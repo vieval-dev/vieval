@@ -1,0 +1,7 @@
+{
+  "name": "maps tactical hint intent",
+  "input": {
+    "message": "can you give me a tactical hint",
+    "expectedIntent": "tactics"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "adds negative and positive",
+  "input": {
+    "a": -4,
+    "b": 10,
+    "expected": 6
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "adds small integers",
+  "input": {
+    "a": 2,
+    "b": 3,
+    "expected": 5
+  }
+}

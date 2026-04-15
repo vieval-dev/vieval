@@ -1,0 +1,59 @@
+catalogMode: prefer
+shellEmulator: true
+trustPolicy: no-downgrade
+
+packages:
+  - packages/**
+  - '!**/dist/**'
+overrides:
+  array-flatten: npm:@nolyfill/array-flatten@^1.0.44
+  axios: npm:feaxios@^0.0.23
+  is-core-module: npm:@nolyfill/is-core-module@^1.0.39
+  isarray: npm:@nolyfill/isarray@^1.0.44
+  onnxruntime-web: npm:onnxruntime-web@^1.24.3
+  safe-buffer: npm:@nolyfill/safe-buffer@^1.0.44
+  safer-buffer: npm:@nolyfill/safer-buffer@^1.0.44
+  side-channel: npm:@nolyfill/side-channel@^1.0.44
+  string.prototype.matchall: npm:@nolyfill/string.prototype.matchall@^1.0.44
+catalog:
+  '@antfu/eslint-config': ^8.2.0
+  '@arethetypeswrong/core': ^0.18.2
+  '@moeru/eslint-config': 0.1.0-beta.15
+  '@moeru/std': 0.1.0-beta.17
+  '@pnpm/find-workspace-dir': ^1000.1.4
+  '@types/node': ^24.12.2
+  '@xsai-ext/providers': 0.5.0-beta.2
+  '@xsai/generate-text': 0.5.0-beta.2
+  bumpp: ^11.0.1
+  c12: ^4.0.0-beta.4
+  es-toolkit: 1.43.0
+  eslint: ^10.2.0
+  eslint-plugin-oxlint: ^1.60.0
+  fast-string-width: ^3.0.2
+  meow: ^14.1.0
+  nano-staged: ^0.9.0
+  oxc-minify: ^0.121.0
+  oxlint: ^1.60.0
+  publint: ^0.3.18
+  rollup: ^4.60.1
+  simple-git-hooks: ^2.13.1
+  taze: ^19.11.0
+  tinyexec: ^1.1.1
+  tinyglobby: ^0.2.16
+  tinyrainbow: ^3.1.0
+  tsdown: ^0.21.4
+  tsx: ^4.21.0
+  turbo: ^2.9.6
+  typescript: ^5.9.3
+  unplugin-raw: ^0.7.0
+  unplugin-unused: ^0.5.7
+  vite: ^8.0.2
+  vite-plugin-inspect: ^11.3.3
+catalogs:
+  vitest:
+    '@vitest/coverage-v8': ^4.1.4
+    vitest: ^4.1.4
+ignoredBuiltDependencies:
+  - simple-git-hooks # [workaround] postinstall script bundled in simple-git-hooks fails to execute with `enableGlobalVirtualStore: true`. Using local postinstall script to run `npx simple-git-hooks` instead.
+onlyBuiltDependencies:
+  - esbuild

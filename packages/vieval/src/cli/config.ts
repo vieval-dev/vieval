@@ -1,0 +1,464 @@
+import type { ConfigHookPlugin, MatrixDefinition, MatrixLayer, TaskRunContext } from '../config'
+import type { ModelDefinition } from '../config/models'
+import type { RunResult, TaskExecutionContext } from '../core/runner'
+import type { InferenceExecutor, ScheduledTask } from '../core/runner/schedule'
+
+import process from 'node:process'
+
+import { access, readFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
+import { dirname, extname, isAbsolute, join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
+
+import { errorMessageFrom } from '@moeru/std'
+import { createDefineConfig, loadConfig } from 'c12'
+import { loadEnv as loadViteEnv } from 'vite'
+
+const matrixLayerKeys = new Set(['disable', 'extend', 'override'])
+const ambiguousMatrixDefinitionErrorMessage = 'Ambiguous matrix definition: cannot mix reserved layer keys (disable, extend, override) with matrix axis keys.'
+const require = createRequire(import.meta.url)
+
+/**
+ * CLI plugin shape bound to the full CLI config object.
+ */
+export type CliConfigPlugin = ConfigHookPlugin<CliConfig>
+
+/**
+ * Defines one project block for `vieval run`.
+ */
+export interface CliProjectConfig {
+  /**
+   * Project label used in summary output.
+   */
+  name: string
+  /**
+   * Project root used for include/exclude glob matching.
+   *
+   * @default process cwd
+   */
+  root?: string
+  /**
+   * Glob patterns for eval file discovery.
+   *
+   * @default Common eval file globs for TypeScript and JavaScript module formats.
+   */
+  include?: string[]
+  /**
+   * Glob patterns excluded from discovery.
+   *
+   * @default Common exclusion globs for dependencies, build output, and VCS directories.
+   */
+  exclude?: string[]
+  /**
+   * Providers expanded by scheduler.
+   *
+   * @default [{ id: 'default' }]
+   */
+  inferenceExecutors?: InferenceExecutor[]
+  /**
+   * Model definitions available to project runtime execution.
+   *
+   * Inference executors control schedule fan-out, while models provide
+   * runtime lookup metadata for `context.model(...)` during task execution.
+   *
+   * @default inherited from top-level config models
+   */
+  models?: ModelDefinition[]
+  /**
+   * Optional run-time matrix dimensions.
+   */
+  runMatrix?: MatrixDefinition | MatrixLayer
+  /**
+   * Optional eval-time matrix dimensions.
+   */
+  evalMatrix?: MatrixDefinition | MatrixLayer
+  /**
+   * Optional task executor.
+   *
+   * Use when this project should execute live inferenceExecutor requests.
+   * If omitted, `vieval run` performs collection + scheduling only.
+   */
+  executor?: (task: ScheduledTask, context: CliProjectExecutorContext) => Promise<RunResult>
+  /**
+   * Optional project-local plugins.
+   */
+  plugins?: CliConfigPlugin[]
+}
+
+/**
+ * Execution context exposed to project-level `executor` implementations.
+ *
+ * Use when:
+ * - a project executor needs the task-scoped model resolver plus case reporter hooks
+ * - custom scheduling logic wants the same hook shape as `TaskRunContext`
+ *
+ * Expects:
+ * - `model` resolves configured models for the current task
+ * - `reporterHooks` follows `TaskRunContext['reporterHooks']`
+ */
+export interface CliProjectExecutorContext extends TaskExecutionContext {
+  reporterHooks?: TaskRunContext['reporterHooks']
+}
+
+/**
+ * Top-level CLI config loaded from `vieval.config.*`.
+ */
+export interface CliConfig {
+  /**
+   * Project list expanded by `vieval run`.
+   *
+   * @default [{ name: 'default' }]
+   */
+  projects?: CliProjectConfig[]
+  /**
+   * Global model definitions inherited by projects.
+   *
+   * @default []
+   */
+  models?: ModelDefinition[]
+  /**
+   * Global config plugins.
+   *
+   * @default []
+   */
+  plugins?: CliConfigPlugin[]
+  /**
+   * Environment variables injected into `process.env` during `vieval run`.
+   *
+   * Use when:
+   * - eval tasks depend on runtime env values (for example inferenceExecutor API keys)
+   * - config wants deterministic env values without shell-level exports
+   *
+   * @default {}
+   */
+  env?: NodeJS.ProcessEnv
+}
+
+/**
+ * Normalized CLI project used by runtime orchestration.
+ */
+export interface NormalizedCliProjectConfig {
+  exclude: string[]
+  executor?: (task: ScheduledTask, context: CliProjectExecutorContext) => Promise<RunResult>
+  include: string[]
+  runMatrix?: MatrixLayer
+  evalMatrix?: MatrixLayer
+  models: ModelDefinition[]
+  name: string
+  inferenceExecutors: InferenceExecutor[]
+  root: string
+}
+
+/**
+ * Result of loading and normalizing a config file.
+ */
+export interface LoadedCliConfig {
+  configFilePath: string | null
+  env: NodeJS.ProcessEnv
+  projects: NormalizedCliProjectConfig[]
+}
+
+/**
+ * Runtime options for config loading.
+ */
+export interface LoadVievalCliConfigOptions {
+  /**
+   * Starting directory for config lookup.
+   *
+   * @default process.cwd()
+   */
+  cwd?: string
+  /**
+   * Explicit config file path.
+   */
+  configFilePath?: string
+}
+
+/**
+ * Helper used by `vieval.config.*` for better type inference.
+ */
+export const defineConfig = createDefineConfig<CliConfig>()
+
+/**
+ * Loads `.env*` files using Vite's env resolution behavior.
+ *
+ * Use when:
+ * - `vieval.config.*` should mirror Vitest/Vite env loading semantics
+ * - config wants to populate top-level `env` via file-based values
+ *
+ * Expects:
+ * - `mode` to match the env file suffix (`.env.<mode>`)
+ * - `envDir` to point at the directory containing `.env` files
+ *
+ * Returns:
+ * - Key/value map compatible with `CliConfig['env']`
+ */
+export function loadEnv(mode: string, envDir: string, prefixes: string | string[] = ''): NodeJS.ProcessEnv {
+  return loadViteEnv(mode, envDir, prefixes)
+}
+
+async function applyVievalPlugins(config: CliConfig): Promise<CliConfig> {
+  let currentConfig: CliConfig = config
+  const plugins = currentConfig.plugins ?? []
+
+  for (const plugin of plugins) {
+    if (plugin.configVieval == null) {
+      continue
+    }
+
+    const nextConfig = await plugin.configVieval(currentConfig)
+    if (nextConfig != null) {
+      currentConfig = {
+        ...currentConfig,
+        ...nextConfig,
+      }
+    }
+  }
+
+  for (const plugin of plugins) {
+    await plugin.configVievalResolved?.(currentConfig)
+  }
+
+  return currentConfig
+}
+
+async function isReadableFile(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath)
+    return true
+  }
+  catch {
+    return false
+  }
+}
+
+function isConfigFileExtensionUsingRequire(extension: string): boolean {
+  return extension === '.cjs' || extension === '.cts'
+}
+
+function isConfigFileExtensionUsingJsonParse(extension: string): boolean {
+  return extension === '.json'
+}
+
+async function importVievalConfigModule(filePath: string): Promise<unknown> {
+  const extension = extname(filePath)
+
+  if (isConfigFileExtensionUsingJsonParse(extension)) {
+    const raw = await readFile(filePath, 'utf-8')
+    return JSON.parse(raw) as unknown
+  }
+
+  if (isConfigFileExtensionUsingRequire(extension)) {
+    return require(filePath) as unknown
+  }
+
+  return import(pathToFileURL(filePath).href)
+}
+
+function resolveConfigExport(moduleValue: unknown): unknown {
+  if (moduleValue == null) {
+    return null
+  }
+
+  if (typeof moduleValue !== 'object') {
+    return moduleValue
+  }
+
+  if ('default' in moduleValue) {
+    return (moduleValue as { default: unknown }).default
+  }
+
+  return moduleValue
+}
+
+async function findNearestConfigFile(startDirectory: string): Promise<string | null> {
+  const supportedFileNames = [
+    'vieval.config.ts',
+    'vieval.config.mts',
+    'vieval.config.cts',
+    'vieval.config.js',
+    'vieval.config.mjs',
+    'vieval.config.cjs',
+    'vieval.config.json',
+  ]
+
+  let currentDirectory = resolve(startDirectory)
+
+  while (true) {
+    for (const fileName of supportedFileNames) {
+      const candidatePath = join(currentDirectory, fileName)
+      if (await isReadableFile(candidatePath)) {
+        return candidatePath
+      }
+    }
+
+    const parentDirectory = dirname(currentDirectory)
+    if (parentDirectory === currentDirectory) {
+      return null
+    }
+    currentDirectory = parentDirectory
+  }
+}
+
+async function resolveVievalConfig(
+  cwd: string,
+  explicitConfigFilePath: string | undefined,
+): Promise<{
+  config: CliConfig | null
+  configFilePath: string | null
+}> {
+  const resolvedConfigFilePath = explicitConfigFilePath == null
+    ? await findNearestConfigFile(cwd)
+    : (isAbsolute(explicitConfigFilePath) ? explicitConfigFilePath : resolve(cwd, explicitConfigFilePath))
+
+  if (explicitConfigFilePath != null && resolvedConfigFilePath != null && !await isReadableFile(resolvedConfigFilePath)) {
+    throw new Error(`Config file does not exist or is not readable: ${resolvedConfigFilePath}`)
+  }
+
+  if (resolvedConfigFilePath == null) {
+    return {
+      config: null,
+      configFilePath: null,
+    }
+  }
+
+  const loaded = await loadConfig<CliConfig>({
+    configFile: resolvedConfigFilePath,
+    cwd,
+    dotenv: false,
+    envName: false,
+    extend: false,
+    import: importVievalConfigModule,
+    packageJson: false,
+    rcFile: false,
+    resolveModule: resolveConfigExport,
+  })
+  return {
+    config: loaded.config,
+    configFilePath: resolvedConfigFilePath,
+  }
+}
+
+function isLayerMatrixDefinition(matrix: MatrixDefinition | MatrixLayer): matrix is MatrixLayer {
+  const matrixKeys = Object.keys(matrix)
+  return (
+    matrixKeys.length > 0
+    && matrixKeys.every(key => matrixLayerKeys.has(key))
+  )
+}
+
+function assertNonAmbiguousMatrixDefinition(matrix: MatrixDefinition | MatrixLayer): void {
+  const matrixKeys = Object.keys(matrix)
+  const hasReservedKeys = matrixKeys.some(key => matrixLayerKeys.has(key))
+  const hasAxisKeys = matrixKeys.some(key => !matrixLayerKeys.has(key))
+
+  if (hasReservedKeys && hasAxisKeys) {
+    throw new TypeError(ambiguousMatrixDefinitionErrorMessage)
+  }
+}
+
+function normalizeMatrixLayerInput(matrix: MatrixDefinition | MatrixLayer | undefined): MatrixLayer | undefined {
+  if (matrix == null) {
+    return undefined
+  }
+
+  assertNonAmbiguousMatrixDefinition(matrix)
+
+  if (isLayerMatrixDefinition(matrix)) {
+    return matrix
+  }
+
+  return {
+    extend: matrix,
+  }
+}
+
+function normalizeProjectConfig(
+  project: CliProjectConfig,
+  cwd: string,
+  inheritedModels: readonly ModelDefinition[],
+): NormalizedCliProjectConfig {
+  const include = project.include ?? [
+    '**/*.eval.ts',
+    '**/*.eval.mts',
+    '**/*.eval.cts',
+    '**/*.eval.js',
+    '**/*.eval.mjs',
+    '**/*.eval.cjs',
+  ]
+  const exclude = project.exclude ?? [
+    '**/node_modules/**',
+    '**/dist/**',
+    '**/.git/**',
+  ]
+  const models = project.models ?? [...inheritedModels]
+  const inferenceExecutors = project.inferenceExecutors ?? (
+    models.length > 0
+      ? models.map(model => ({ id: model.id }))
+      : [{ id: 'default' }]
+  )
+  const root = project.root == null
+    ? cwd
+    : (isAbsolute(project.root) ? project.root : resolve(cwd, project.root))
+
+  return {
+    exclude,
+    executor: project.executor,
+    include,
+    evalMatrix: normalizeMatrixLayerInput(project.evalMatrix),
+    models,
+    name: project.name,
+    inferenceExecutors,
+    runMatrix: normalizeMatrixLayerInput(project.runMatrix),
+    root,
+  }
+}
+
+function normalizeConfig(config: CliConfig | null | undefined, cwd: string): NormalizedCliProjectConfig[] {
+  const projects = config?.projects ?? [{ name: 'default' }]
+  const inheritedModels = config?.models ?? []
+  return projects.map(project => normalizeProjectConfig(project, cwd, inheritedModels))
+}
+
+/**
+ * Loads nearest `vieval.config.*` and returns normalized project definitions.
+ *
+ * Call stack:
+ *
+ * {@link loadVievalCliConfig}
+ *   -> {@link resolveVievalConfig}
+ *   -> {@link normalizeConfig}
+ *     -> {@link NormalizedCliProjectConfig}[]
+ *
+ * Use when:
+ * - CLI orchestration needs project includes/excludes similar to Vitest
+ * - callers want config auto-discovery without manual imports in eval files
+ */
+export async function loadVievalCliConfig(options: LoadVievalCliConfigOptions = {}): Promise<LoadedCliConfig> {
+  const cwd = options.cwd ?? process.cwd()
+  try {
+    const loadedConfig = await resolveVievalConfig(cwd, options.configFilePath)
+    if (loadedConfig.configFilePath == null || loadedConfig.config == null) {
+      return {
+        configFilePath: null,
+        env: {},
+        projects: normalizeConfig(null, cwd),
+      }
+    }
+
+    const config = await applyVievalPlugins(loadedConfig.config)
+
+    return {
+      configFilePath: loadedConfig.configFilePath,
+      env: config.env ?? {},
+      projects: normalizeConfig(config, dirname(loadedConfig.configFilePath)),
+    }
+  }
+  catch (error) {
+    const errorMessage = errorMessageFrom(error) ?? 'Unknown config loading error.'
+    const configFilePath = options.configFilePath == null
+      ? 'vieval.config'
+      : (isAbsolute(options.configFilePath) ? options.configFilePath : resolve(cwd, options.configFilePath))
+    throw new Error(`Failed to load vieval config "${configFilePath}": ${errorMessage}`, { cause: error })
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "maps opening question intent",
+  "input": {
+    "message": "what opening should i play as black",
+    "expectedIntent": "opening"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "projects": [
+    {
+      "name": "example-pattern-byoa-bring-your-own-agent",
+      "root": ".",
+      "include": [
+        "evals/*.eval.ts"
+      ],
+      "exclude": [],
+      "providers": [
+        { "id": "fixture-provider" }
+      ]
+    }
+  ]
+}

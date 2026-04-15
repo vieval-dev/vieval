@@ -1,0 +1,7 @@
+{
+  "name": "maps recap request intent",
+  "input": {
+    "message": "summarize what happened in this game",
+    "expectedIntent": "recap"
+  }
+}

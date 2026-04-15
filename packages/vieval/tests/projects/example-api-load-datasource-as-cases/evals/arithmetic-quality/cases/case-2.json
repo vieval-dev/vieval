@@ -1,0 +1,8 @@
+{
+  "name": "adds zero",
+  "input": {
+    "a": 0,
+    "b": 11,
+    "expected": 11
+  }
+}

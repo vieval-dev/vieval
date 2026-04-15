@@ -1,0 +1,83 @@
+{
+  "name": "vieval",
+  "type": "module",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Evaluation framework based on Vitest, the testing framework you familiar with, for agents, models, and more.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./config": {
+      "types": "./dist/config.d.mts",
+      "default": "./dist/config.mjs"
+    },
+    "./cli": {
+      "types": "./dist/cli/index.d.mts",
+      "default": "./dist/cli/index.mjs"
+    },
+    "./core/runner": {
+      "types": "./dist/core/runner/index.d.mts",
+      "default": "./dist/core/runner/index.mjs"
+    },
+    "./core/assertions": {
+      "types": "./dist/core/assertions/index.d.mts",
+      "default": "./dist/core/assertions/index.mjs"
+    },
+    "./core/processors/results": {
+      "types": "./dist/core/processors/results/index.d.mts",
+      "default": "./dist/core/processors/results/index.mjs"
+    },
+    "./core/inference-executors": {
+      "types": "./dist/core/inference-executors/index.d.mts",
+      "default": "./dist/core/inference-executors/index.mjs"
+    },
+    "./plugins/chat-models": {
+      "types": "./dist/plugins/chat-models/index.d.mts",
+      "default": "./dist/plugins/chat-models/index.mjs"
+    },
+    "./expect": {
+      "types": "./dist/expect.d.mts",
+      "default": "./dist/expect.mjs"
+    },
+    "./testing/expect-extensions": {
+      "types": "./dist/testing/expect-extensions.d.mts",
+      "default": "./dist/testing/expect-extensions.mjs"
+    }
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "bin": {
+    "vieval": "./dist/cli/index.mjs"
+  },
+  "files": [
+    "README.md",
+    "dist",
+    "package.json"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "eval:run": "node --import tsx src/cli/index.ts run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest",
+    "test:run": "vitest run"
+  },
+  "dependencies": {
+    "@moeru/std": "catalog:",
+    "@pnpm/find-workspace-dir": "catalog:",
+    "@xsai-ext/providers": "catalog:",
+    "@xsai/generate-text": "catalog:",
+    "c12": "catalog:",
+    "es-toolkit": "catalog:",
+    "fast-string-width": "catalog:",
+    "meow": "catalog:",
+    "tinyglobby": "catalog:",
+    "tinyrainbow": "catalog:",
+    "vite": "catalog:"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "vitest": "catalog:vitest"
+  }
+}

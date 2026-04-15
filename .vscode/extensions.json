@@ -1,0 +1,14 @@
+{
+  "recommendations": [
+    "antfu.goto-alias",
+    "antfu.pnpm-catalog-lens",
+    "dbaeumer.vscode-eslint",
+    "EditorConfig.EditorConfig",
+    "mikestead.dotenv",
+    "redhat.vscode-yaml",
+    "streetsidesoftware.code-spell-checker",
+    "usernamehw.errorlens",
+    "vitest.explorer",
+    "yzhang.markdown-all-in-one"
+  ]
+}

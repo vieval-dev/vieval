@@ -1,0 +1,63 @@
+{
+  "name": "@vieval/root",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.33.0",
+  "description": "Evaluation framework based on Vitest, the testing framework you familiar with, for agents, models, and more.",
+  "author": {
+    "name": "Vieval Team",
+    "email": "vieval@moeru.ai",
+    "url": "https://github.com/vieval-dev"
+  },
+  "license": "MIT",
+  "scripts": {
+    "postinstall": "pnpm exec simple-git-hooks && pnpm run build:packages",
+    "dev": "pnpm -r -F vieval build",
+    "build": "pnpm run build:packages",
+    "build:packages": "turbo run build -F=\"./packages/*\"",
+    "test": "vitest --coverage",
+    "test:run": "vitest run",
+    "lint": "moeru-lint .",
+    "lint:fix": "moeru-lint --fix .",
+    "typecheck": "pnpm -rF=\"./packages/*\" --parallel typecheck",
+    "up": "taze -w -r -I && pnpm prune && pnpm dedupe",
+    "nolyfill": "pnpm dlx nolyfill"
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "catalog:",
+    "@arethetypeswrong/core": "catalog:",
+    "@moeru/eslint-config": "catalog:",
+    "@types/node": "catalog:",
+    "@vitest/coverage-v8": "catalog:vitest",
+    "bumpp": "catalog:",
+    "eslint": "catalog:",
+    "eslint-plugin-oxlint": "catalog:",
+    "nano-staged": "catalog:",
+    "oxc-minify": "catalog:",
+    "oxlint": "catalog:",
+    "publint": "catalog:",
+    "rollup": "catalog:",
+    "simple-git-hooks": "catalog:",
+    "taze": "catalog:",
+    "tinyexec": "catalog:",
+    "tsdown": "catalog:",
+    "tsx": "catalog:",
+    "turbo": "catalog:",
+    "typescript": "catalog:",
+    "unplugin-raw": "catalog:",
+    "unplugin-unused": "catalog:",
+    "vite": "catalog:",
+    "vite-plugin-inspect": "catalog:",
+    "vitest": "catalog:vitest"
+  },
+  "workspaces": [
+    "packages/**"
+  ],
+  "simple-git-hooks": {
+    "pre-commit": "pnpm nano-staged"
+  },
+  "nano-staged": {
+    "*": "moeru-lint --fix"
+  }
+}
