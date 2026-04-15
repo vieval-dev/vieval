@@ -266,6 +266,16 @@ Do not use `vieval` when:
 - you need hosted dataset management, annotation UI, or SaaS observability out of the box;
 - you only need one-off scripts without reusable eval definitions or matrix scheduling.
 
+## Acknowledgements
+
+- [Vitest](https://github.com/vitest-dev/vitest)
+- [LobeHub](https://github.com/lobehub/lobehub)
+- [EvalSys](https://github.com/evalsys)
+
+## License
+
+MIT
+
 [npm-version-src]: https://img.shields.io/npm/v/vieval?style=flat&colorA=080f12&colorB=1fa669
 [npm-version-href]: https://npmjs.com/package/vieval
 [npm-downloads-src]: https://img.shields.io/npm/dm/vieval?style=flat&colorA=080f12&colorB=1fa669
