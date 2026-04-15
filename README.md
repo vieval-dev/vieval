@@ -1,126 +1,90 @@
 # Vieval
 
-Evaluation framework based on Vitest, the testing framework you familiar with, for agents, models, and more.
+[![CI][ci-src]][ci-href]
+[![Release][release-src]][release-href]
+[![License][license-src]][license-href]
 
-## Structure
+Vitest-style evaluation framework for agents, models, and task pipelines.
 
-- `vieval.config.ts`: shared eval module contracts
-- `src/core/runner/*`: reusable collection/scheduling/execution/aggregation utilities
-- `src/core/assertions/*`: reusable assertion and rubric helpers
-- `src/core/processors/results/*`: threshold and hard-limit gating policies
-- `vitest.config.ts`: isolated test config for this package
-- `tests/projects/*`: fixture mini-projects for runner and path tests
+`vieval` keeps eval authoring close to product code while giving you repeatable project/eval/task matrix runs and a CLI summary experience.
 
-Scenario/eval definitions should live near business agent implementations, for example:
-- `plugins/airi-plugin-game-chess/src/agent/evals/chess-commentary.eval.ts`
+## Why Vieval
 
-## Matrix Scopes
+- Familiar authoring model (`describeEval`, `caseOf`, `expect`) instead of a separate eval DSL language.
+- Matrix control at three levels (project, eval, task) with deterministic merge rules.
+- Works for chat and non-chat workloads through custom `projects[].executor`.
+- Human-readable TTY output and machine-readable JSON output from the same command.
 
-`vieval` expands matrices in three layers:
+## Quick Start
 
-- `project` scope from `vieval.config.*`
-- `eval` scope from `*.eval.ts`
-- `task` scope from `defineTask(...)`
-
-Each scope can contribute `runMatrix` and `evalMatrix` blocks. The runner resolves them in scope order `project -> eval -> task`, and within each scope it applies `disable -> extend -> override`.
-
-### Matrix rules
-
-- `disable` removes axes before any additions or replacements.
-- `extend` adds axes or appends axis values without discarding earlier values.
-- `override` replaces the axis values already visible at that scope.
-- Pure axis objects and pure layer objects are both accepted.
-- Mixed objects that combine reserved layer keys with axis keys are rejected with an `Ambiguous matrix definition` error.
-
-### Legacy mapping
-
-`matrix` is still supported as a compatibility alias for `runMatrix.extend`.
+### 1) Create a config
 
 ```ts
-defineConfig({
+// vieval.config.ts
+import { defineConfig } from 'vieval'
+
+export default defineConfig({
   projects: [
     {
-      name: 'legacy-project',
-      matrix: {
-        model: ['gpt-4.1-mini'],
-      },
+      name: 'default',
+      root: '.',
+      include: ['evals/*.eval.ts'],
     },
   ],
 })
 ```
 
-That is normalized to:
+### 2) Create an eval
 
 ```ts
-defineConfig({
-  projects: [
-    {
-      name: 'legacy-project',
-      runMatrix: {
-        extend: {
-          model: ['gpt-4.1-mini'],
-        },
-      },
-    },
-  ],
+// evals/smoke.eval.ts
+import { caseOf, describeEval, expect } from 'vieval'
+
+export default describeEval('smoke', () => {
+  caseOf('2 + 2 = 4', () => {
+    expect(2 + 2).toBe(4)
+  }, {})
 })
 ```
 
-### Control-group example
+### 3) Run
 
-This example keeps runtime and judging controls separate while still producing a single combined schedule:
-
-```ts
-defineConfig({
-  projects: [
-    {
-      name: 'chat-evals',
-      runMatrix: {
-        extend: {
-          model: ['gpt-4.1-mini', 'gpt-4.1'],
-          promptLanguage: ['en', 'zh'],
-        },
-      },
-      evalMatrix: {
-        extend: {
-          rubric: ['strict', 'lenient'],
-        },
-      },
-    },
-  ],
-})
+```bash
+pnpm -F vieval eval:run -- --config ./vieval.config.ts
 ```
 
-If an eval or task narrows the experiment, the same precedence rules still apply:
+## Core Concepts
 
-```ts
-defineEval({
-  matrix: {
-    runMatrix: {
-      disable: ['promptLanguage'],
-      extend: {
-        promptLanguage: ['en'],
-      },
-    },
-    evalMatrix: {
-      override: {
-        rubric: ['strict'],
-      },
-    },
-  },
-})
-```
+### Matrix layering
 
-### Structured matrix artifact
+`vieval` expands matrices in scope order:
 
-Each scheduled run carries a structured matrix artifact with:
+1. `project` from `vieval.config.*`
+2. `eval` from `*.eval.ts`
+3. `task` from `defineTask(...)`
 
-- `run`
-- `eval`
-- `meta.runRowId`
-- `meta.evalRowId`
+Within each scope, matrix layers apply in this order:
 
-That artifact is stable across collection, scheduling, execution, and aggregation, so downstream analysis can group results by model, rubric, prompt language, or any other axis combination.
+1. `disable`
+2. `extend`
+3. `override`
+
+Both `runMatrix` and `evalMatrix` are supported at each scope.
+
+### Matrix compatibility alias
+
+`matrix` remains supported as a compatibility alias for `runMatrix.extend`.
+
+### Stable matrix artifact
+
+Each scheduled run includes:
+
+- `matrix.run`
+- `matrix.eval`
+- `matrix.meta.runRowId`
+- `matrix.meta.evalRowId`
+
+Use these fields to group and compare runs across models, rubrics, and scenarios.
 
 ## Architecture
 
@@ -189,65 +153,36 @@ sequenceDiagram
   C->>U: static summary (or JSON)
 ```
 
-## Run Eval Projects
-
-`vieval` runs eval projects discovered from `vieval.config.*` (auto-discovered from current working directory unless `--config` is provided).
-
-Run with auto-discovery:
-
-```bash
-pnpm run eval:run
-```
-
-Run with explicit config:
-
-```bash
-pnpm run eval:run -- --config plugins/airi-plugin-game-chess/vieval.config.ts
-```
-
-Inject env values from config (Vitest-style pattern):
+## Config Example (Control Group Style)
 
 ```ts
-import { join } from 'node:path'
-import { cwd } from 'node:process'
-
-import { defineConfig, loadEnv } from 'vieval'
+import { defineConfig } from 'vieval'
 
 export default defineConfig({
-  env: loadEnv('test', join(cwd(), 'packages', 'stage-ui'), ''),
-  projects: [{ name: 'my-project' }],
+  projects: [
+    {
+      name: 'chat-evals',
+      runMatrix: {
+        extend: {
+          model: ['gpt-4.1-mini', 'gpt-4.1'],
+          promptLanguage: ['en', 'zh'],
+          scenario: ['baseline', 'stress'],
+        },
+      },
+      evalMatrix: {
+        extend: {
+          rubric: ['strict', 'lenient'],
+          rubricModel: ['judge-mini', 'judge-large'],
+        },
+      },
+    },
+  ],
 })
 ```
 
-Run only selected projects (repeat `--project`):
+## Custom Executor Example
 
-```bash
-pnpm run eval:run -- --config plugins/airi-plugin-game-chess/vieval.config.ts --project chess
-pnpm run eval:run -- --config path/to/vieval.config.ts --project chess --project moderation
-```
-
-Print machine-readable output:
-
-```bash
-pnpm run eval:run -- --json
-```
-
-Help:
-
-```bash
-pnpm run eval:run -- --help
-node --import tsx packages/vieval/src/cli/index.ts help
-```
-
-Run package tests:
-
-```bash
-pnpm run test:run
-```
-
-## Custom Inference Executor
-
-Use `projects[].executor` when you want non-chat inference workloads (for example ASR, TTS, motion generation, 3D generation, or image generation).
+Use `projects[].executor` for non-chat workloads such as ASR, TTS, image, motion, or other domain-specific evaluators.
 
 ```ts
 import { defineConfig } from 'vieval'
@@ -267,20 +202,15 @@ export default defineConfig({
         },
       ],
       async executor(task, context) {
-        const selectedModel = context.model()
-        const runVariant = task.matrix.run
-
-        // Replace this with your own inference call.
-        const success = selectedModel.model === 'v2' && runVariant.scenario === 'baseline'
+        const model = context.model()
+        const success = model.model === 'v2' && task.matrix.run.scenario === 'baseline'
 
         return {
           id: task.id,
           entryId: task.entry.id,
           inferenceExecutorId: task.inferenceExecutor.id,
           matrix: task.matrix,
-          scores: [
-            { kind: 'exact', score: success ? 1 : 0 },
-          ],
+          scores: [{ kind: 'exact', score: success ? 1 : 0 }],
         }
       },
     },
@@ -288,50 +218,54 @@ export default defineConfig({
 })
 ```
 
-Notes:
-
-- `task.inferenceExecutor.id` is the scheduled executor target for this run.
-- `context.model()` resolves the task model (including matrix-selected model aliases).
-- Your executor only needs to return normalized score entries (`0..1`) and metadata fields.
-
-### CLI Reporter Behavior
-
-The CLI uses a live summary reporter only when stdout is a TTY.
-
-- TTY runs show in-place active rows in the form `❯ <badge> <task-name> <completed>/<total>`.
-- Queued tasks show `❯ <badge> <task-name> [queued]` until the task starts.
-- Slow cases appear as nested rows under the active task once they exceed the slow threshold, with the elapsed time shown in yellow.
-- The footer updates live with `Tasks` and `Cases` counters, plus `Start at` and `Duration`.
-- Non-TTY runs skip live redraws and use the silent reporter path, so only the final static CLI summary is emitted.
-- The slow-case threshold defaults to `300ms`.
-
-## Task 1 Verification
-
-Task 1 followed a fail-first then pass cycle for `collectEvalEntries`.
-
-Red phase:
+## CLI
 
 ```bash
-pnpm exec vitest run --config packages/vieval/vitest.config.ts packages/vieval/src/core/runner/collect.test.ts
+vieval run [--config <path>] [--project <name>] [--json]
 ```
 
-Summary: failed with `Cannot find module '../collect'` before `collect.ts` existed.
-
-Green phase:
+Common usage:
 
 ```bash
-pnpm exec vitest run --config packages/vieval/vitest.config.ts packages/vieval/src/core/runner/collect.test.ts
+pnpm -F vieval eval:run
+pnpm -F vieval eval:run -- --config ./vieval.config.ts
+pnpm -F vieval eval:run -- --config ./vieval.config.ts --project chess --project moderation
+pnpm -F vieval eval:run -- --json
+pnpm -F vieval eval:run -- --help
 ```
 
-Summary: `1` test file passed and `4` tests passed from this worktree after the runner implementation and local `node_modules` symlink were in place.
+## Examples In This Repository
 
-## Task 7 Verification
+- `packages/vieval/tests/projects/example-api-defining-new-task`
+- `packages/vieval/tests/projects/example-api-config-matrix`
+- `packages/vieval/tests/projects/example-api-load-datasource-as-cases`
+- `packages/vieval/tests/projects/example-pattern-byoa-bring-your-own-agent`
 
-Task 7 used this command set:
+## Development
 
 ```bash
-pnpm exec vitest run packages/vieval/src/cli/*.test.ts packages/vieval/src/core/runner/*.test.ts packages/vieval/src/dsl/task.test.ts --config packages/vieval/vitest.config.ts
+pnpm install
+pnpm -F vieval test:run
 pnpm -F vieval typecheck
+pnpm lint:fix
 ```
 
-Summary: both commands passed.
+## When To Use / Not Use
+
+Use `vieval` when:
+
+- you want evals close to app code with Vitest-like ergonomics;
+- you need matrix experiments and repeatable run metadata;
+- you want one CLI for local diagnostics and CI export (`--json`).
+
+Do not use `vieval` when:
+
+- you need hosted dataset management, annotation UI, or SaaS observability out of the box;
+- you only need one-off scripts without reusable eval definitions or matrix scheduling.
+
+[ci-src]: https://img.shields.io/github/actions/workflow/status/vieval-dev/vieval/ci.yml?label=CI
+[ci-href]: https://github.com/vieval-dev/vieval/actions/workflows/ci.yml
+[release-src]: https://img.shields.io/github/actions/workflow/status/vieval-dev/vieval/release-pkg.yaml?label=Release
+[release-href]: https://github.com/vieval-dev/vieval/actions/workflows/release-pkg.yaml
+[license-src]: https://img.shields.io/github/license/vieval-dev/vieval
+[license-href]: https://github.com/vieval-dev/vieval/blob/main/LICENSE
