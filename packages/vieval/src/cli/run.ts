@@ -191,8 +191,8 @@ function createColorPalette(enabled: boolean): CliColorPalette {
   }
 }
 
-function createProjectBadge(name: string, colors: CliColorPalette): string {
-  if (!c.isColorSupported) {
+function createProjectBadge(name: string, colors: CliColorPalette, colorEnabled: boolean): string {
+  if (!colorEnabled || !c.isColorSupported) {
     return `|${name}| `
   }
 
@@ -829,7 +829,8 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
  * Formats CLI run output as human-readable lines.
  */
 export function formatVievalCliRunOutput(output: CliRunOutput): string {
-  const colors = createColorPalette(shouldUseColor())
+  const colorEnabled = shouldUseColor()
+  const colors = createColorPalette(colorEnabled)
   const lines: string[] = []
   lines.push(` ${colors.dim('RUN')}  ${colors.yellow('vieval')}`)
   lines.push(` ${colors.dim('Config')}  ${output.configFilePath ?? '(not found, using defaults)'}`)
@@ -887,7 +888,7 @@ export function formatVievalCliRunOutput(output: CliRunOutput): string {
     totalTasks += project.taskCount
     executedTasks += project.result?.overall.runCount ?? 0
 
-    const badge = createProjectBadge(project.name, colors)
+    const badge = createProjectBadge(project.name, colors, colorEnabled)
     const isFailed = project.errorMessage != null
     if (isFailed) {
       failedProjects += 1
