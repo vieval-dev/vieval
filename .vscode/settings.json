@@ -47,5 +47,9 @@
     "appimage",
     "localforage"
   ],
-  "vitest.disableWorkspaceWarning": true
+  "vitest.disableWorkspaceWarning": true,
+
+  "files.associations": {
+    ".prototools": "toml"
+  }
 }
