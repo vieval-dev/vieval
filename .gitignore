@@ -117,3 +117,7 @@ plugins-development
 
 # Tools - Obsidian
 .obsidian/
+
+# AI Agent
+docs/ai/superpowers/*
+docs/superpowers/*
