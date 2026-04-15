@@ -6,24 +6,45 @@ settings:
 
 catalogs:
   default:
+    '@antfu/eslint-config':
+      specifier: ^8.2.0
+      version: 8.2.0
+    '@arethetypeswrong/core':
+      specifier: ^0.18.2
+      version: 0.18.2
     '@moeru/eslint-config':
       specifier: 0.1.0-beta.15
       version: 0.1.0-beta.15
     '@moeru/std':
       specifier: 0.1.0-beta.17
       version: 0.1.0-beta.17
+    '@pnpm/find-workspace-dir':
+      specifier: ^1000.1.4
+      version: 1000.1.5
+    '@types/node':
+      specifier: ^24.12.2
+      version: 24.12.2
     '@xsai-ext/providers':
       specifier: 0.5.0-beta.2
       version: 0.5.0-beta.2
     '@xsai/generate-text':
       specifier: 0.5.0-beta.2
       version: 0.5.0-beta.2
+    bumpp:
+      specifier: ^11.0.1
+      version: 11.0.1
     c12:
       specifier: ^4.0.0-beta.4
       version: 4.0.0-beta.4
     es-toolkit:
       specifier: 1.43.0
       version: 1.43.0
+    eslint:
+      specifier: ^10.2.0
+      version: 10.2.0
+    eslint-plugin-oxlint:
+      specifier: ^1.60.0
+      version: 1.60.0
     fast-string-width:
       specifier: ^3.0.2
       version: 3.0.2
@@ -36,12 +57,48 @@ catalogs:
     oxc-minify:
       specifier: ^0.121.0
       version: 0.121.0
+    oxlint:
+      specifier: ^1.60.0
+      version: 1.60.0
+    publint:
+      specifier: ^0.3.18
+      version: 0.3.18
+    rollup:
+      specifier: ^4.60.1
+      version: 4.60.1
+    simple-git-hooks:
+      specifier: ^2.13.1
+      version: 2.13.1
+    taze:
+      specifier: ^19.11.0
+      version: 19.11.0
+    tinyexec:
+      specifier: ^1.1.1
+      version: 1.1.1
     tinyglobby:
       specifier: ^0.2.16
       version: 0.2.16
+    tinyrainbow:
+      specifier: ^3.1.0
+      version: 3.1.0
     tsdown:
       specifier: ^0.21.4
       version: 0.21.8
+    tsx:
+      specifier: ^4.21.0
+      version: 4.21.0
+    turbo:
+      specifier: ^2.9.6
+      version: 2.9.6
+    typescript:
+      specifier: ^5.9.3
+      version: 5.9.3
+    unplugin-raw:
+      specifier: ^0.7.0
+      version: 0.7.0
+    unplugin-unused:
+      specifier: ^0.5.7
+      version: 0.5.7
     vite:
       specifier: ^8.0.2
       version: 8.0.8
@@ -72,28 +129,28 @@ importers:
   .:
     devDependencies:
       '@antfu/eslint-config':
-        specifier: ^8.2.0
+        specifier: 'catalog:'
         version: 8.2.0(@typescript-eslint/rule-tester@8.58.2(eslint@10.2.0(jiti@2.6.1))(typescript@5.9.3))(@typescript-eslint/typescript-estree@8.58.2(typescript@5.9.3))(@typescript-eslint/utils@8.58.2(eslint@10.2.0(jiti@2.6.1))(typescript@5.9.3))(@vue/compiler-sfc@3.5.32)(eslint@10.2.0(jiti@2.6.1))(oxlint@1.60.0)(typescript@5.9.3)(vitest@4.1.4)
       '@arethetypeswrong/core':
-        specifier: ^0.18.2
+        specifier: 'catalog:'
         version: 0.18.2
       '@moeru/eslint-config':
         specifier: 'catalog:'
         version: 0.1.0-beta.15(@antfu/eslint-config@8.2.0(@typescript-eslint/rule-tester@8.58.2(eslint@10.2.0(jiti@2.6.1))(typescript@5.9.3))(@typescript-eslint/typescript-estree@8.58.2(typescript@5.9.3))(@typescript-eslint/utils@8.58.2(eslint@10.2.0(jiti@2.6.1))(typescript@5.9.3))(@vue/compiler-sfc@3.5.32)(eslint@10.2.0(jiti@2.6.1))(oxlint@1.60.0)(typescript@5.9.3)(vitest@4.1.4))(eslint-plugin-oxlint@1.60.0(oxlint@1.60.0))(eslint@10.2.0(jiti@2.6.1))(typescript@5.9.3)
       '@types/node':
-        specifier: ^24.12.2
+        specifier: 'catalog:'
         version: 24.12.2
       '@vitest/coverage-v8':
         specifier: catalog:vitest
         version: 4.1.4(vitest@4.1.4)
       bumpp:
-        specifier: ^11.0.1
+        specifier: 'catalog:'
         version: 11.0.1
       eslint:
-        specifier: ^10.2.0
+        specifier: 'catalog:'
         version: 10.2.0(jiti@2.6.1)
       eslint-plugin-oxlint:
-        specifier: ^1.60.0
+        specifier: 'catalog:'
         version: 1.60.0(oxlint@1.60.0)
       nano-staged:
         specifier: 'catalog:'
@@ -102,49 +159,49 @@ importers:
         specifier: 'catalog:'
         version: 0.121.0(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)
       oxlint:
-        specifier: ^1.60.0
+        specifier: 'catalog:'
         version: 1.60.0
       publint:
-        specifier: ^0.3.18
+        specifier: 'catalog:'
         version: 0.3.18
       rollup:
-        specifier: ^4.60.1
+        specifier: 'catalog:'
         version: 4.60.1
       simple-git-hooks:
-        specifier: ^2.13.1
+        specifier: 'catalog:'
         version: 2.13.1
       taze:
-        specifier: ^19.11.0
+        specifier: 'catalog:'
         version: 19.11.0
       tinyexec:
-        specifier: ^1.1.1
+        specifier: 'catalog:'
         version: 1.1.1
       tsdown:
         specifier: 'catalog:'
         version: 0.21.8(@arethetypeswrong/core@0.18.2)(publint@0.3.18)(synckit@0.11.12)(typescript@5.9.3)(unplugin-unused@0.5.7)
       tsx:
-        specifier: ^4.21.0
+        specifier: 'catalog:'
         version: 4.21.0
       turbo:
-        specifier: ^2.9.6
+        specifier: 'catalog:'
         version: 2.9.6
       typescript:
-        specifier: ^5.9.3
+        specifier: 'catalog:'
         version: 5.9.3
       unplugin-raw:
-        specifier: ^0.7.0
+        specifier: 'catalog:'
         version: 0.7.0(esbuild@0.27.7)
       unplugin-unused:
-        specifier: ^0.5.7
+        specifier: 'catalog:'
         version: 0.5.7
       vite:
-        specifier: ^8.0.8
+        specifier: 'catalog:'
         version: 8.0.8(@types/node@24.12.2)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3)
       vite-plugin-inspect:
         specifier: 'catalog:'
         version: 11.3.3(vite@8.0.8(@types/node@24.12.2)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
       vitest:
-        specifier: ^4.1.4
+        specifier: catalog:vitest
         version: 4.1.4(@types/node@24.12.2)(@vitest/coverage-v8@4.1.4)(vite@8.0.8(@types/node@24.12.2)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
 
   packages/vieval:
@@ -153,7 +210,7 @@ importers:
         specifier: 'catalog:'
         version: 0.1.0-beta.17
       '@pnpm/find-workspace-dir':
-        specifier: ^1000.1.4
+        specifier: 'catalog:'
         version: 1000.1.5
       '@xsai-ext/providers':
         specifier: 'catalog:'
@@ -177,14 +234,14 @@ importers:
         specifier: 'catalog:'
         version: 0.2.16
       tinyrainbow:
-        specifier: ^3.1.0
+        specifier: 'catalog:'
         version: 3.1.0
       vite:
         specifier: 'catalog:'
         version: 8.0.8(@types/node@24.12.2)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3)
     devDependencies:
       typescript:
-        specifier: ^5.9.3
+        specifier: 'catalog:'
         version: 5.9.3
       vitest:
         specifier: catalog:vitest
