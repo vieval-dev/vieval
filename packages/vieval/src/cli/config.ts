@@ -86,6 +86,82 @@ export interface CliProjectConfig {
 }
 
 /**
+ * One workspace descriptor for workspace-mode configs.
+ */
+export interface CliWorkspaceConfig {
+  /**
+   * Workspace identifier.
+   */
+  id: string
+  /**
+   * Workspace root path.
+   */
+  root: string
+}
+
+/**
+ * One explicit comparison method descriptor.
+ */
+export interface CliComparisonMethodConfig {
+  /**
+   * Method identifier shown in compare reports.
+   */
+  id: string
+  /**
+   * Workspace path containing this method's `vieval.config.*`.
+   */
+  workspace: string
+  /**
+   * Project name to execute inside workspace config.
+   */
+  project: string
+  /**
+   * Optional explicit config file path for this workspace.
+   */
+  configFilePath?: string
+}
+
+/**
+ * Benchmark identity and shared cache namespace.
+ */
+export interface CliComparisonBenchmarkConfig {
+  /**
+   * Benchmark identifier used in report artifacts.
+   */
+  id: string
+  /**
+   * Shared cache namespace reused across method runs.
+   */
+  sharedCaseNamespace: string
+}
+
+/**
+ * One comparison entry loaded by `vieval compare`.
+ */
+export interface CliComparisonConfig {
+  /**
+   * Comparison id selected by `--comparison`.
+   */
+  id: string
+  /**
+   * Benchmark metadata for reporting and shared cache coordination.
+   */
+  benchmark: CliComparisonBenchmarkConfig
+  /**
+   * Optional explicit method list.
+   */
+  methods?: CliComparisonMethodConfig[]
+  /**
+   * Optional workspace glob(s) discovered relative to config directory.
+   */
+  includesWorkspaces?: string | string[]
+  /**
+   * Optional workspace exclude glob(s), also relative to config directory.
+   */
+  excludesWorkspaces?: string | string[]
+}
+
+/**
  * Execution context exposed to project-level `executor` implementations.
  *
  * Use when:
@@ -103,13 +179,7 @@ export interface CliProjectExecutorContext extends TaskExecutionContext {
 /**
  * Top-level CLI config loaded from `vieval.config.*`.
  */
-export interface CliConfig {
-  /**
-   * Project list expanded by `vieval run`.
-   *
-   * @default [{ name: 'default' }]
-   */
-  projects?: CliProjectConfig[]
+interface CliConfigBase {
   /**
    * Global model definitions inherited by projects.
    *
@@ -132,6 +202,55 @@ export interface CliConfig {
    * @default {}
    */
   env?: NodeJS.ProcessEnv
+}
+
+/**
+ * Project mode config for `vieval run`.
+ */
+export interface CliProjectModeConfig extends CliConfigBase {
+  /**
+   * Project list expanded by `vieval run`.
+   *
+   * @default [{ name: 'default' }]
+   */
+  projects?: CliProjectConfig[]
+  comparisons?: never
+  workspaces?: never
+}
+
+/**
+ * Workspace mode config placeholder for future workspace orchestration.
+ */
+export interface CliWorkspaceModeConfig extends CliConfigBase {
+  workspaces: CliWorkspaceConfig[]
+  projects?: never
+  comparisons?: never
+}
+
+/**
+ * Comparison mode config for `vieval compare`.
+ */
+export interface CliComparisonModeConfig extends CliConfigBase {
+  comparisons: CliComparisonConfig[]
+  projects?: never
+  workspaces?: never
+}
+
+/**
+ * Top-level CLI config loaded from `vieval.config.*`.
+ *
+ * Exactly one top-level mode is allowed:
+ * - `projects`
+ * - `workspaces`
+ * - `comparisons`
+ */
+export type CliConfig = CliProjectModeConfig | CliWorkspaceModeConfig | CliComparisonModeConfig
+
+export type CliConfigMode = 'comparisons' | 'projects' | 'workspaces'
+
+export interface LoadedRawCliConfig {
+  config: CliConfig | null
+  configFilePath: string | null
 }
 
 /**
@@ -211,7 +330,7 @@ async function applyVievalPlugins(config: CliConfig): Promise<CliConfig> {
       currentConfig = {
         ...currentConfig,
         ...nextConfig,
-      }
+      } as CliConfig
     }
   }
 
@@ -415,9 +534,79 @@ function normalizeProjectConfig(
 }
 
 function normalizeConfig(config: CliConfig | null | undefined, cwd: string): NormalizedCliProjectConfig[] {
+  if (config != null) {
+    const mode = detectCliConfigMode(config)
+    if (mode === 'comparisons') {
+      throw new Error('vieval run requires project-mode config. Received comparison-mode config.')
+    }
+    if (mode === 'workspaces') {
+      throw new Error('vieval run requires project-mode config. Received workspace-mode config.')
+    }
+  }
+
   const projects = config?.projects ?? [{ name: 'default' }]
   const inheritedModels = config?.models ?? []
   return projects.map(project => normalizeProjectConfig(project, cwd, inheritedModels))
+}
+
+/**
+ * Detects which top-level config mode is active.
+ *
+ * Expects:
+ * - exactly one of `projects`, `workspaces`, or `comparisons`
+ *
+ * Returns:
+ * - active top-level mode key
+ */
+export function detectCliConfigMode(config: CliConfig): CliConfigMode {
+  const declaredModes: CliConfigMode[] = []
+  if (config.projects != null) {
+    declaredModes.push('projects')
+  }
+  if (config.workspaces != null) {
+    declaredModes.push('workspaces')
+  }
+  if (config.comparisons != null) {
+    declaredModes.push('comparisons')
+  }
+
+  if (declaredModes.length > 1) {
+    throw new Error(`Invalid vieval config: top-level keys are mutually exclusive. Found ${declaredModes.join(', ')}.`)
+  }
+
+  return declaredModes[0] ?? 'projects'
+}
+
+/**
+ * Loads nearest `vieval.config.*` without project normalization.
+ */
+export async function loadRawVievalConfig(options: LoadVievalCliConfigOptions = {}): Promise<LoadedRawCliConfig> {
+  const cwd = options.cwd ?? process.cwd()
+
+  try {
+    const loadedConfig = await resolveVievalConfig(cwd, options.configFilePath)
+    if (loadedConfig.configFilePath == null || loadedConfig.config == null) {
+      return {
+        config: null,
+        configFilePath: null,
+      }
+    }
+
+    const config = await applyVievalPlugins(loadedConfig.config)
+    detectCliConfigMode(config)
+
+    return {
+      config,
+      configFilePath: loadedConfig.configFilePath,
+    }
+  }
+  catch (error) {
+    const errorMessage = errorMessageFrom(error) ?? 'Unknown config loading error.'
+    const configFilePath = options.configFilePath == null
+      ? 'vieval.config'
+      : (isAbsolute(options.configFilePath) ? options.configFilePath : resolve(cwd, options.configFilePath))
+    throw new Error(`Failed to load vieval config "${configFilePath}": ${errorMessage}`, { cause: error })
+  }
 }
 
 /**
@@ -437,7 +626,7 @@ function normalizeConfig(config: CliConfig | null | undefined, cwd: string): Nor
 export async function loadVievalCliConfig(options: LoadVievalCliConfigOptions = {}): Promise<LoadedCliConfig> {
   const cwd = options.cwd ?? process.cwd()
   try {
-    const loadedConfig = await resolveVievalConfig(cwd, options.configFilePath)
+    const loadedConfig = await loadRawVievalConfig(options)
     if (loadedConfig.configFilePath == null || loadedConfig.config == null) {
       return {
         configFilePath: null,
@@ -446,7 +635,7 @@ export async function loadVievalCliConfig(options: LoadVievalCliConfigOptions = 
       }
     }
 
-    const config = await applyVievalPlugins(loadedConfig.config)
+    const config = loadedConfig.config
 
     return {
       configFilePath: loadedConfig.configFilePath,

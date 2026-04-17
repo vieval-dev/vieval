@@ -9,12 +9,13 @@ import meow from 'meow'
 
 import { errorMessageFrom } from '@moeru/std'
 
+import { runCompareCliOrExit } from './compare'
 import { parseCliArguments as parseRunCliArguments } from './eval-run'
 import { runReportAnalyzeCli } from './report-analyze'
 import { runReportIndexCli } from './report-index'
 import { formatVievalCliRunOutput, runVievalCli } from './run'
 
-type Command = 'report' | 'run'
+type Command = 'compare' | 'report' | 'run'
 
 interface ParsedTopLevelCliArguments {
   command: Command | 'help'
@@ -29,11 +30,13 @@ const topLevelHelpText = `
 
   Commands
     run            Discover and execute eval projects
+    compare        Compare multiple workspaces/methods on one benchmark
     report         Analyze and index generated report artifacts
 
   Examples
     $ vieval run
     $ vieval run --config vieval.config.ts --project chess --json --report-out .vieval/reports
+    $ vieval compare --config vieval.config.ts --comparison agent-memory
     $ vieval report analyze .vieval/reports/my-run
     $ vieval report index .vieval/reports --output .vieval/reports/index/runs.jsonl
 `
@@ -62,9 +65,9 @@ export function parseTopLevelCliArguments(argv: readonly string[]): ParsedTopLev
     }
   }
 
-  if (command !== 'run' && command !== 'report') {
+  if (command !== 'run' && command !== 'report' && command !== 'compare') {
     const receivedCommand = command ?? '(none)'
-    throw new Error(`Unsupported vieval command "${receivedCommand}". Expected "run" or "report".`)
+    throw new Error(`Unsupported vieval command "${receivedCommand}". Expected "run", "compare", or "report".`)
   }
 
   return {
@@ -95,6 +98,11 @@ export async function runTopLevelCli(argv: readonly string[]): Promise<void> {
     }
 
     throw new Error(`Unsupported vieval report command "${reportSubcommand ?? '(none)'}". Expected "analyze" or "index".`)
+  }
+
+  if (parsed.command === 'compare') {
+    await runCompareCliOrExit(parsed.commandArgv)
+    return
   }
 
   const runArguments = parseRunCliArguments(parsed.commandArgv)

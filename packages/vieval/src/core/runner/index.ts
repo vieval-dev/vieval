@@ -1,3 +1,4 @@
+export * from '../cache'
 export * from './aggregate'
 export * from './collect'
 export * from './run'

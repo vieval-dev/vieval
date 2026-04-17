@@ -4,6 +4,18 @@ import { describe, expect, it } from 'vitest'
 
 import { emitChatModelErrorTelemetry, emitChatModelRequestTelemetry, emitChatModelResponseTelemetry, extractChatModelToolCalls, extractMeteringDimensions } from './telemetry'
 
+function createTestTaskCacheRuntime() {
+  return {
+    namespace() {
+      return {
+        file() {
+          throw new Error('not used in telemetry test')
+        },
+      }
+    },
+  } as TaskRunContext['cache']
+}
+
 describe('extractChatModelToolCalls', () => {
   it('normalizes tool calls from OpenAI-compatible response shapes', () => {
     const toolCalls = extractChatModelToolCalls({
@@ -53,6 +65,7 @@ describe('emitChatModelResponseTelemetry', () => {
   it('emits inference response and per-tool lifecycle events', () => {
     const events: Array<{ caseId?: string, data?: unknown, event: string }> = []
     const context = {
+      cache: createTestTaskCacheRuntime(),
       model() {
         throw new Error('not used in telemetry test')
       },
@@ -134,6 +147,7 @@ describe('emitChatModelRequestTelemetry', () => {
   it('emits inference request events with model/provider payload', () => {
     const events: Array<{ caseId?: string, data?: unknown, event: string }> = []
     const context = {
+      cache: createTestTaskCacheRuntime(),
       model() {
         throw new Error('not used in telemetry test')
       },
@@ -179,6 +193,7 @@ describe('emitChatModelErrorTelemetry', () => {
   it('emits inference error events with normalized error message', () => {
     const events: Array<{ caseId?: string, data?: unknown, event: string }> = []
     const context = {
+      cache: createTestTaskCacheRuntime(),
       model() {
         throw new Error('not used in telemetry test')
       },

@@ -1,3 +1,4 @@
+import type { TaskCacheRuntime } from '../cache'
 import type { AggregatedRunResults, RunResult } from './aggregate'
 import type { ScheduledTask } from './schedule'
 import type { TaskExecutionContext } from './task-context'
@@ -77,7 +78,19 @@ export interface RunScheduledTasksOptions {
 }
 
 function createDefaultExecutionContext(task: ScheduledTask): TaskExecutionContext {
+  const cache: TaskCacheRuntime = {
+    namespace(name) {
+      return {
+        file(options) {
+          const key = options.key.join('/')
+          throw new Error(`Task cache runtime is not configured. Requested namespace "${name}" and key "${key}".`)
+        },
+      }
+    },
+  }
+
   return {
+    cache,
     model(options) {
       const requestedModelName = typeof options === 'string' ? options : options?.name
       if (requestedModelName != null) {

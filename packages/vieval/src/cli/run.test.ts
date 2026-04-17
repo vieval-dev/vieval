@@ -160,6 +160,75 @@ describe('runVievalCli', () => {
     expect(output.projects[0].result?.overall.hybridAverage).toBe(1)
   })
 
+  it('injects cache runtime into task execution and persists cache artifacts', async () => {
+    const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
+    const projectDirectory = await createDslProject({
+      evalFiles: {
+        'cache-runtime.eval.ts': `
+import { caseOf, describeTask } from '${vievalImportPath}'
+
+describeTask('cache-runtime-task', () => {
+  caseOf('cache-runtime-case', async (context) => {
+    const artifact = context.cache.namespace('locomo').file({
+      ext: 'json',
+      key: ['fixtures', 'sample'],
+    })
+
+    await artifact.writeJson({ ok: true })
+    const loaded = await artifact.readJson<{ ok: boolean }>()
+
+    if (loaded.ok !== true) {
+      throw new Error('cache-runtime-read-failed')
+    }
+  }, undefined)
+})
+`,
+      },
+      executorSource: `async (task, context) => {
+        if (task.entry.task == null) {
+          throw new Error(\`Missing eval task definition for entry "\${task.entry.id}".\`)
+        }
+
+        const output = await task.entry.task.run({
+          cache: context.cache,
+          model: context.model,
+          reporterHooks: context.reporterHooks,
+          task,
+        })
+
+        return {
+          entryId: task.entry.id,
+          id: task.id,
+          inferenceExecutorId: task.inferenceExecutor.id,
+          matrix: task.matrix,
+          scores: [...output.scores],
+        }
+      }`,
+      projectName: 'cache-runtime-project',
+    })
+
+    const output = await runVievalCli({
+      configFilePath: join(projectDirectory, 'vieval.config.ts'),
+      cwd: projectDirectory,
+      workspace: 'workspace-cache',
+    })
+
+    const cacheArtifactPath = join(
+      projectDirectory,
+      '.vieval',
+      'cache',
+      'workspace-cache',
+      'cache-runtime-project',
+      'locomo',
+      'fixtures',
+      'sample.json',
+    )
+    const cacheArtifact = await readFile(cacheArtifactPath, 'utf-8')
+
+    expect(output.projects[0]?.executed).toBe(true)
+    expect(cacheArtifact).toContain('"ok": true')
+  })
+
   it('writes report artifacts under workspace/project/experiment/attempt/run layout', async () => {
     const reportOut = await mkdtemp(join(tmpdir(), 'vieval-report-out-'))
     temporaryDirectories.push(reportOut)

@@ -2,6 +2,22 @@ import { describe, expect, it } from 'vitest'
 
 import { caseOf, casesFromInputs, describeEval, describeTask } from './task'
 
+function createTestTaskCacheRuntime() {
+  return {
+    namespace() {
+      return {
+        file() {
+          return {
+            async exists() {
+              return false
+            },
+          }
+        },
+      }
+    },
+  } as any
+}
+
 function createScheduledTaskMatrix() {
   return {
     eval: {
@@ -27,6 +43,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
     })
 
     const runResult = await taskDefinition.task?.run({
+      cache: createTestTaskCacheRuntime(),
       model: () => ({
         aliases: [],
         id: 'openai:gpt-4.1-mini',
@@ -64,6 +81,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
     })
 
     const runResult = await taskDefinition.task?.run({
+      cache: createTestTaskCacheRuntime(),
       model: () => ({
         aliases: [],
         id: 'openai:gpt-4.1-mini',
@@ -108,6 +126,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
     })
 
     const runPromise = taskDefinition.task?.run({
+      cache: createTestTaskCacheRuntime(),
       model: () => ({
         aliases: [],
         id: 'openai:gpt-4.1-mini',
@@ -170,6 +189,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
     })
 
     const runResult = await taskDefinition.task?.run({
+      cache: createTestTaskCacheRuntime(),
       model: () => ({
         aliases: [],
         id: 'openai:gpt-4.1-mini',
@@ -214,6 +234,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
     })
 
     const runResult = await taskDefinition.task?.run({
+      cache: createTestTaskCacheRuntime(),
       model: () => ({
         aliases: [],
         id: 'openai:gpt-4.1-mini',
@@ -246,5 +267,42 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
   it('throws when casesFromInputs is called outside describeTask', () => {
     expect(() => casesFromInputs('oops', [{}], async () => {})).toThrow('caseOf/casesFromInputs must be called inside describeTask/describeEval.')
+  })
+
+  it('exposes cache runtime on task context', async () => {
+    const taskDefinition = describeTask('dsl-cache-context', () => {
+      caseOf('case-1', (context) => {
+        expect(typeof context.cache.namespace).toBe('function')
+      }, {})
+    })
+
+    const runResult = await taskDefinition.task?.run({
+      cache: createTestTaskCacheRuntime(),
+      model: () => ({
+        aliases: [],
+        id: 'openai:gpt-4.1-mini',
+        inferenceExecutor: 'openai',
+        inferenceExecutorId: 'openai',
+        model: 'gpt-4.1-mini',
+      }),
+      task: {
+        entry: {
+          description: 'd',
+          directory: 'x',
+          filePath: '/tmp/x.eval.ts',
+          id: 'x',
+          name: 'x',
+        },
+        id: 'x',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: {
+          eval: { rubric: 'strict' },
+          meta: { evalRowId: 'rubric=strict', runRowId: 'model=gpt-4.1-mini' },
+          run: { model: 'gpt-4.1-mini' },
+        },
+      },
+    })
+
+    expect(runResult?.scores[0]?.score).toBe(1)
   })
 })

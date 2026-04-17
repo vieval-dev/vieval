@@ -230,6 +230,14 @@ export interface TaskRunOutput {
  */
 export interface TaskRunContext {
   /**
+   * Task-scoped cache runtime.
+   *
+   * Use when:
+   * - benchmark setup needs deterministic artifact reuse across attempts
+   * - case-level logic needs typed text/json/binary cache loaders
+   */
+  cache: TaskExecutionContext['cache']
+  /**
    * Scheduled runner task metadata.
    *
    * Matrix impact on runtime context:

@@ -1,4 +1,5 @@
 import type { ModelDefinition } from '../../config/models'
+import type { TaskCacheRuntime } from '../cache'
 import type { ScheduledTask } from './schedule'
 
 import { resolveModelByName } from '../../config/models'
@@ -18,6 +19,10 @@ export interface TaskModelSelectionOptions {
  */
 export interface TaskExecutionContext {
   /**
+   * Deterministic cache runtime scoped to the current task project.
+   */
+  cache: TaskCacheRuntime
+  /**
    * Resolves model configuration for the current task.
    *
    * Use when:
@@ -33,8 +38,22 @@ export interface TaskExecutionContext {
  * Inputs used to build task execution context.
  */
 export interface CreateTaskExecutionContextOptions {
+  cache?: TaskCacheRuntime
   models: readonly ModelDefinition[]
   task: ScheduledTask
+}
+
+function createNoopTaskCacheRuntime(): TaskCacheRuntime {
+  return {
+    namespace(name) {
+      return {
+        file(options) {
+          const key = options.key.join('/')
+          throw new Error(`Task cache runtime is not configured. Requested namespace "${name}" and key "${key}".`)
+        },
+      }
+    },
+  }
 }
 
 function resolveDefaultTaskModel(
@@ -78,6 +97,7 @@ function resolveDefaultTaskModel(
  */
 export function createTaskExecutionContext(options: CreateTaskExecutionContextOptions): TaskExecutionContext {
   return {
+    cache: options.cache ?? createNoopTaskCacheRuntime(),
     model(selection) {
       if (selection == null) {
         return resolveDefaultTaskModel(options.models, options.task)

@@ -15,7 +15,7 @@ import c from 'tinyrainbow'
 
 import { errorMessageFrom } from '@moeru/std'
 
-import { collectEvalEntries, createRunnerRuntimeContext, createRunnerSchedule, createTaskExecutionContext, RunnerExecutionError, runScheduledTasks } from '../core/runner'
+import { collectEvalEntries, createFilesystemTaskCacheRuntime, createRunnerRuntimeContext, createRunnerSchedule, createTaskExecutionContext, RunnerExecutionError, runScheduledTasks } from '../core/runner'
 import { beginModuleRegistration, consumeModuleRegistrations, endModuleRegistration } from '../dsl/registry'
 import { loadVievalCliConfig } from './config'
 import { discoverEvalFiles } from './discovery'
@@ -108,6 +108,10 @@ export interface RunVievalCliOptions extends LoadVievalCliConfigOptions {
    * Workspace id attached to report artifacts.
    */
   workspace?: string
+  /**
+   * Cache project identifier override used to share benchmark cache across multiple method runs.
+   */
+  cacheProjectName?: string
 }
 
 /**
@@ -624,6 +628,9 @@ function createTaskReporterHooks(
 function createCliTaskExecutionContext(
   task: ScheduledTask,
   models: NormalizedCliProjectConfig['models'],
+  cacheRootDirectory: string,
+  cacheProjectName: string,
+  workspaceId: string,
   reporter: CliRunReporter,
   projectName: string,
   recordEvent: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void,
@@ -631,6 +638,11 @@ function createCliTaskExecutionContext(
 ): CliTaskExecutionContext {
   return {
     ...createTaskExecutionContext({
+      cache: createFilesystemTaskCacheRuntime({
+        cacheRootDirectory,
+        projectName: cacheProjectName,
+        workspaceId,
+      }),
       models,
       task,
     }),
@@ -670,6 +682,7 @@ function createAutoTaskExecutor(
     }
 
     const output = await taskDefinition.run({
+      cache: context.cache,
       model: context.model,
       reporterHooks: resolveTaskReporterHooks(task, context, reporter, projectName, recordEvent, projectCaseCounters),
       task,
@@ -801,6 +814,8 @@ async function prepareProject(project: NormalizedCliProjectConfig): Promise<Prep
 
 async function executePreparedProject(
   prepared: PreparedCliProjectExecution,
+  identity: CliRunIdentity,
+  cacheProjectName: string | undefined,
   reporter: CliRunReporter,
   counters: RunCliReporterCounters,
   recordEvent: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void,
@@ -833,6 +848,9 @@ async function executePreparedProject(
         return createCliTaskExecutionContext(
           task,
           prepared.project.models,
+          resolve(prepared.project.root, '.vieval', 'cache'),
+          cacheProjectName ?? prepared.name,
+          identity.workspaceId,
           reporter,
           prepared.name,
           recordEvent,
@@ -1027,6 +1045,8 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
 
       projectSummaries.push(await executePreparedProject(
         preparedProject.prepared,
+        identity,
+        options.cacheProjectName,
         reporter,
         reporterCounters,
         eventRecorder.record,

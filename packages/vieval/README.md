@@ -225,6 +225,7 @@ export default defineConfig({
 
 ```bash
 vieval run [--config <path>] [--project <name>] [--json]
+vieval compare [--config <path>] [--comparison <id>] [--output <path>] [--format table|json]
 ```
 
 Common usage:
@@ -234,6 +235,7 @@ pnpm -F vieval eval:run
 pnpm -F vieval eval:run -- --config ./vieval.config.ts
 pnpm -F vieval eval:run -- --config ./vieval.config.ts --project chess --project moderation
 pnpm -F vieval eval:run -- --json
+pnpm -F vieval exec tsx src/cli/index.ts compare --config ../../vieval.config.ts --comparison <comparison-id>
 pnpm -F vieval eval:run -- --help
 ```
 
