@@ -4,6 +4,7 @@ trustPolicy: no-downgrade
 
 packages:
   - packages/**
+  - evals/**
   - '!**/dist/**'
 overrides:
   array-flatten: npm:@nolyfill/array-flatten@^1.0.44

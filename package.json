@@ -52,7 +52,8 @@
     "vitest": "catalog:vitest"
   },
   "workspaces": [
-    "packages/**"
+    "packages/**",
+    "evals/**"
   ],
   "simple-git-hooks": {
     "pre-commit": "pnpm nano-staged"
