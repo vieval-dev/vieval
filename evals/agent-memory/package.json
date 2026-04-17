@@ -1,0 +1,22 @@
+{
+  "name": "@vieval/eval-agent-memory",
+  "type": "module",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Agent-memory evaluation workspace with LoCoMo cases and backend test objects.",
+  "exports": {
+    ".": "./eval/cases/locomo/src/index.ts"
+  },
+  "types": "./eval/cases/locomo/src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest --config ./vitest.config.ts",
+    "test:run": "vitest run --config ./vitest.config.ts",
+    "eval:run": "vieval compare --config ./vieval.config.ts --comparison agent-memory-semantic-approaches",
+    "eval:run:mem9": "vieval run --config ./eval/test-objects/mem9/vieval.config.ts --project locomo-mem9",
+    "eval:run:lobehub": "vieval run --config ./eval/test-objects/lobehub/vieval.config.ts --project locomo-lobehub"
+  },
+  "dependencies": {
+    "vieval": "workspace:*"
+  }
+}
