@@ -132,3 +132,5 @@ export function ChatModels(options: ChatModelsPluginOptions): Plugin {
     name: 'vieval:chat-models',
   }
 }
+
+export * from './telemetry'

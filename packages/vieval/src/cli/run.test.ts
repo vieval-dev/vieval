@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -158,6 +158,109 @@ describe('runVievalCli', () => {
     expect(output.projects[0].executed).toBe(true)
     expect(output.projects[0].result?.overall.runCount).toBe(2)
     expect(output.projects[0].result?.overall.hybridAverage).toBe(1)
+  })
+
+  it('writes report artifacts under workspace/project/experiment/attempt/run layout', async () => {
+    const reportOut = await mkdtemp(join(tmpdir(), 'vieval-report-out-'))
+    temporaryDirectories.push(reportOut)
+
+    const output = await runVievalCli({
+      attempt: 'attempt-1',
+      configFilePath: join(fixtureProjectDirectory, 'vieval.exec.config.cjs'),
+      cwd: fixtureProjectDirectory,
+      experiment: 'baseline',
+      reportOut,
+      workspace: 'packages-vieval',
+    })
+
+    expect(output.reportDirectory).toBeDefined()
+    expect(output.reportDirectory).toContain('/packages-vieval/example-pattern-byoa-bring-your-own-agent-exec/baseline/attempt-1/')
+
+    const summaryText = await readFile(join(output.reportDirectory!, 'run-summary.json'), 'utf-8')
+    const eventsText = await readFile(join(output.reportDirectory!, 'events.jsonl'), 'utf-8')
+
+    expect(summaryText).toContain('"workspaceId": "packages-vieval"')
+    expect(summaryText).toContain('"experimentId": "baseline"')
+    expect(summaryText).toContain('"attemptId": "attempt-1"')
+    expect(eventsText.length).toBeGreaterThan(0)
+  })
+
+  it('persists task-emitted custom telemetry events into report artifacts', async () => {
+    const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
+    const reportOut = await mkdtemp(join(tmpdir(), 'vieval-report-telemetry-'))
+    temporaryDirectories.push(reportOut)
+
+    const projectDirectory = await createDslProject({
+      evalFiles: {
+        'custom-telemetry.eval.ts': `
+import { caseOf, describeTask } from '${vievalImportPath}'
+
+describeTask('custom-telemetry-task', () => {
+  caseOf('custom-telemetry-case', (context) => {
+    context.reporterHooks?.onEvent?.({
+      caseId: 'custom-telemetry-case',
+      data: {
+        metering: {
+          dimensions: {
+            input_tokens: 12,
+            output_tokens: 6,
+            total_tokens: 18,
+            tool_call_count: 1,
+          },
+        },
+        toolCalls: [
+          {
+            args: { city: 'tokyo' },
+            name: 'weather.lookup',
+          },
+        ],
+      },
+      event: 'InferenceResponse',
+    })
+  }, undefined)
+})
+`,
+      },
+      projectName: 'custom-telemetry-project',
+    })
+
+    const output = await runVievalCli({
+      attempt: 'attempt-telemetry',
+      configFilePath: join(projectDirectory, 'vieval.config.ts'),
+      cwd: projectDirectory,
+      experiment: 'tool-calls',
+      reportOut,
+      workspace: 'ws-telemetry',
+    })
+
+    expect(output.reportDirectory).toBeDefined()
+
+    const eventsText = await readFile(join(output.reportDirectory!, 'events.jsonl'), 'utf-8')
+    const events = eventsText
+      .split('\n')
+      .filter(line => line.trim().length > 0)
+      .map(line => JSON.parse(line) as {
+        caseId?: string
+        data?: {
+          metering?: {
+            dimensions?: Record<string, number>
+          }
+          toolCalls?: Array<{
+            name: string
+          }>
+        }
+        event: string
+        projectId?: string
+        taskId?: string
+      })
+    const telemetryEvent = events.find(event => event.event === 'InferenceResponse')
+
+    expect(telemetryEvent).toBeDefined()
+    expect(telemetryEvent?.taskId).toBeDefined()
+    expect(telemetryEvent?.projectId).toBe('custom-telemetry-project')
+    expect(telemetryEvent?.caseId).toBe('custom-telemetry-case')
+    expect(telemetryEvent?.data?.metering?.dimensions?.tool_call_count).toBe(1)
+    expect(telemetryEvent?.data?.toolCalls?.[0]?.name).toBe('weather.lookup')
   })
 
   it('preserves scoped scheduled matrix artifacts in CLI output', async () => {

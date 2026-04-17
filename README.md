@@ -239,10 +239,11 @@ pnpm -F vieval eval:run -- --help
 
 ## Examples In This Repository
 
-- `packages/vieval/tests/projects/example-api-defining-new-task`
-- `packages/vieval/tests/projects/example-api-config-matrix`
-- `packages/vieval/tests/projects/example-api-load-datasource-as-cases`
-- `packages/vieval/tests/projects/example-pattern-byoa-bring-your-own-agent`
+- [Define a custom eval task API](packages/vieval/tests/projects/example-api-defining-new-task)
+- [Configure run/eval matrix combinations](packages/vieval/tests/projects/example-api-config-matrix)
+- [Load datasource records as task cases](packages/vieval/tests/projects/example-api-load-datasource-as-cases)
+- [Compare reporters and experiment/attempt layering](packages/vieval/tests/projects/example-api-reporters-and-experiments)
+- [Bring your own agent execution pattern](packages/vieval/tests/projects/example-pattern-byoa-bring-your-own-agent)
 
 ## Development
 

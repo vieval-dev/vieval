@@ -21,7 +21,8 @@
     "lint:fix": "moeru-lint --fix .",
     "typecheck": "pnpm -rF=\"./packages/*\" --parallel typecheck",
     "up": "taze -w -r -I && pnpm prune && pnpm dedupe",
-    "nolyfill": "pnpm dlx nolyfill"
+    "nolyfill": "pnpm dlx nolyfill",
+    "eval:run": "pnpm -F vieval eval:run"
   },
   "devDependencies": {
     "@antfu/eslint-config": "catalog:",

@@ -10,9 +10,11 @@ import meow from 'meow'
 import { errorMessageFrom } from '@moeru/std'
 
 import { parseCliArguments as parseRunCliArguments } from './eval-run'
+import { runReportAnalyzeCli } from './report-analyze'
+import { runReportIndexCli } from './report-index'
 import { formatVievalCliRunOutput, runVievalCli } from './run'
 
-type Command = 'run'
+type Command = 'report' | 'run'
 
 interface ParsedTopLevelCliArguments {
   command: Command | 'help'
@@ -27,10 +29,13 @@ const topLevelHelpText = `
 
   Commands
     run            Discover and execute eval projects
+    report         Analyze and index generated report artifacts
 
   Examples
     $ vieval run
-    $ vieval run --config vieval.config.ts --project chess --json
+    $ vieval run --config vieval.config.ts --project chess --json --report-out .vieval/reports
+    $ vieval report analyze .vieval/reports/my-run
+    $ vieval report index .vieval/reports --output .vieval/reports/index/runs.jsonl
 `
 
 function normalizeCliArgv(argv: readonly string[]): string[] {
@@ -57,9 +62,9 @@ export function parseTopLevelCliArguments(argv: readonly string[]): ParsedTopLev
     }
   }
 
-  if (command !== 'run') {
+  if (command !== 'run' && command !== 'report') {
     const receivedCommand = command ?? '(none)'
-    throw new Error(`Unsupported vieval command "${receivedCommand}". Expected "run".`)
+    throw new Error(`Unsupported vieval command "${receivedCommand}". Expected "run" or "report".`)
   }
 
   return {
@@ -76,10 +81,30 @@ export async function runTopLevelCli(argv: readonly string[]): Promise<void> {
     return
   }
 
+  if (parsed.command === 'report') {
+    const reportSubcommand = parsed.commandArgv[0]
+
+    if (reportSubcommand === 'analyze') {
+      await runReportAnalyzeCli(parsed.commandArgv)
+      return
+    }
+
+    if (reportSubcommand === 'index') {
+      await runReportIndexCli(parsed.commandArgv)
+      return
+    }
+
+    throw new Error(`Unsupported vieval report command "${reportSubcommand ?? '(none)'}". Expected "analyze" or "index".`)
+  }
+
   const runArguments = parseRunCliArguments(parsed.commandArgv)
   const output = await runVievalCli({
+    attempt: runArguments.attempt,
     configFilePath: runArguments.configFilePath,
+    experiment: runArguments.experiment,
     project: runArguments.project,
+    reportOut: runArguments.reportOut,
+    workspace: runArguments.workspace,
   })
 
   if (runArguments.json) {

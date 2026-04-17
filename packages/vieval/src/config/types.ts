@@ -369,6 +369,40 @@ export interface TaskReporterHooks {
    * Runs after a case settles.
    */
   onCaseEnd?: (payload: TaskCaseReporterEndPayload) => void
+  /**
+   * Runs when task code emits a custom telemetry/reporting event.
+   *
+   * Use when:
+   * - eval implementations need report artifacts beyond case lifecycle counters
+   * - model/runtime integrations emit inference, metering, or tool-call events
+   */
+  onEvent?: (payload: TaskReporterEventPayload) => void
+}
+
+/**
+ * Payload emitted by task code for custom report events.
+ *
+ * Use when:
+ * - reporting runtime telemetry such as inference requests, responses, or tool calls
+ * - attaching modality-specific metrics without coupling task logic to CLI internals
+ *
+ * Expects:
+ * - `event` to be a stable event name
+ * - `data` to be JSON-serializable for report artifact persistence
+ */
+export interface TaskReporterEventPayload {
+  /**
+   * Event name written into report event envelopes.
+   */
+  event: string
+  /**
+   * Optional custom payload persisted under event `data`.
+   */
+  data?: unknown
+  /**
+   * Optional stable case id when the event maps to one case lifecycle.
+   */
+  caseId?: string
 }
 
 /**

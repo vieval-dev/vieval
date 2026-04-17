@@ -15,5 +15,5 @@ Included tasks:
 Run:
 
 ```bash
-pnpm run eval:run -- --config packages/vieval/tests/projects/example-api-load-datasource-as-cases/vieval.config.ts
+pnpm run eval:run -- --config tests/projects/example-api-load-datasource-as-cases/vieval.config.ts
 ```

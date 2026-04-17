@@ -1,4 +1,4 @@
-import type { EvalDefinition, EvalModuleMap, TaskCaseReporterEndPayload, TaskCaseReporterPayload, TaskReporterHooks } from '../config'
+import type { EvalDefinition, EvalModuleMap, TaskCaseReporterEndPayload, TaskCaseReporterPayload, TaskReporterEventPayload, TaskReporterHooks } from '../config'
 import type { AggregatedRunResults, ScheduledTask, ScheduledTaskExecutor, TaskExecutionContext } from '../core/runner'
 import type { CliProjectExecutorContext, LoadVievalCliConfigOptions, NormalizedCliProjectConfig } from './config'
 import type { CliReporter, SummaryReporter, SummaryReporterCaseStartPayload, SummaryReporterTaskQueuedPayload } from './reporters'
@@ -6,6 +6,9 @@ import type { WindowRendererTimer } from './reporters/renderers/windowed-rendere
 
 import process from 'node:process'
 
+import { randomUUID } from 'node:crypto'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import c from 'tinyrainbow'
@@ -80,15 +83,31 @@ export interface RunVievalCliReporterOptions {
  */
 export interface RunVievalCliOptions extends LoadVievalCliConfigOptions {
   /**
+   * Attempt id attached to report artifacts.
+   */
+  attempt?: string
+  /**
+   * Experiment id attached to report artifacts.
+   */
+  experiment?: string
+  /**
    * Restrict run to project names.
    *
    * @default []
    */
   project?: string[]
   /**
+   * Optional report output root directory.
+   */
+  reportOut?: string
+  /**
    * Optional reporter overrides used by CLI integration tests or custom hosts.
    */
   reporter?: RunVievalCliReporterOptions
+  /**
+   * Workspace id attached to report artifacts.
+   */
+  workspace?: string
 }
 
 /**
@@ -131,8 +150,41 @@ export interface CliProjectMatrixSummary {
  * Final CLI output model.
  */
 export interface CliRunOutput {
+  attemptId?: string
   configFilePath: string | null
+  experimentId?: string
   projects: CliProjectSummary[]
+  reportDirectory?: string | null
+  runId?: string
+  workspaceId?: string
+}
+
+interface CliRunReportEvent {
+  attemptId: string
+  caseId?: string
+  data: unknown
+  event: string
+  experimentId: string
+  projectId?: string
+  runId: string
+  schemaVersion: 1
+  taskId?: string
+  timestamp: string
+  version: 1
+  workspaceId: string
+}
+
+interface CliRunIdentity {
+  attemptId: string
+  experimentId: string
+  runId: string
+  workspaceId: string
+}
+
+interface CliRunRecordedEventMetadata {
+  caseId?: string
+  projectName?: string
+  taskId?: string
 }
 
 interface CliColorPalette {
@@ -264,6 +316,113 @@ function filterProjectsByName(projects: readonly NormalizedCliProjectConfig[], n
 
   const nameSet = new Set(names)
   return projects.filter(project => nameSet.has(project.name))
+}
+
+function sanitizeIdentitySegment(value: string): string {
+  const normalized = value.trim()
+  if (normalized.length === 0) {
+    return 'default'
+  }
+
+  return normalized.replace(/[^\w.-]+/g, '-')
+}
+
+function createRunIdentity(options: RunVievalCliOptions): CliRunIdentity {
+  const workspaceId = sanitizeIdentitySegment(options.workspace ?? 'default-workspace')
+  const experimentId = sanitizeIdentitySegment(options.experiment ?? 'default-experiment')
+  const attemptId = sanitizeIdentitySegment(options.attempt ?? `attempt-${new Date().toISOString().replace(/[:.]/g, '-')}`)
+
+  return {
+    attemptId,
+    experimentId,
+    runId: `run-${Date.now()}-${randomUUID().slice(0, 8)}`,
+    workspaceId,
+  }
+}
+
+function deriveReportProjectId(output: CliRunOutput): string {
+  const uniqueProjectNames = [...new Set(output.projects.map(project => project.name))]
+  if (uniqueProjectNames.length === 1) {
+    return sanitizeIdentitySegment(uniqueProjectNames[0] ?? 'default-project')
+  }
+
+  return 'multi-project'
+}
+
+function createEventRecorder(identity: CliRunIdentity): {
+  events: CliRunReportEvent[]
+  record: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void
+} {
+  const events: CliRunReportEvent[] = []
+  const taskProjectMap = new Map<string, string>()
+
+  return {
+    events,
+    record(event, payload, metadata): void {
+      const maybeTaskPayload = payload as { taskId?: string, projectName?: string }
+      const taskId = metadata?.taskId ?? maybeTaskPayload?.taskId
+      const caseId = metadata?.caseId ?? (payload as { caseId?: string })?.caseId
+      const projectName = metadata?.projectName ?? maybeTaskPayload?.projectName
+
+      if (taskId != null && projectName != null) {
+        taskProjectMap.set(taskId, projectName)
+      }
+
+      events.push({
+        attemptId: identity.attemptId,
+        caseId,
+        data: payload,
+        event,
+        experimentId: identity.experimentId,
+        projectId: taskId == null ? undefined : taskProjectMap.get(taskId),
+        runId: identity.runId,
+        schemaVersion: 1,
+        taskId,
+        timestamp: new Date().toISOString(),
+        version: 1,
+        workspaceId: identity.workspaceId,
+      })
+    },
+  }
+}
+
+function createReporterWithEventCapture(
+  reporter: CliRunReporter,
+  recordEvent: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void,
+): CliRunReporter {
+  return {
+    dispose() {
+      reporter.dispose()
+    },
+    onCaseEnd(payload) {
+      recordEvent('CaseEnded', payload)
+      reporter.onCaseEnd(payload)
+    },
+    onCaseStart(payload) {
+      recordEvent('CaseStarted', payload)
+      reporter.onCaseStart(payload)
+    },
+    onRunEnd(payload) {
+      recordEvent('RunEnded', payload)
+      reporter.onRunEnd(payload)
+    },
+    onRunStart(payload) {
+      recordEvent('RunStarted', payload)
+      reporter.onRunStart(payload)
+    },
+    onTaskEnd(payload) {
+      recordEvent('TaskEnded', payload)
+      reporter.onTaskEnd(payload)
+    },
+    onTaskQueued(payload) {
+      recordEvent('TaskQueued', payload)
+      reporter.onTaskQueued(payload)
+    },
+    onTaskStart(payload) {
+      recordEvent('TaskStarted', payload)
+      reporter.onTaskStart(payload)
+    },
+  }
 }
 
 interface ProcessEnvSnapshotValue {
@@ -406,6 +565,8 @@ function createTaskCaseReporterId(payload: TaskCaseReporterPayload | TaskCaseRep
 function createTaskReporterHooks(
   task: ScheduledTask,
   reporter: CliRunReporter,
+  projectName: string,
+  recordEvent: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void,
   projectCaseCounters?: RunCliProjectCaseCounters,
 ): TaskReporterHooks {
   function syncCaseTotal(total: number): void {
@@ -450,6 +611,13 @@ function createTaskReporterHooks(
         taskId: task.id,
       })
     },
+    onEvent(payload: TaskReporterEventPayload) {
+      recordEvent(payload.event, payload.data, {
+        caseId: payload.caseId,
+        projectName,
+        taskId: task.id,
+      })
+    },
   }
 }
 
@@ -457,6 +625,8 @@ function createCliTaskExecutionContext(
   task: ScheduledTask,
   models: NormalizedCliProjectConfig['models'],
   reporter: CliRunReporter,
+  projectName: string,
+  recordEvent: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void,
   projectCaseCounters: RunCliProjectCaseCounters,
 ): CliTaskExecutionContext {
   return {
@@ -464,7 +634,7 @@ function createCliTaskExecutionContext(
       models,
       task,
     }),
-    reporterHooks: createTaskReporterHooks(task, reporter, projectCaseCounters),
+    reporterHooks: createTaskReporterHooks(task, reporter, projectName, recordEvent, projectCaseCounters),
   }
 }
 
@@ -472,9 +642,11 @@ function resolveTaskReporterHooks(
   task: ScheduledTask,
   context: CliProjectExecutorContext,
   reporter: CliRunReporter,
+  projectName: string,
+  recordEvent: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void,
   projectCaseCounters: RunCliProjectCaseCounters,
 ): TaskReporterHooks {
-  return context.reporterHooks ?? createTaskReporterHooks(task, reporter, projectCaseCounters)
+  return context.reporterHooks ?? createTaskReporterHooks(task, reporter, projectName, recordEvent, projectCaseCounters)
 }
 
 function getFailedTaskId(error: unknown): string | null {
@@ -487,6 +659,8 @@ function getFailedTaskId(error: unknown): string | null {
 
 function createAutoTaskExecutor(
   reporter: CliRunReporter,
+  projectName: string,
+  recordEvent: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void,
   projectCaseCounters: RunCliProjectCaseCounters,
 ): ScheduledTaskExecutor {
   return async (task, context) => {
@@ -497,7 +671,7 @@ function createAutoTaskExecutor(
 
     const output = await taskDefinition.run({
       model: context.model,
-      reporterHooks: resolveTaskReporterHooks(task, context, reporter, projectCaseCounters),
+      reporterHooks: resolveTaskReporterHooks(task, context, reporter, projectName, recordEvent, projectCaseCounters),
       task,
     })
 
@@ -629,6 +803,7 @@ async function executePreparedProject(
   prepared: PreparedCliProjectExecution,
   reporter: CliRunReporter,
   counters: RunCliReporterCounters,
+  recordEvent: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void,
 ): Promise<CliProjectSummary> {
   const settledTaskIds = new Set<string>()
   const projectCaseCounters: RunCliProjectCaseCounters = {
@@ -637,7 +812,12 @@ async function executePreparedProject(
     seenCaseIds: new Set<string>(),
     skipped: 0,
   }
-  const rawTaskExecutor = prepared.project.executor ?? createAutoTaskExecutor(reporter, projectCaseCounters)
+  const rawTaskExecutor = prepared.project.executor ?? createAutoTaskExecutor(
+    reporter,
+    prepared.name,
+    recordEvent,
+    projectCaseCounters,
+  )
   const taskExecutor: ScheduledTaskExecutor = async (task, context) => {
     const result = await rawTaskExecutor(task, context)
 
@@ -650,7 +830,14 @@ async function executePreparedProject(
   try {
     const aggregated = await runScheduledTasks(prepared.tasks, taskExecutor, {
       createExecutionContext(task): TaskExecutionContext {
-        return createCliTaskExecutionContext(task, prepared.project.models, reporter, projectCaseCounters)
+        return createCliTaskExecutionContext(
+          task,
+          prepared.project.models,
+          reporter,
+          prepared.name,
+          recordEvent,
+          projectCaseCounters,
+        )
       },
       onTaskEnd(task, state): void {
         settledTaskIds.add(task.id)
@@ -736,6 +923,35 @@ async function executePreparedProject(
   }
 }
 
+async function writeRunReportArtifacts(
+  output: CliRunOutput,
+  events: readonly CliRunReportEvent[],
+  identity: CliRunIdentity,
+  reportOut: string,
+): Promise<string> {
+  const projectId = deriveReportProjectId(output)
+  const reportDirectory = resolve(
+    reportOut,
+    identity.workspaceId,
+    projectId,
+    identity.experimentId,
+    identity.attemptId,
+    identity.runId,
+  )
+  await mkdir(reportDirectory, { recursive: true })
+  await writeFile(
+    resolve(reportDirectory, 'run-summary.json'),
+    `${JSON.stringify(output, null, 2)}\n`,
+    'utf-8',
+  )
+  await writeFile(
+    resolve(reportDirectory, 'events.jsonl'),
+    events.map(event => JSON.stringify(event)).join('\n').concat(events.length > 0 ? '\n' : ''),
+    'utf-8',
+  )
+  return reportDirectory
+}
+
 /**
  * Runs vieval orchestration from config and returns project-level summaries.
  *
@@ -753,12 +969,17 @@ async function executePreparedProject(
  * - keeping business-agent eval files near their implementation packages
  */
 export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<CliRunOutput> {
+  const identity = createRunIdentity(options)
   const loadedConfig = await loadVievalCliConfig({
     configFilePath: options.configFilePath,
     cwd: options.cwd,
   })
   const restoreEnvironment = applyRunEnvironment(loadedConfig.env)
-  const reporter = createRunReporter(options.reporter)
+  const eventRecorder = createEventRecorder(identity)
+  const reporter = createReporterWithEventCapture(
+    createRunReporter(options.reporter),
+    eventRecorder.record,
+  )
 
   try {
     const selectedProjects = filterProjectsByName(loadedConfig.projects, options.project ?? [])
@@ -804,7 +1025,12 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
         continue
       }
 
-      projectSummaries.push(await executePreparedProject(preparedProject.prepared, reporter, reporterCounters))
+      projectSummaries.push(await executePreparedProject(
+        preparedProject.prepared,
+        reporter,
+        reporterCounters,
+        eventRecorder.record,
+      ))
     }
 
     reporter.onRunEnd({
@@ -814,10 +1040,26 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
       totalTasks,
     })
 
-    return {
+    const output: CliRunOutput = {
+      attemptId: identity.attemptId,
       configFilePath: loadedConfig.configFilePath,
+      experimentId: identity.experimentId,
       projects: projectSummaries,
+      reportDirectory: null,
+      runId: identity.runId,
+      workspaceId: identity.workspaceId,
     }
+
+    if (options.reportOut != null) {
+      output.reportDirectory = await writeRunReportArtifacts(
+        output,
+        eventRecorder.events,
+        identity,
+        options.reportOut,
+      )
+    }
+
+    return output
   }
   finally {
     reporter.dispose()

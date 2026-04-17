@@ -14,20 +14,28 @@ import packageJSON from '../../package.json'
 import { formatVievalCliRunOutput, runVievalCli } from './run'
 
 interface ParsedCliArguments {
+  attempt?: string
   configFilePath?: string
+  experiment?: string
   json: boolean
   project: string[]
+  reportOut?: string
+  workspace?: string
 }
 
 const evalRunHelpText = `
   Execute vieval projects from discovered or explicit config.
 
   Usage
-    $ vieval run [--config <path>] [--project <name>] [--json]
+    $ vieval run [--config <path>] [--project <name>] [--json] [--report-out <path>]
 
   Options
     --config     Config file path
     --project    Project name to execute; may be repeated
+    --workspace  Workspace id used in report artifacts
+    --experiment Experiment id used in report artifacts
+    --attempt    Attempt id used in report artifacts
+    --report-out Report output root directory
     --json       Print machine-readable JSON output
 `
 
@@ -65,13 +73,29 @@ export function parseCliArguments(argv: readonly string[]): ParsedCliArguments {
         isMultiple: true,
         type: 'string',
       },
+      workspace: {
+        type: 'string',
+      },
+      experiment: {
+        type: 'string',
+      },
+      attempt: {
+        type: 'string',
+      },
+      reportOut: {
+        type: 'string',
+      },
     },
   })
 
   return {
+    attempt: cli.flags.attempt,
     configFilePath: cli.flags.config,
+    experiment: cli.flags.experiment,
     json: cli.flags.json === true,
     project: normalizeProjectNames(cli.flags.project),
+    reportOut: cli.flags.reportOut,
+    workspace: cli.flags.workspace,
   }
 }
 
@@ -106,8 +130,12 @@ async function main(): Promise<void> {
 
   try {
     const output = await runVievalCli({
+      attempt: parsed.attempt,
       configFilePath: parsed.configFilePath,
+      experiment: parsed.experiment,
       project: parsed.project,
+      reportOut: parsed.reportOut,
+      workspace: parsed.workspace,
     })
 
     if (parsed.json) {
