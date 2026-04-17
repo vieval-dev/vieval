@@ -1,10 +1,14 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "rootDir": ".",
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "paths": {
+      "vieval": ["../../packages/vieval/src/index.ts"],
+      "vieval/*": ["../../packages/vieval/src/*"]
+    },
     "types": ["node", "vitest"],
+    "allowImportingTsExtensions": true,
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true

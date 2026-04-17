@@ -28,11 +28,31 @@ describe('scoreLoCoMoAnswer', () => {
     expect(score).toBeLessThan(1)
   })
 
+  it('matches snap locomo category-1 multi-answer matching by splitting predictions too', () => {
+    const score = scoreLoCoMoAnswer({
+      category: 1,
+      goldAnswer: 'Psychology, counseling certification',
+      prediction: 'Psychology, counseling',
+    })
+
+    expect(score).toBeCloseTo(0.833333, 4)
+  })
+
   it('scores category 3 by matching against the first semicolon-delimited span', () => {
     const score = scoreLoCoMoAnswer({
       category: 3,
       goldAnswer: 'june 12, 2020; accepted alternate formats',
       prediction: 'june 12 2020',
+    })
+
+    expect(score).toBe(1)
+  })
+
+  it('uses stemmed token matching like snap locomo scorer', () => {
+    const score = scoreLoCoMoAnswer({
+      category: 4,
+      goldAnswer: 'run',
+      prediction: 'running',
     })
 
     expect(score).toBe(1)

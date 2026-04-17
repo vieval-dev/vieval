@@ -14,9 +14,12 @@
     "test:run": "vitest run --config ./vitest.config.ts",
     "eval:run": "vieval compare --config ./vieval.config.ts --comparison agent-memory-semantic-approaches",
     "eval:run:mem9": "vieval run --config ./eval/test-objects/mem9/vieval.config.ts --project locomo-mem9",
-    "eval:run:lobehub": "vieval run --config ./eval/test-objects/lobehub/vieval.config.ts --project locomo-lobehub"
+    "eval:run:lobehub": "vieval run --config ./eval/test-objects/lobehub/vieval.config.ts --project locomo-lobehub",
+    "locomo:run:snap-live-qa": "tsx ./eval/cases/locomo/src/cases/run-snap-live-qa.ts"
   },
   "dependencies": {
+    "@xsai-ext/providers": "catalog:",
+    "@xsai/generate-text": "catalog:",
     "vieval": "workspace:*"
   }
 }

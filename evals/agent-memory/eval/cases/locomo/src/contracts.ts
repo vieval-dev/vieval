@@ -1,4 +1,4 @@
-import type { LoCoMoCategory } from './types'
+import type { LoCoMoCategory } from './types.ts'
 
 export interface LoCoMoRetrieverAdapter {
   id: string
@@ -15,9 +15,12 @@ export interface LoCoMoRetrieverAdapter {
 export interface LoCoMoAnswerGeneratorAdapter {
   id: string
   generateAnswer: (input: {
+    caseId: string
     category: LoCoMoCategory
     contextText: string
+    goldAnswer: string
     question: string
+    sampleId: string
   }) => Promise<string>
 }
 

@@ -1,7 +1,14 @@
+import { stemEnglishPorter } from './porter-stemmer.ts'
+
 const ARTICLES = new Set(['a', 'an', 'and', 'the'])
 
 /**
  * Normalizes answer text before token-level F1 scoring.
+ *
+ * Python parity:
+ * - Equivalent to `normalize_answer` in
+ *   `snap-research/locomo/task_eval/evaluation.py:75-92`
+ *   followed by stemming in `evaluation.py:127-128`.
  *
  * Before:
  * - "The, Big Apple!"
@@ -15,11 +22,16 @@ export function normalizeLoCoMoAnswer(value: string): string {
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
     .filter(token => token.length > 0 && !ARTICLES.has(token))
+    .map(token => stemEnglishPorter(token))
     .join(' ')
 }
 
 /**
  * Computes token-level F1 for two LoCoMo answer strings.
+ *
+ * Python parity:
+ * - Equivalent to `f1_score` in
+ *   `snap-research/locomo/task_eval/evaluation.py:126-138`.
  */
 export function tokenF1(prediction: string, groundTruth: string): number {
   const predictionTokens = normalizeLoCoMoAnswer(prediction).split(' ').filter(Boolean)
@@ -28,7 +40,6 @@ export function tokenF1(prediction: string, groundTruth: string): number {
   if (predictionTokens.length === 0 && goldTokens.length === 0) {
     return 1
   }
-
   if (predictionTokens.length === 0 || goldTokens.length === 0) {
     return 0
   }

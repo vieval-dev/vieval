@@ -1,0 +1,15 @@
+[
+  {
+    "sample_id": "conv-26",
+    "qa": [
+      {
+        "question": "When did Caroline go to the LGBTQ support group?",
+        "answer": "7 May 2023",
+        "evidence": [
+          "D1:3"
+        ],
+        "category": 2
+      }
+    ]
+  }
+]

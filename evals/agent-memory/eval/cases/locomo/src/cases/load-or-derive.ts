@@ -1,8 +1,8 @@
 import type { TaskRunContext } from 'vieval/config'
 
-import type { LoCoMoCase } from '../types'
+import type { LoCoMoCase } from '../types.ts'
 
-import { createLoCoMoCaseCacheKey } from './cache-keys'
+import { createLoCoMoCaseCacheKey } from './cache-keys.ts'
 
 /**
  * Loads LoCoMo cases from deterministic cache or derives and writes them once.

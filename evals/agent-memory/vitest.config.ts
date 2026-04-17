@@ -7,5 +7,8 @@ export default defineConfig({
       'eval/cases/**/*.test.ts',
       'eval/test-objects/**/*.test.ts',
     ],
+    setupFiles: [
+      'eval/test-setup/load-env.ts',
+    ],
   },
 })
