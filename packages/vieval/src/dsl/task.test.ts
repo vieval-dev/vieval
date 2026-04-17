@@ -305,4 +305,103 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     expect(runResult?.scores[0]?.score).toBe(1)
   })
+
+  it('supports custom exact/judge scores while keeping describeTask case semantics', async () => {
+    const taskDefinition = describeTask('dsl-custom-scores', () => {
+      caseOf('case-1', (context) => {
+        context.score(0.8)
+        context.score(0.6, 'judge')
+      }, {})
+
+      caseOf('case-2', (context) => {
+        context.score(0.2)
+        context.score(0.4, 'judge')
+      }, {})
+    })
+
+    const runResult = await taskDefinition.task?.run({
+      cache: createTestTaskCacheRuntime(),
+      model: () => ({
+        aliases: [],
+        id: 'openai:gpt-4.1-mini',
+        inferenceExecutor: 'openai',
+        inferenceExecutorId: 'openai',
+        model: 'gpt-4.1-mini',
+      }),
+      task: {
+        entry: {
+          description: 'd',
+          directory: 'x',
+          filePath: '/tmp/x.eval.ts',
+          id: 'x',
+          name: 'x',
+        },
+        id: 'x',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: {
+          eval: { rubric: 'strict' },
+          meta: { evalRowId: 'rubric=strict', runRowId: 'model=gpt-4.1-mini' },
+          run: { model: 'gpt-4.1-mini' },
+        },
+      },
+    })
+
+    expect(runResult?.scores).toEqual([
+      { kind: 'exact', score: 0.5 },
+      { kind: 'judge', score: 0.5 },
+    ])
+  })
+
+  it('emits task.case.metric events from case contexts', async () => {
+    const events: Array<{ caseId?: string, data?: unknown, event: string }> = []
+
+    const taskDefinition = describeTask('dsl-case-metrics', () => {
+      caseOf('case-1', (context) => {
+        context.metric('overallAverageScore', 0.77)
+      }, {})
+    })
+
+    await taskDefinition.task?.run({
+      cache: createTestTaskCacheRuntime(),
+      model: () => ({
+        aliases: [],
+        id: 'openai:gpt-4.1-mini',
+        inferenceExecutor: 'openai',
+        inferenceExecutorId: 'openai',
+        model: 'gpt-4.1-mini',
+      }),
+      reporterHooks: {
+        onEvent(payload) {
+          events.push(payload)
+        },
+      },
+      task: {
+        entry: {
+          description: 'd',
+          directory: 'x',
+          filePath: '/tmp/x.eval.ts',
+          id: 'x',
+          name: 'x',
+        },
+        id: 'x',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: {
+          eval: { rubric: 'strict' },
+          meta: { evalRowId: 'rubric=strict', runRowId: 'model=gpt-4.1-mini' },
+          run: { model: 'gpt-4.1-mini' },
+        },
+      },
+    })
+
+    expect(events).toEqual([
+      {
+        caseId: '0:case-1',
+        data: {
+          name: 'overallAverageScore',
+          value: 0.77,
+        },
+        event: 'task.case.metric',
+      },
+    ])
+  })
 })

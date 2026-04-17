@@ -1,4 +1,5 @@
 import type { TaskRunContext, TaskRunOutput } from '../config'
+import type { RunScoreKind } from '../core/runner'
 
 import { defineEval, defineTask } from '../config'
 import { registerEvalDefinition } from './registry'
@@ -11,6 +12,27 @@ export interface CaseRunContext<TInput> extends TaskRunContext {
    * Case-scoped matrix payload.
    */
   matrix: TaskRunContext['task']['matrix'] & { inputs: TInput }
+  /**
+   * Overrides one case score family with a custom normalized value.
+   *
+   * Use when:
+   * - one case computes a benchmark-native score that should flow into run aggregation
+   *
+   * Expects:
+   * - `score` to stay in the `0..1` range
+   */
+  score: (score: number, kind?: RunScoreKind) => void
+  /**
+   * Emits one custom case metric into report events.
+   *
+   * Use when:
+   * - tasks need structured benchmark metadata beyond exact/judge score families
+   *
+   * Expects:
+   * - `name` to be a stable metric identifier
+   * - `value` to be JSON-serializable
+   */
+  metric: (name: string, value: boolean | number | string | null) => void
 }
 
 /**
@@ -35,6 +57,16 @@ function cloneCaseMatrix(matrix: TaskRunContext['task']['matrix']): TaskRunConte
     run: {
       ...matrix.run,
     },
+  }
+}
+
+function createTaskCaseReporterId(index: number, name: string): string {
+  return `${index}:${encodeURIComponent(name)}`
+}
+
+function assertValidScore(score: number): void {
+  if (!Number.isFinite(score) || score < 0 || score > 1) {
+    throw new Error(`Case score must be a finite number in range 0..1, got "${score}".`)
   }
 }
 
@@ -213,7 +245,12 @@ export function describeTask(
 
         const totalCases = registeredCases.length
 
-        const caseScores: number[] = await Promise.all(
+        const scoreBucketsByKind: Record<RunScoreKind, number[]> = {
+          exact: [],
+          judge: [],
+        }
+
+        await Promise.all(
           registeredCases.map(async (taskCase, index) => {
             emitCaseStart(context.reporterHooks, {
               index,
@@ -222,6 +259,8 @@ export function describeTask(
             })
 
             let state: 'passed' | 'failed' = 'passed'
+            const caseId = createTaskCaseReporterId(index, taskCase.name)
+            const customScoresByKind = new Map<RunScoreKind, number>()
 
             try {
               await taskCase.run({
@@ -229,6 +268,20 @@ export function describeTask(
                 matrix: {
                   ...cloneCaseMatrix(context.task.matrix),
                   inputs: taskCase.input,
+                },
+                metric(name, value) {
+                  context.reporterHooks?.onEvent?.({
+                    caseId,
+                    data: {
+                      name,
+                      value,
+                    },
+                    event: 'task.case.metric',
+                  })
+                },
+                score(score, kind = 'exact') {
+                  assertValidScore(score)
+                  customScoresByKind.set(kind, score)
                 },
               })
             }
@@ -244,14 +297,37 @@ export function describeTask(
               })
             }
 
-            return state === 'passed' ? 1 : 0
+            if (state === 'failed') {
+              scoreBucketsByKind.exact.push(0)
+              return
+            }
+
+            if (customScoresByKind.size === 0) {
+              scoreBucketsByKind.exact.push(1)
+              return
+            }
+
+            scoreBucketsByKind.exact.push(customScoresByKind.get('exact') ?? 1)
+            const judgeScore = customScoresByKind.get('judge')
+            if (judgeScore != null) {
+              scoreBucketsByKind.judge.push(judgeScore)
+            }
           }),
         )
 
-        const averageScore = caseScores.reduce((sum, score) => sum + score, 0) / caseScores.length
+        const scores = (Object.keys(scoreBucketsByKind) as RunScoreKind[])
+          .filter(kind => scoreBucketsByKind[kind].length > 0)
+          .map((kind) => {
+            const values = scoreBucketsByKind[kind]
+            const total = values.reduce((sum, value) => sum + value, 0)
+            return {
+              kind,
+              score: total / values.length,
+            }
+          })
 
         return {
-          scores: [{ kind: 'exact', score: averageScore }],
+          scores,
         }
       },
     }),

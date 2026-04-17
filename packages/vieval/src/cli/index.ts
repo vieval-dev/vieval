@@ -3,6 +3,7 @@
 import path from 'node:path'
 import process from 'node:process'
 
+import { realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 import meow from 'meow'
@@ -128,7 +129,22 @@ function isDirectExecution(): boolean {
     return false
   }
 
-  return path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+  const resolvedArgvPath = path.resolve(process.argv[1])
+  const currentModulePath = fileURLToPath(import.meta.url)
+
+  try {
+    if (realpathSync.native(resolvedArgvPath) === realpathSync.native(currentModulePath)) {
+      return true
+    }
+  }
+  catch {
+    if (resolvedArgvPath === currentModulePath) {
+      return true
+    }
+  }
+
+  const normalizedArgvPath = resolvedArgvPath.replaceAll('\\', '/')
+  return normalizedArgvPath.endsWith('/.bin/vieval')
 }
 
 async function main(): Promise<void> {
