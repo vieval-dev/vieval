@@ -2,6 +2,7 @@ import type { ConfigHookPlugin, MatrixDefinition, MatrixLayer, TaskRunContext } 
 import type { ModelDefinition } from '../config/models'
 import type { RunResult, TaskExecutionContext } from '../core/runner'
 import type { InferenceExecutor, ScheduledTask } from '../core/runner/schedule'
+import type { VievalVitestCompatReporterReference } from './reporters/vitest-compat-reporter'
 
 import process from 'node:process'
 
@@ -83,6 +84,15 @@ export interface CliProjectConfig {
    * Optional project-local plugins.
    */
   plugins?: CliConfigPlugin[]
+  /**
+   * Optional vitest-compatible reporter modules.
+   *
+   * Use when:
+   * - project runs should emit additional reporter callbacks using Vitest-style lifecycle names
+   *
+   * @default []
+   */
+  reporters?: VievalVitestCompatReporterReference[]
 }
 
 /**
@@ -193,6 +203,12 @@ interface CliConfigBase {
    */
   plugins?: CliConfigPlugin[]
   /**
+   * Global vitest-compatible reporter modules inherited by projects.
+   *
+   * @default []
+   */
+  reporters?: VievalVitestCompatReporterReference[]
+  /**
    * Environment variables injected into `process.env` during `vieval run`.
    *
    * Use when:
@@ -266,6 +282,7 @@ export interface NormalizedCliProjectConfig {
   name: string
   inferenceExecutors: InferenceExecutor[]
   root: string
+  reporters: VievalVitestCompatReporterReference[]
 }
 
 /**
@@ -496,6 +513,7 @@ function normalizeProjectConfig(
   project: CliProjectConfig,
   cwd: string,
   inheritedModels: readonly ModelDefinition[],
+  inheritedReporterReferences: readonly VievalVitestCompatReporterReference[],
 ): NormalizedCliProjectConfig {
   const include = project.include ?? [
     '**/*.eval.ts',
@@ -519,6 +537,7 @@ function normalizeProjectConfig(
   const root = project.root == null
     ? cwd
     : (isAbsolute(project.root) ? project.root : resolve(cwd, project.root))
+  const reporters = project.reporters ?? [...inheritedReporterReferences]
 
   return {
     exclude,
@@ -528,6 +547,7 @@ function normalizeProjectConfig(
     models,
     name: project.name,
     inferenceExecutors,
+    reporters,
     runMatrix: normalizeMatrixLayerInput(project.runMatrix),
     root,
   }
@@ -546,7 +566,9 @@ function normalizeConfig(config: CliConfig | null | undefined, cwd: string): Nor
 
   const projects = config?.projects ?? [{ name: 'default' }]
   const inheritedModels = config?.models ?? []
-  return projects.map(project => normalizeProjectConfig(project, cwd, inheritedModels))
+  const inheritedReporterReferences = config?.reporters ?? []
+
+  return projects.map(project => normalizeProjectConfig(project, cwd, inheritedModels, inheritedReporterReferences))
 }
 
 /**

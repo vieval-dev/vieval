@@ -143,6 +143,38 @@ describe('loadVievalCliConfig', () => {
     })
   })
 
+  it('inherits global reporter references and allows project overrides', async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-cli-config-'))
+    temporaryDirectories.push(temporaryDirectory)
+
+    const configFilePath = join(temporaryDirectory, 'vieval.config.json')
+    await writeFile(
+      configFilePath,
+      JSON.stringify({
+        projects: [
+          {
+            name: 'inherits-reporters',
+          },
+          {
+            name: 'overrides-reporters',
+            reporters: ['./custom-reporter.js'],
+          },
+        ],
+        reporters: [['./global-reporter.js', { verbose: true }]],
+      }),
+      'utf-8',
+    )
+
+    const loaded = await loadVievalCliConfig({
+      cwd: temporaryDirectory,
+    })
+
+    expect(loaded.projects[0]?.reporters).toEqual([
+      ['./global-reporter.js', { verbose: true }],
+    ])
+    expect(loaded.projects[1]?.reporters).toEqual(['./custom-reporter.js'])
+  })
+
   it('normalizes flat runMatrix shorthand to a layered extend object', async () => {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-cli-config-'))
     temporaryDirectories.push(temporaryDirectory)

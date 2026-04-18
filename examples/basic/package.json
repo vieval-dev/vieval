@@ -1,0 +1,10 @@
+{
+  "name": "example-basic",
+  "type": "module",
+  "private": true,
+  "description": "Examples of vieval, basic",
+  "scripts": {},
+  "devDependencies": {
+    "vieval": "workspace:^"
+  }
+}

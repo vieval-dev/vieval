@@ -53,7 +53,8 @@
   },
   "workspaces": [
     "packages/**",
-    "evals/**"
+    "evals/**",
+    "examples/**"
   ],
   "simple-git-hooks": {
     "pre-commit": "pnpm nano-staged"

@@ -216,6 +216,12 @@ importers:
         specifier: workspace:*
         version: link:../../packages/vieval
 
+  examples/basic:
+    devDependencies:
+      vieval:
+        specifier: workspace:^
+        version: link:../../packages/vieval
+
   packages/vieval:
     dependencies:
       '@moeru/std':
@@ -224,6 +230,9 @@ importers:
       '@pnpm/find-workspace-dir':
         specifier: 'catalog:'
         version: 1000.1.5
+      '@vitest/runner':
+        specifier: ^4.1.4
+        version: 4.1.4
       '@xsai-ext/providers':
         specifier: 'catalog:'
         version: 0.5.0-beta.2
@@ -251,13 +260,13 @@ importers:
       vite:
         specifier: 'catalog:'
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3)
+      vitest:
+        specifier: catalog:vitest
+        version: 4.1.4(@types/node@25.6.0)(@vitest/coverage-v8@4.1.4)(vite@8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
     devDependencies:
       typescript:
         specifier: 'catalog:'
         version: 6.0.2
-      vitest:
-        specifier: catalog:vitest
-        version: 4.1.4(@types/node@25.6.0)(@vitest/coverage-v8@4.1.4)(vite@8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
 
 packages:
 

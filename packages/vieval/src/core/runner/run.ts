@@ -4,6 +4,7 @@ import type { ScheduledTask } from './schedule'
 import type { TaskExecutionContext } from './task-context'
 
 import { errorMessageFrom } from '@moeru/std'
+import { limitConcurrency } from '@vitest/runner/utils'
 
 import { aggregateRunResults } from './aggregate'
 
@@ -75,6 +76,12 @@ export interface RunScheduledTasksOptions {
    * - failed-task observers do not override the executor error for the task
    */
   onTaskEnd?: (task: ScheduledTask, state: RunnerTaskState) => void
+  /**
+   * Maximum number of tasks to execute concurrently.
+   *
+   * @default 1
+   */
+  maxConcurrency?: number
 }
 
 function createDefaultExecutionContext(task: ScheduledTask): TaskExecutionContext {
@@ -159,9 +166,7 @@ export async function runScheduledTasks(
     return aggregateRunResults([])
   }
 
-  const results: RunResult[] = []
-
-  for (const task of tasks) {
+  async function executeScheduledTask(task: ScheduledTask): Promise<RunResult> {
     let executionContext: TaskExecutionContext
 
     try {
@@ -178,8 +183,9 @@ export async function runScheduledTasks(
       throw createRunnerExecutionError(task.id, error)
     }
 
+    let runResult: RunResult
     try {
-      results.push(await executor(task, executionContext))
+      runResult = await executor(task, executionContext)
     }
     catch (error) {
       try {
@@ -197,7 +203,28 @@ export async function runScheduledTasks(
     catch (error) {
       throw createRunnerExecutionError(task.id, error)
     }
+
+    return runResult
   }
 
-  return aggregateRunResults(results)
+  const maxConcurrency = options.maxConcurrency ?? 1
+  if (maxConcurrency <= 1) {
+    const results: RunResult[] = []
+    for (const task of tasks) {
+      results.push(await executeScheduledTask(task))
+    }
+    return aggregateRunResults(results)
+  }
+
+  const runWithLimit = limitConcurrency(maxConcurrency)
+  const resultPairs = await Promise.all(tasks.map(async (task, index) => {
+    const result = await runWithLimit(async () => executeScheduledTask(task))
+    return { index, result }
+  }))
+
+  const sortedResults = resultPairs
+    .sort((left, right) => left.index - right.index)
+    .map(item => item.result)
+
+  return aggregateRunResults(sortedResults)
 }

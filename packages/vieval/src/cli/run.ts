@@ -1,26 +1,27 @@
-import type { EvalDefinition, EvalModuleMap, TaskCaseReporterEndPayload, TaskCaseReporterPayload, TaskReporterEventPayload, TaskReporterHooks } from '../config'
+import type { TaskCaseReporterEndPayload, TaskCaseReporterPayload, TaskReporterEventPayload, TaskReporterHooks } from '../config'
 import type { AggregatedRunResults, ScheduledTask, ScheduledTaskExecutor, TaskExecutionContext } from '../core/runner'
 import type { CliProjectExecutorContext, LoadVievalCliConfigOptions, NormalizedCliProjectConfig } from './config'
 import type { CliReporter, SummaryReporter, SummaryReporterCaseStartPayload, SummaryReporterTaskQueuedPayload } from './reporters'
 import type { WindowRendererTimer } from './reporters/renderers/windowed-renderer'
+import type { VievalVitestCompatReporterBridge } from './reporters/vitest-compat-reporter'
 
 import process from 'node:process'
 
 import { randomUUID } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
 
 import c from 'tinyrainbow'
 
 import { errorMessageFrom } from '@moeru/std'
 
 import { collectEvalEntries, createFilesystemTaskCacheRuntime, createRunnerRuntimeContext, createRunnerSchedule, createTaskExecutionContext, RunnerExecutionError, runScheduledTasks } from '../core/runner'
-import { beginModuleRegistration, consumeModuleRegistrations, endModuleRegistration } from '../dsl/registry'
 import { loadVievalCliConfig } from './config'
 import { discoverEvalFiles } from './discovery'
+import { loadEvalModulesWithVitestRuntime } from './module-runtime'
 import { createCliReporter } from './reporters'
 import { WindowRenderer } from './reporters/renderers/windowed-renderer'
+import { createVievalVitestCompatReporterBridge } from './reporters/vitest-compat-reporter'
 
 interface PreparedCliProjectExecution {
   discoveredEvalFileCount: number
@@ -268,49 +269,6 @@ function formatDuration(durationMs: number | undefined, colors: CliColorPalette)
   const rounded = Math.round(durationMs)
   const color = rounded > 1_000 ? colors.yellow : colors.green
   return color(` ${rounded}${colors.dim('ms')}`)
-}
-
-async function loadEvalModules(evalFilePaths: readonly string[]): Promise<EvalModuleMap> {
-  const loadedModules: EvalModuleMap = {}
-
-  for (const [moduleIndex, evalFilePath] of evalFilePaths.entries()) {
-    const moduleHref = pathToFileURL(evalFilePath).href
-    const importHref = `${moduleHref}?vieval_load=${Date.now()}_${moduleIndex}`
-    beginModuleRegistration(importHref)
-    try {
-      const moduleValue = await import(importHref)
-      const registeredDefinitions = consumeModuleRegistrations(importHref)
-      const defaultDefinition = (moduleValue as { default?: EvalDefinition }).default
-
-      const definitions = [
-        ...registeredDefinitions,
-        ...(defaultDefinition == null ? [] : [defaultDefinition]),
-      ]
-      const deduplicatedDefinitions = definitions.filter((definition, index) => {
-        const key = `${definition.name}::${definition.description}::${definition.task?.id ?? ''}`
-        return definitions.findIndex(candidate => `${candidate.name}::${candidate.description}::${candidate.task?.id ?? ''}` === key) === index
-      })
-
-      if (deduplicatedDefinitions.length === 0) {
-        continue
-      }
-
-      for (const [definitionIndex, definition] of deduplicatedDefinitions.entries()) {
-        const moduleKey = definitionIndex === 0
-          ? moduleHref
-          : `${moduleHref}#registration-${definitionIndex + 1}`
-
-        loadedModules[moduleKey] = {
-          default: definition,
-        }
-      }
-    }
-    finally {
-      endModuleRegistration()
-    }
-  }
-
-  return loadedModules
 }
 
 function filterProjectsByName(projects: readonly NormalizedCliProjectConfig[], names: readonly string[]): NormalizedCliProjectConfig[] {
@@ -572,6 +530,7 @@ function createTaskReporterHooks(
   projectName: string,
   recordEvent: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void,
   projectCaseCounters?: RunCliProjectCaseCounters,
+  vitestCompatReporter?: VievalVitestCompatReporterBridge | null,
 ): TaskReporterHooks {
   function syncCaseTotal(total: number): void {
     reporter.onTaskQueued({
@@ -605,6 +564,11 @@ function createTaskReporterHooks(
         state: payload.state,
         taskId: task.id,
       })
+      void vitestCompatReporter?.onCaseEnd({
+        caseId,
+        state: payload.state,
+        taskId: task.id,
+      })
     },
     onCaseStart(payload) {
       const caseId = createTaskCaseReporterId(payload)
@@ -612,6 +576,10 @@ function createTaskReporterHooks(
       reporter.onCaseStart({
         caseId,
         caseName: payload.name,
+        taskId: task.id,
+      })
+      void vitestCompatReporter?.onCaseStart({
+        caseId,
         taskId: task.id,
       })
     },
@@ -635,6 +603,7 @@ function createCliTaskExecutionContext(
   projectName: string,
   recordEvent: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void,
   projectCaseCounters: RunCliProjectCaseCounters,
+  vitestCompatReporter?: VievalVitestCompatReporterBridge | null,
 ): CliTaskExecutionContext {
   return {
     ...createTaskExecutionContext({
@@ -646,7 +615,7 @@ function createCliTaskExecutionContext(
       models,
       task,
     }),
-    reporterHooks: createTaskReporterHooks(task, reporter, projectName, recordEvent, projectCaseCounters),
+    reporterHooks: createTaskReporterHooks(task, reporter, projectName, recordEvent, projectCaseCounters, vitestCompatReporter),
   }
 }
 
@@ -657,8 +626,9 @@ function resolveTaskReporterHooks(
   projectName: string,
   recordEvent: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void,
   projectCaseCounters: RunCliProjectCaseCounters,
+  vitestCompatReporter?: VievalVitestCompatReporterBridge | null,
 ): TaskReporterHooks {
-  return context.reporterHooks ?? createTaskReporterHooks(task, reporter, projectName, recordEvent, projectCaseCounters)
+  return context.reporterHooks ?? createTaskReporterHooks(task, reporter, projectName, recordEvent, projectCaseCounters, vitestCompatReporter)
 }
 
 function getFailedTaskId(error: unknown): string | null {
@@ -674,6 +644,7 @@ function createAutoTaskExecutor(
   projectName: string,
   recordEvent: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void,
   projectCaseCounters: RunCliProjectCaseCounters,
+  vitestCompatReporter?: VievalVitestCompatReporterBridge | null,
 ): ScheduledTaskExecutor {
   return async (task, context) => {
     const taskDefinition = task.entry.task
@@ -684,7 +655,7 @@ function createAutoTaskExecutor(
     const output = await taskDefinition.run({
       cache: context.cache,
       model: context.model,
-      reporterHooks: resolveTaskReporterHooks(task, context, reporter, projectName, recordEvent, projectCaseCounters),
+      reporterHooks: resolveTaskReporterHooks(task, context, reporter, projectName, recordEvent, projectCaseCounters, vitestCompatReporter),
       task,
     })
 
@@ -750,7 +721,7 @@ async function prepareProject(project: NormalizedCliProjectConfig): Promise<Prep
       include: project.include,
       root: project.root,
     })
-    const modules = await loadEvalModules(evalFilePaths)
+    const modules = await loadEvalModulesWithVitestRuntime(evalFilePaths, project.root)
     const entries = collectEvalEntries(modules, runtimeContext)
     const tasks = createRunnerSchedule({
       evalMatrix: project.evalMatrix,
@@ -827,11 +798,16 @@ async function executePreparedProject(
     seenCaseIds: new Set<string>(),
     skipped: 0,
   }
+  const vitestCompatReporter = await createVievalVitestCompatReporterBridge({
+    projectName: prepared.name,
+    references: prepared.project.reporters,
+  })
   const rawTaskExecutor = prepared.project.executor ?? createAutoTaskExecutor(
     reporter,
     prepared.name,
     recordEvent,
     projectCaseCounters,
+    vitestCompatReporter,
   )
   const taskExecutor: ScheduledTaskExecutor = async (task, context) => {
     const result = await rawTaskExecutor(task, context)
@@ -841,6 +817,14 @@ async function executePreparedProject(
       matrix: cloneScheduledTaskMatrix(task),
     }
   }
+
+  for (const task of prepared.tasks) {
+    await vitestCompatReporter?.onTaskQueued({
+      taskId: task.id,
+    })
+  }
+
+  await vitestCompatReporter?.onRunStart()
 
   try {
     const aggregated = await runScheduledTasks(prepared.tasks, taskExecutor, {
@@ -855,11 +839,16 @@ async function executePreparedProject(
           prepared.name,
           recordEvent,
           projectCaseCounters,
+          vitestCompatReporter,
         )
       },
       onTaskEnd(task, state): void {
         settledTaskIds.add(task.id)
         reporter.onTaskEnd({
+          state,
+          taskId: task.id,
+        })
+        void vitestCompatReporter?.onTaskEnd({
           state,
           taskId: task.id,
         })
@@ -875,7 +864,14 @@ async function executePreparedProject(
         reporter.onTaskStart({
           taskId: task.id,
         })
+        void vitestCompatReporter?.onTaskStart({
+          taskId: task.id,
+        })
       },
+    })
+
+    await vitestCompatReporter?.onRunEnd({
+      failed: false,
     })
 
     return {
@@ -906,6 +902,10 @@ async function executePreparedProject(
         state: 'failed',
         taskId: failedTaskId,
       })
+      await vitestCompatReporter?.onTaskEnd({
+        state: 'failed',
+        taskId: failedTaskId,
+      })
     }
 
     for (const task of prepared.tasks) {
@@ -919,7 +919,15 @@ async function executePreparedProject(
         state: 'skipped',
         taskId: task.id,
       })
+      await vitestCompatReporter?.onTaskEnd({
+        state: 'skipped',
+        taskId: task.id,
+      })
     }
+
+    await vitestCompatReporter?.onRunEnd({
+      failed: true,
+    })
 
     return {
       caseSummary: {

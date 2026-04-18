@@ -36,6 +36,13 @@ function createScheduledTask() {
   } as const
 }
 
+function createScheduledTaskWithId(taskId: string) {
+  return {
+    ...createScheduledTask(),
+    id: taskId,
+  } as const
+}
+
 function createSuccessfulRunResult(task: ScheduledTask): RunResult {
   return {
     entryId: task.entry.id,
@@ -212,5 +219,31 @@ describe('runScheduledTasks', () => {
       'executor',
       'end:task-1:failed',
     ])
+  })
+
+  it('supports parallel execution when maxConcurrency is greater than one', async () => {
+    const taskA = createScheduledTaskWithId('task-a')
+    const taskB = createScheduledTaskWithId('task-b')
+    const callOrder: string[] = []
+    const finishOrder: string[] = []
+
+    const executor: ScheduledTaskExecutor = vi.fn(async (task) => {
+      callOrder.push(task.id)
+      if (task.id === 'task-a') {
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+      finishOrder.push(task.id)
+      return createSuccessfulRunResult(task)
+    })
+
+    const result = await runScheduledTasks([taskA, taskB], executor, {
+      maxConcurrency: 2,
+    })
+
+    expect(callOrder).toEqual(['task-a', 'task-b'])
+    expect(finishOrder).toEqual(['task-b', 'task-a'])
+    expect(result.overall.runCount).toBe(2)
+    expect(result.runs[0]?.id).toBe('task-a')
+    expect(result.runs[1]?.id).toBe('task-b')
   })
 })

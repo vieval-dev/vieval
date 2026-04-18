@@ -71,6 +71,7 @@
   "dependencies": {
     "@moeru/std": "catalog:",
     "@pnpm/find-workspace-dir": "catalog:",
+    "@vitest/runner": "catalog:",
     "@xsai-ext/providers": "catalog:",
     "@xsai/generate-text": "catalog:",
     "c12": "catalog:",
@@ -79,10 +80,10 @@
     "meow": "catalog:",
     "tinyglobby": "catalog:",
     "tinyrainbow": "catalog:",
-    "vite": "catalog:"
+    "vite": "catalog:",
+    "vitest": "catalog:vitest"
   },
   "devDependencies": {
-    "typescript": "catalog:",
-    "vitest": "catalog:vitest"
+    "typescript": "catalog:"
   }
 }
