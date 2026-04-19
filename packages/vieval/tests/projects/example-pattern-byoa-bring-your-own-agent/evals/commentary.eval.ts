@@ -6,7 +6,9 @@ describeTask('commentary', () => {
     const score = await runMinimalAgent(task)
     expect(score).toBe(1)
   }, {
-    kind: 'commentary',
+    input: {
+      kind: 'commentary',
+    },
   })
 }, {
   description: 'Fixture eval for commentary behavior.',

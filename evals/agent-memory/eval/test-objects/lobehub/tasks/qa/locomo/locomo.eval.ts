@@ -53,5 +53,5 @@ describeTask('locomo-lobehub', () => {
       context.metric(`locomo.byCategory.${category}.averageScore`, categorySummary.averageScore)
       context.metric(`locomo.byCategory.${category}.count`, categorySummary.count)
     }
-  }, {})
+  })
 })

@@ -32,7 +32,9 @@ import { caseOf, describeTask } from '${vievalImportPath}'
 
 describeTask('live-task', () => {
   caseOf('live-case', () => {}, {
-    source: 'live-case',
+    input: {
+      source: 'live-case',
+    },
   })
 })
 `,
@@ -180,7 +182,7 @@ describeTask('cache-runtime-task', () => {
     if (loaded.ok !== true) {
       throw new Error('cache-runtime-read-failed')
     }
-  }, undefined)
+  })
 })
 `,
       },
@@ -286,7 +288,7 @@ describeTask('custom-telemetry-task', () => {
       },
       event: 'InferenceResponse',
     })
-  }, undefined)
+  })
 })
 `,
       },
@@ -750,7 +752,9 @@ import { caseOf, describeTask } from '${vievalImportPath}'
 
 describeTask('custom-live-task', () => {
   caseOf('custom-case', () => {}, {
-    source: 'custom-case',
+    input: {
+      source: 'custom-case',
+    },
   })
 })
 `,
@@ -852,7 +856,9 @@ import { caseOf, describeTask } from '${vievalImportPath}'
 
 describeTask('first-task', () => {
   caseOf('first-case', () => {}, {
-    source: 'first-case',
+    input: {
+      source: 'first-case',
+    },
   })
 })
 `,
@@ -861,7 +867,9 @@ import { caseOf, describeTask } from '${vievalImportPath}'
 
 describeTask('second-task', () => {
   caseOf('second-case', () => {}, {
-    source: 'second-case',
+    input: {
+      source: 'second-case',
+    },
   })
 })
 `,
@@ -970,7 +978,9 @@ import { caseOf, describeTask } from '${vievalImportPath}'
 
 describeTask('observer-task', () => {
   caseOf('observer-case', () => {}, {
-    source: 'observer-case',
+    input: {
+      source: 'observer-case',
+    },
   })
 })
 `,
@@ -1085,7 +1095,9 @@ import { caseOf, describeTask } from '${vievalImportPath}'
 
 describeTask('exec-task', () => {
   caseOf('exec-case', () => {}, {
-    source: 'exec-case',
+    input: {
+      source: 'exec-case',
+    },
   })
 })
 `,
@@ -1098,7 +1110,9 @@ import { caseOf, describeTask } from '${vievalImportPath}'
 
 describeTask('skipped-task', () => {
   caseOf('skipped-case', () => {}, {
-    source: 'skipped-case',
+    input: {
+      source: 'skipped-case',
+    },
   })
 })
 `,

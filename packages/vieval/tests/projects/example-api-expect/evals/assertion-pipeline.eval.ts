@@ -21,5 +21,5 @@ describeTask('assertion-pipeline', () => {
     const structuredOutput = { move: 'Nf3' }
     expect(typeof structuredOutput.move).toBe('string')
     expect(structuredOutput.move.length).toBeGreaterThan(0)
-  }, undefined)
+  })
 })

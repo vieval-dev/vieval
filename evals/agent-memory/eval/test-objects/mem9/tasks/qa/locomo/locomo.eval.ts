@@ -56,5 +56,5 @@ describeTask('locomo-mem9', () => {
       context.metric(`locomo.byCategory.${category}.averageScore`, categorySummary.averageScore)
       context.metric(`locomo.byCategory.${category}.count`, categorySummary.count)
     }
-  }, {})
+  })
 })

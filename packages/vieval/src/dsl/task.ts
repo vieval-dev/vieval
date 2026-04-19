@@ -110,7 +110,10 @@ export interface DescribeTaskBuilder {
   /**
    * Registers one explicit case.
    */
-  caseOf: <TInput>(name: string, run: CaseRunner<TInput>, input: TInput) => void
+  caseOf: {
+    (name: string, run: CaseRunner<undefined>): void
+    <TInput>(name: string, run: CaseRunner<TInput>, options: { input: TInput }): void
+  }
   /**
    * Registers multiple cases from input list.
    */
@@ -132,14 +135,22 @@ export interface DescribeTaskOptions {
 }
 
 function createCaseBuilder(registeredCases: RegisteredCase<unknown>[]): DescribeTaskBuilder {
+  function registerCase(name: string, run: CaseRunner<undefined>): void
+  function registerCase<TInput>(name: string, run: CaseRunner<TInput>, options: { input: TInput }): void
+  function registerCase<TInput>(
+    name: string,
+    run: CaseRunner<TInput> | CaseRunner<undefined>,
+    options?: { input: TInput },
+  ): void {
+    registeredCases.push({
+      input: options?.input,
+      name,
+      run: run as CaseRunner<unknown>,
+    })
+  }
+
   return {
-    caseOf(name, run, input) {
-      registeredCases.push({
-        input,
-        name,
-        run: run as CaseRunner<unknown>,
-      })
-    },
+    caseOf: registerCase,
     casesFromInputs(namePrefix, inputs, run) {
       inputs.forEach((input, index) => {
         registeredCases.push({
@@ -177,13 +188,24 @@ function getActiveCases(): RegisteredCase<unknown>[] {
 /**
  * Registers one case in the currently active task scope.
  */
+export function caseOf(
+  name: string,
+  run: CaseRunner<undefined>,
+): void
+
 export function caseOf<TInput>(
   name: string,
   run: CaseRunner<TInput>,
-  input: TInput,
+  options: { input: TInput },
+): void
+
+export function caseOf<TInput>(
+  name: string,
+  run: CaseRunner<TInput> | CaseRunner<undefined>,
+  options?: { input: TInput },
 ): void {
   getActiveCases().push({
-    input,
+    input: options?.input,
     name,
     run: run as CaseRunner<unknown>,
   })

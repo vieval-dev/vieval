@@ -5,6 +5,8 @@ describeTask('task-registration-only', () => {
     const currentModel = task.model()
     expect(currentModel.id.length).toBeGreaterThan(0)
   }, {
-    source: 'registration-only',
+    input: {
+      source: 'registration-only',
+    },
   })
 })

@@ -6,7 +6,9 @@ describeTask('tactics', () => {
     const score = await runMinimalAgent(task)
     expect(score).toBe(1)
   }, {
-    kind: 'tactics',
+    input: {
+      kind: 'tactics',
+    },
   })
 }, {
   description: 'Fixture eval for tactical behavior.',

@@ -10,6 +10,8 @@ describeTask('prompt-language-ablation', () => {
     expect(scenario).toBeDefined()
     expect(selectedModel.id.length).toBeGreaterThan(0)
   }, {
-    prompt: 'summarize the position in one sentence',
+    input: {
+      prompt: 'summarize the position in one sentence',
+    },
   })
 })

@@ -46,7 +46,7 @@ import { caseOf, describeEval, expect } from 'vieval'
 export default describeEval('smoke', () => {
   caseOf('2 + 2 = 4', () => {
     expect(2 + 2).toBe(4)
-  }, {})
+  })
 })
 ```
 

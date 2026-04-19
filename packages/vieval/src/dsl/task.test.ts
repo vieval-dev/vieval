@@ -39,7 +39,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
     const taskDefinition = describeTask('dsl-top-level', () => {
       caseOf('case-1', async (task) => {
         expect(task.matrix.inputs).toEqual({ text: 'hello' })
-      }, { text: 'hello' })
+      }, { input: { text: 'hello' } })
     })
 
     const runResult = await taskDefinition.task?.run({
@@ -74,7 +74,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
     const taskDefinition = describeEval('dsl-builder', (task) => {
       task.caseOf('case-a', async (context) => {
         expect(context.matrix.inputs).toBe('a')
-      }, 'a')
+      }, { input: 'a' })
       task.casesFromInputs('bulk', ['b', 'c'], async (context) => {
         expect(['b', 'c']).toContain(context.matrix.inputs)
       })
@@ -118,11 +118,11 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
         await new Promise<void>((resolve) => {
           resolveFirstCase = resolve
         })
-      }, 'pass-later')
+      }, { input: 'pass-later' })
 
       caseOf('case-2', async () => {
         throw new Error('boom')
-      }, 'fail-fast')
+      }, { input: 'fail-fast' })
     })
 
     const runPromise = taskDefinition.task?.run({
@@ -185,7 +185,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
           ...createScheduledTaskMatrix(),
           inputs: { prompt: 'hello' },
         })
-      }, { prompt: 'hello' })
+      }, { input: { prompt: 'hello' } })
     })
 
     const runResult = await taskDefinition.task?.run({
@@ -222,7 +222,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
         context.matrix.run.model = 'mutated-model'
         context.matrix.eval.rubric = 'mutated-rubric'
         context.matrix.meta.runRowId = 'mutated-row-id'
-      }, 'first')
+      }, { input: 'first' })
 
       caseOf('case-2', (context) => {
         expect(context.task.matrix).toEqual(createScheduledTaskMatrix())
@@ -230,7 +230,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
           ...createScheduledTaskMatrix(),
           inputs: 'second',
         })
-      }, 'second')
+      }, { input: 'second' })
     })
 
     const runResult = await taskDefinition.task?.run({
@@ -262,7 +262,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
   })
 
   it('throws when caseOf is called outside describeTask', () => {
-    expect(() => caseOf('oops', async () => {}, {})).toThrow('caseOf/casesFromInputs must be called inside describeTask/describeEval.')
+    expect(() => caseOf('oops', async () => {})).toThrow('caseOf/casesFromInputs must be called inside describeTask/describeEval.')
   })
 
   it('throws when casesFromInputs is called outside describeTask', () => {
@@ -273,7 +273,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
     const taskDefinition = describeTask('dsl-cache-context', () => {
       caseOf('case-1', (context) => {
         expect(typeof context.cache.namespace).toBe('function')
-      }, {})
+      }, { input: {} })
     })
 
     const runResult = await taskDefinition.task?.run({
@@ -311,12 +311,12 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
       caseOf('case-1', (context) => {
         context.score(0.8)
         context.score(0.6, 'judge')
-      }, {})
+      }, { input: {} })
 
       caseOf('case-2', (context) => {
         context.score(0.2)
         context.score(0.4, 'judge')
-      }, {})
+      }, { input: {} })
     })
 
     const runResult = await taskDefinition.task?.run({
@@ -358,7 +358,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
     const taskDefinition = describeTask('dsl-case-metrics', () => {
       caseOf('case-1', (context) => {
         context.metric('overallAverageScore', 0.77)
-      }, {})
+      }, { input: {} })
     })
 
     await taskDefinition.task?.run({
@@ -403,5 +403,77 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
         event: 'task.case.metric',
       },
     ])
+  })
+
+  it('supports caseOf without input by exposing undefined inputs in context', async () => {
+    const taskDefinition = describeTask('dsl-no-input', () => {
+      caseOf('case-1', (context) => {
+        expect(context.matrix.inputs).toBeUndefined()
+      })
+    })
+
+    const runResult = await taskDefinition.task?.run({
+      cache: createTestTaskCacheRuntime(),
+      model: () => ({
+        aliases: [],
+        id: 'openai:gpt-4.1-mini',
+        inferenceExecutor: 'openai',
+        inferenceExecutorId: 'openai',
+        model: 'gpt-4.1-mini',
+      }),
+      task: {
+        entry: {
+          description: 'd',
+          directory: 'x',
+          filePath: '/tmp/x.eval.ts',
+          id: 'x',
+          name: 'x',
+        },
+        id: 'x',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: {
+          eval: { rubric: 'strict' },
+          meta: { evalRowId: 'rubric=strict', runRowId: 'model=gpt-4.1-mini' },
+          run: { model: 'gpt-4.1-mini' },
+        },
+      },
+    })
+
+    expect(runResult?.scores[0]?.score).toBe(1)
+  })
+
+  it('supports builder-form caseOf without input', async () => {
+    const taskDefinition = describeEval('dsl-builder-no-input', (task) => {
+      task.caseOf('case-a', (context) => {
+        expect(context.matrix.inputs).toBeUndefined()
+      })
+    })
+
+    const runResult = await taskDefinition.task?.run({
+      cache: createTestTaskCacheRuntime(),
+      model: () => ({
+        aliases: [],
+        id: 'openai:gpt-4.1-mini',
+        model: 'gpt-4.1-mini',
+        inferenceExecutor: 'openai',
+        inferenceExecutorId: 'openai',
+      }),
+      task: {
+        entry: {
+          description: 'd',
+          directory: 'x',
+          filePath: '/tmp/x.eval.ts',
+          id: 'x',
+          name: 'x',
+        },
+        id: 'x',
+        matrix: createScheduledTaskMatrix(),
+        inferenceExecutor: {
+          id: 'openai:gpt-4.1-mini',
+        },
+      },
+    })
+
+    expect(runResult?.scores[0]?.score).toBe(1)
   })
 })
