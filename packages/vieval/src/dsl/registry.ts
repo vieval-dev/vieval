@@ -1,40 +1,64 @@
 import type { EvalDefinition } from '../config'
 
-const registeredDefinitionsByModule = new Map<string, EvalDefinition[]>()
-let activeModuleHref: string | null = null
+import process from 'node:process'
+
+interface EvalDefinitionRegistryStore {
+  activeModuleHref: string | null
+  registeredDefinitionsByModule: Map<string, EvalDefinition[]>
+}
+
+const registryStoreSymbol = Symbol.for('vieval.dsl.registry.store')
+
+function getRegistryStore(): EvalDefinitionRegistryStore {
+  const processWithStore = process as NodeJS.Process & {
+    [registryStoreSymbol]?: EvalDefinitionRegistryStore
+  }
+
+  processWithStore[registryStoreSymbol] ??= {
+    activeModuleHref: null,
+    registeredDefinitionsByModule: new Map<string, EvalDefinition[]>(),
+  }
+
+  return processWithStore[registryStoreSymbol]
+}
 
 /**
  * Starts module-scoped eval registration collection.
  */
 export function beginModuleRegistration(moduleHref: string): void {
-  activeModuleHref = moduleHref
+  const store = getRegistryStore()
+  store.activeModuleHref = moduleHref
 }
 
 /**
  * Ends module-scoped eval registration collection.
  */
 export function endModuleRegistration(): void {
-  activeModuleHref = null
+  const store = getRegistryStore()
+  store.activeModuleHref = null
 }
 
 /**
  * Registers one eval definition against the currently active module.
  */
 export function registerEvalDefinition(definition: EvalDefinition): void {
-  if (activeModuleHref == null) {
+  const store = getRegistryStore()
+
+  if (store.activeModuleHref == null) {
     return
   }
 
-  const existing = registeredDefinitionsByModule.get(activeModuleHref) ?? []
+  const existing = store.registeredDefinitionsByModule.get(store.activeModuleHref) ?? []
   existing.push(definition)
-  registeredDefinitionsByModule.set(activeModuleHref, existing)
+  store.registeredDefinitionsByModule.set(store.activeModuleHref, existing)
 }
 
 /**
  * Consumes registered definitions for one module and clears stored state.
  */
 export function consumeModuleRegistrations(moduleHref: string): EvalDefinition[] {
-  const definitions = registeredDefinitionsByModule.get(moduleHref) ?? []
-  registeredDefinitionsByModule.delete(moduleHref)
+  const store = getRegistryStore()
+  const definitions = store.registeredDefinitionsByModule.get(moduleHref) ?? []
+  store.registeredDefinitionsByModule.delete(moduleHref)
   return definitions
 }

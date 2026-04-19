@@ -27,6 +27,7 @@ catalog:
   '@vitest/runner': ^4.1.4
   '@xsai-ext/providers': 0.5.0-beta.2
   '@xsai/generate-text': 0.5.0-beta.2
+  '@xsai/providers': ^0.1.0-beta.5
   bumpp: ^11.0.1
   c12: ^4.0.0-beta.4
   es-toolkit: 1.43.0
@@ -52,9 +53,11 @@ catalog:
   unplugin-unused: ^0.5.7
   vite: ^8.0.8
   vite-plugin-inspect: ^11.3.3
+  xsai: ^0.5.0-beta.2
 catalogs:
   vitest:
     '@vitest/coverage-v8': ^4.1.4
+    '@vitest/expect': ^4.1.4
     vitest: ^4.1.4
 ignoredBuiltDependencies:
   - simple-git-hooks # [workaround] postinstall script bundled in simple-git-hooks fails to execute with `enableGlobalVirtualStore: true`. Using local postinstall script to run `npx simple-git-hooks` instead.

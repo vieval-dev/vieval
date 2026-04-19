@@ -164,14 +164,14 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
       { index: 0, name: 'case-1', total: 2 },
       { index: 1, name: 'case-2', total: 2 },
     ])
-    expect(endPayloads).toEqual([{ index: 1, name: 'case-2', state: 'failed', total: 2 }])
+    expect(endPayloads).toEqual([{ errorMessage: 'boom', index: 1, name: 'case-2', state: 'failed', total: 2 }])
 
     resolveFirstCase?.()
 
     const runResult = await runPromise
 
     expect(endPayloads).toEqual([
-      { index: 1, name: 'case-2', state: 'failed', total: 2 },
+      { errorMessage: 'boom', index: 1, name: 'case-2', state: 'failed', total: 2 },
       { index: 0, name: 'case-1', state: 'passed', total: 2 },
     ])
     expect(runResult?.scores[0]?.score).toBe(0.5)

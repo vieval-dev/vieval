@@ -521,6 +521,37 @@ export default defineConfig({
     expect(summary).toContain('matrix run ')
   })
 
+  it('includes failed case error messages in JSON output and terminal summary', async () => {
+    const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
+    const projectDirectory = await createDslProject({
+      evalFiles: {
+        'failed-case.eval.ts': `
+import { caseOf, describeTask, expect } from '${vievalImportPath}'
+
+describeTask('failed-case-task', () => {
+  caseOf('failed-case', () => {
+    expect('left').toBe('right')
+  })
+})
+`,
+      },
+      projectName: 'failed-case-project',
+    })
+
+    const output = await runVievalCli({
+      configFilePath: join(projectDirectory, 'vieval.config.ts'),
+      cwd: projectDirectory,
+    })
+
+    expect(output.projects[0]?.caseFailures?.length).toBe(1)
+    expect(output.projects[0]?.caseFailures?.[0]?.caseName).toBe('failed-case')
+    expect(output.projects[0]?.caseFailures?.[0]?.errorMessage).toContain('expected')
+
+    const summary = formatVievalCliRunOutput(output)
+    expect(summary).toContain('Failed cases:')
+    expect(summary).toContain('failed-case')
+  })
+
   it('shows schedule breakdown when project task count is a clean matrix cross-product', () => {
     const summary = formatVievalCliRunOutput({
       configFilePath: '/tmp/vieval.config.ts',
@@ -1160,6 +1191,6 @@ export default defineConfig({
     expect(output.projects[0]?.executed).toBe(true)
     expect(output.projects[0]?.result).not.toBeNull()
     expect(output.projects[1]?.executed).toBe(false)
-    expect(formatVievalCliRunOutput(output)).toContain('Tasks     0 executed / 0 scheduled')
+    expect(formatVievalCliRunOutput(output)).toContain('Tasks     1 executed / 2 scheduled')
   })
 })

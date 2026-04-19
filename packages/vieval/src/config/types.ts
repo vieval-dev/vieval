@@ -356,6 +356,10 @@ export interface TaskCaseReporterEndPayload extends TaskCaseReporterPayload {
    * Final case state.
    */
   state: TaskCaseState
+  /**
+   * Optional failure message when `state` is `failed`.
+   */
+  errorMessage?: string
 }
 
 /**

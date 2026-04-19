@@ -1,6 +1,8 @@
 import type { TaskRunContext, TaskRunOutput } from '../config'
 import type { RunScoreKind } from '../core/runner'
 
+import { errorMessageFrom } from '@moeru/std'
+
 import { defineEval, defineTask } from '../config'
 import { registerEvalDefinition } from './registry'
 
@@ -93,6 +95,7 @@ function emitCaseEnd(
     state: 'passed' | 'failed'
     name: string
     total: number
+    errorMessage?: string
   },
 ): void {
   try {
@@ -281,6 +284,7 @@ export function describeTask(
             })
 
             let state: 'passed' | 'failed' = 'passed'
+            let errorMessage: string | undefined
             const caseId = createTaskCaseReporterId(index, taskCase.name)
             const customScoresByKind = new Map<RunScoreKind, number>()
 
@@ -307,11 +311,13 @@ export function describeTask(
                 },
               })
             }
-            catch {
+            catch (error) {
               state = 'failed'
+              errorMessage = errorMessageFrom(error) ?? 'Unknown case failure.'
             }
             finally {
               emitCaseEnd(context.reporterHooks, {
+                ...(errorMessage == null ? {} : { errorMessage }),
                 index,
                 state,
                 name: taskCase.name,

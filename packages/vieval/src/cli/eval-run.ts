@@ -11,7 +11,7 @@ import { errorMessageFrom } from '@moeru/std'
 
 import packageJSON from '../../package.json'
 
-import { formatVievalCliRunOutput, runVievalCli } from './run'
+import { formatVievalCliRunOutput, hasRunFailures, runVievalCli } from './run'
 
 interface ParsedCliArguments {
   attempt?: string
@@ -140,10 +140,16 @@ async function main(): Promise<void> {
 
     if (parsed.json) {
       process.stdout.write(`${JSON.stringify(output, null, 2)}\n`)
+      if (hasRunFailures(output)) {
+        process.exitCode = 1
+      }
       return
     }
 
     process.stdout.write(`${formatVievalCliRunOutput(output)}\n`)
+    if (hasRunFailures(output)) {
+      process.exitCode = 1
+    }
   }
   catch (error) {
     const errorMessage = errorMessageFrom(error) ?? 'Unknown CLI failure.'

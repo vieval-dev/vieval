@@ -71,6 +71,7 @@
   "dependencies": {
     "@moeru/std": "catalog:",
     "@pnpm/find-workspace-dir": "catalog:",
+    "@vitest/expect": "catalog:vitest",
     "@vitest/runner": "catalog:",
     "@xsai-ext/providers": "catalog:",
     "@xsai/generate-text": "catalog:",

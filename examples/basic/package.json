@@ -3,7 +3,13 @@
   "type": "module",
   "private": true,
   "description": "Examples of vieval, basic",
-  "scripts": {},
+  "scripts": {
+    "eval:run": "vieval run"
+  },
+  "dependencies": {
+    "@xsai/providers": "catalog:",
+    "xsai": "catalog:"
+  },
   "devDependencies": {
     "vieval": "workspace:^"
   }

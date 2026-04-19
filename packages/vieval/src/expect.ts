@@ -1,6 +1,5 @@
-import { expect as vitestExpect } from 'vitest'
-
 import { installVievalExpectMatchers } from './testing/expect-extensions'
+import { getRuntimeExpect } from './testing/runtime-expect'
 
 let isInstalled = false
 
@@ -18,4 +17,4 @@ ensureExpectMatchersInstalled()
 /**
  * Re-exported expect with vieval custom matchers pre-installed.
  */
-export const expect = vitestExpect
+export const expect = getRuntimeExpect()

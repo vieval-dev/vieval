@@ -120,6 +120,7 @@ export interface RunVievalCliOptions extends LoadVievalCliConfigOptions {
  */
 export interface CliProjectSummary {
   caseSummary?: CliProjectCaseSummary | null
+  caseFailures?: CliProjectCaseFailure[]
   discoveredEvalFileCount: number
   durationMs?: number
   entryCount: number
@@ -139,6 +140,16 @@ export interface CliProjectCaseSummary {
   passed: number
   skipped: number
   total: number
+}
+
+/**
+ * Captures one failed case with its message for CLI and JSON debugging output.
+ */
+export interface CliProjectCaseFailure {
+  caseId: string
+  caseName: string
+  errorMessage: string
+  taskId: string
 }
 
 /**
@@ -162,6 +173,23 @@ export interface CliRunOutput {
   reportDirectory?: string | null
   runId?: string
   workspaceId?: string
+}
+
+/**
+ * Returns true when output contains at least one failing project/task/case outcome.
+ */
+export function hasRunFailures(output: CliRunOutput): boolean {
+  return output.projects.some((project) => {
+    if (project.errorMessage != null) {
+      return true
+    }
+
+    if (project.caseSummary != null && project.caseSummary.failed > 0) {
+      return true
+    }
+
+    return (project.caseFailures?.length ?? 0) > 0
+  })
 }
 
 interface CliRunReportEvent {
@@ -530,6 +558,7 @@ function createTaskReporterHooks(
   projectName: string,
   recordEvent: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void,
   projectCaseCounters?: RunCliProjectCaseCounters,
+  projectCaseFailures?: CliProjectCaseFailure[],
   vitestCompatReporter?: VievalVitestCompatReporterBridge | null,
 ): TaskReporterHooks {
   function syncCaseTotal(total: number): void {
@@ -559,13 +588,23 @@ function createTaskReporterHooks(
       }
 
       syncCaseTotal(payload.total)
+      if (payload.state === 'failed' && payload.errorMessage != null && projectCaseFailures != null) {
+        projectCaseFailures.push({
+          caseId,
+          caseName: payload.name,
+          errorMessage: payload.errorMessage,
+          taskId: task.id,
+        })
+      }
       reporter.onCaseEnd({
         caseId,
+        errorMessage: payload.errorMessage,
         state: payload.state,
         taskId: task.id,
       })
       void vitestCompatReporter?.onCaseEnd({
         caseId,
+        errorMessage: payload.errorMessage,
         state: payload.state,
         taskId: task.id,
       })
@@ -603,6 +642,7 @@ function createCliTaskExecutionContext(
   projectName: string,
   recordEvent: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void,
   projectCaseCounters: RunCliProjectCaseCounters,
+  projectCaseFailures: CliProjectCaseFailure[],
   vitestCompatReporter?: VievalVitestCompatReporterBridge | null,
 ): CliTaskExecutionContext {
   return {
@@ -615,7 +655,7 @@ function createCliTaskExecutionContext(
       models,
       task,
     }),
-    reporterHooks: createTaskReporterHooks(task, reporter, projectName, recordEvent, projectCaseCounters, vitestCompatReporter),
+    reporterHooks: createTaskReporterHooks(task, reporter, projectName, recordEvent, projectCaseCounters, projectCaseFailures, vitestCompatReporter),
   }
 }
 
@@ -626,9 +666,10 @@ function resolveTaskReporterHooks(
   projectName: string,
   recordEvent: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void,
   projectCaseCounters: RunCliProjectCaseCounters,
+  projectCaseFailures: CliProjectCaseFailure[],
   vitestCompatReporter?: VievalVitestCompatReporterBridge | null,
 ): TaskReporterHooks {
-  return context.reporterHooks ?? createTaskReporterHooks(task, reporter, projectName, recordEvent, projectCaseCounters, vitestCompatReporter)
+  return context.reporterHooks ?? createTaskReporterHooks(task, reporter, projectName, recordEvent, projectCaseCounters, projectCaseFailures, vitestCompatReporter)
 }
 
 function getFailedTaskId(error: unknown): string | null {
@@ -644,6 +685,7 @@ function createAutoTaskExecutor(
   projectName: string,
   recordEvent: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void,
   projectCaseCounters: RunCliProjectCaseCounters,
+  projectCaseFailures: CliProjectCaseFailure[],
   vitestCompatReporter?: VievalVitestCompatReporterBridge | null,
 ): ScheduledTaskExecutor {
   return async (task, context) => {
@@ -655,7 +697,7 @@ function createAutoTaskExecutor(
     const output = await taskDefinition.run({
       cache: context.cache,
       model: context.model,
-      reporterHooks: resolveTaskReporterHooks(task, context, reporter, projectName, recordEvent, projectCaseCounters, vitestCompatReporter),
+      reporterHooks: resolveTaskReporterHooks(task, context, reporter, projectName, recordEvent, projectCaseCounters, projectCaseFailures, vitestCompatReporter),
       task,
     })
 
@@ -739,6 +781,7 @@ async function prepareProject(project: NormalizedCliProjectConfig): Promise<Prep
         kind: 'summary',
         summary: {
           caseSummary: null,
+          caseFailures: [],
           discoveredEvalFileCount: evalFilePaths.length,
           durationMs: Date.now() - startedAt,
           entryCount: entries.length,
@@ -769,6 +812,7 @@ async function prepareProject(project: NormalizedCliProjectConfig): Promise<Prep
       kind: 'summary',
       summary: {
         caseSummary: null,
+        caseFailures: [],
         discoveredEvalFileCount: 0,
         durationMs: Date.now() - startedAt,
         entryCount: 0,
@@ -798,6 +842,7 @@ async function executePreparedProject(
     seenCaseIds: new Set<string>(),
     skipped: 0,
   }
+  const projectCaseFailures: CliProjectCaseFailure[] = []
   const vitestCompatReporter = await createVievalVitestCompatReporterBridge({
     projectName: prepared.name,
     references: prepared.project.reporters,
@@ -807,6 +852,7 @@ async function executePreparedProject(
     prepared.name,
     recordEvent,
     projectCaseCounters,
+    projectCaseFailures,
     vitestCompatReporter,
   )
   const taskExecutor: ScheduledTaskExecutor = async (task, context) => {
@@ -839,6 +885,7 @@ async function executePreparedProject(
           prepared.name,
           recordEvent,
           projectCaseCounters,
+          projectCaseFailures,
           vitestCompatReporter,
         )
       },
@@ -881,6 +928,7 @@ async function executePreparedProject(
         skipped: projectCaseCounters.skipped,
         total: projectCaseCounters.seenCaseIds.size,
       },
+      caseFailures: projectCaseFailures,
       discoveredEvalFileCount: prepared.discoveredEvalFileCount,
       durationMs: Date.now() - prepared.startedAt,
       entryCount: prepared.entryCount,
@@ -936,6 +984,7 @@ async function executePreparedProject(
         skipped: projectCaseCounters.skipped,
         total: projectCaseCounters.seenCaseIds.size,
       },
+      caseFailures: projectCaseFailures,
       discoveredEvalFileCount: prepared.discoveredEvalFileCount,
       durationMs: Date.now() - prepared.startedAt,
       entryCount: prepared.entryCount,
@@ -1160,6 +1209,7 @@ export function formatVievalCliRunOutput(output: CliRunOutput): string {
 
     const badge = createProjectBadge(project.name, colors, colorEnabled)
     const isFailed = project.errorMessage != null
+    const hasFailedCases = (project.caseSummary?.failed ?? 0) > 0 || (project.caseFailures?.length ?? 0) > 0
     if (isFailed) {
       failedProjects += 1
       lines.push(` ${colors.red('❯')} ${badge}${formatDuration(project.durationMs, colors)}`)
@@ -1183,7 +1233,12 @@ export function formatVievalCliRunOutput(output: CliRunOutput): string {
       continue
     }
 
-    passedProjects += 1
+    if (hasFailedCases) {
+      failedProjects += 1
+    }
+    else {
+      passedProjects += 1
+    }
     const hybridAverage = project.result?.overall.hybridAverage
     const hybridAverageLabel = hybridAverage == null ? 'n/a' : String(hybridAverage)
     const runCount = project.result?.overall.runCount ?? 0
@@ -1193,13 +1248,25 @@ export function formatVievalCliRunOutput(output: CliRunOutput): string {
       : `, cases ${project.caseSummary.passed} passed | ${project.caseSummary.failed} failed`
     const detailsLabel = colors.dim(` ${project.discoveredEvalFileCount} files, ${project.entryCount} entries, ${runCount} runs${caseSummaryLabel}, hybrid ${hybridAverageLabel}`)
     const matrixSummary = formatMatrixSummary(project.matrixSummary)
-    lines.push(` ${colors.green('✓')} ${badge}${countLabel}${detailsLabel}${formatDuration(project.durationMs, colors)}`)
+    lines.push(` ${hasFailedCases ? colors.red('❯') : colors.green('✓')} ${badge}${countLabel}${detailsLabel}${formatDuration(project.durationMs, colors)}`)
     if (matrixSummary != null) {
       lines.push(`   ${colors.dim(matrixSummary)}`)
     }
     const scheduleBreakdown = formatScheduleBreakdown(project)
     if (scheduleBreakdown != null) {
       lines.push(`   ${scheduleBreakdown}`)
+    }
+    if ((project.caseFailures?.length ?? 0) > 0) {
+      lines.push(`   ${colors.red('Failed cases:')}`)
+      for (const failure of project.caseFailures!.slice(0, 5)) {
+        lines.push(`   ${colors.red(`- ${failure.caseName} (${failure.taskId})`)}`)
+        for (const line of failure.errorMessage.split('\n')) {
+          lines.push(`     ${colors.red(line)}`)
+        }
+      }
+      if (project.caseFailures!.length > 5) {
+        lines.push(`   ${colors.dim(`... ${project.caseFailures!.length - 5} more failed cases`)}`)
+      }
     }
   }
 

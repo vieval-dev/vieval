@@ -1,8 +1,7 @@
 import type { RubricJudgeResult, ToolCall } from '../core/assertions'
 
-import { expect } from 'vitest'
-
 import { normalizeMatchText } from '../core/assertions'
+import { getRuntimeExpect } from './runtime-expect'
 
 /**
  * Options for keyword-based matcher behavior.
@@ -55,6 +54,8 @@ function toKeywordArray(keywords: string | readonly string[]): readonly string[]
  * - callers want native `.not` chaining with the same matchers
  */
 export function installVievalExpectMatchers(): void {
+  const expect = getRuntimeExpect()
+
   expect.extend({
     toMustExclude(received: unknown, keywords: string | readonly string[], options: KeywordMatcherOptions = {}) {
       const keywordList = toKeywordArray(keywords)
@@ -186,42 +187,52 @@ export function installVievalExpectMatchers(): void {
   })
 }
 
-declare module 'vitest' {
-  interface Assertion {
-    /**
-     * Asserts that text includes required keywords.
-     *
-     * Example:
-     * `expect('calm answer').toMustInclude(['calm'])`
-     */
-    toMustInclude: (keywords: string | readonly string[], options?: KeywordMatcherOptions) => void
-    /**
-     * Asserts that text excludes forbidden keywords.
-     *
-     * Example:
-     * `expect('calm answer').toMustExclude(['bestmove'])`
-     */
-    toMustExclude: (keywords: string | readonly string[], options?: KeywordMatcherOptions) => void
-    /**
-     * Asserts rubric score is greater than a threshold.
-     *
-     * Example:
-     * `expect({ score: 0.91 }).toScoreRubricGreaterThan(0.8)`
-     */
-    toScoreRubricGreaterThan: (threshold: number) => void
-    /**
-     * Asserts structured output satisfies a validator.
-     *
-     * Example:
-     * `expect(value).toSatisfyStructuredOutput(isMyShape)`
-     */
-    toSatisfyStructuredOutput: <TValue>(validator: (value: unknown) => value is TValue) => void
-    /**
-     * Asserts selected tool-call args satisfy validator.
-     *
-     * Example:
-     * `expect({ toolCalls }).toSatisfyToolCallArgs('builtIn_sparkCommand', isSparkArgs)`
-     */
-    toSatisfyToolCallArgs: (toolName: string, validator: (args: unknown) => boolean) => void
-  }
+interface VievalCustomMatchers {
+  /**
+   * Asserts that text includes required keywords.
+   *
+   * Example:
+   * `expect('calm answer').toMustInclude(['calm'])`
+   */
+  toMustInclude: (keywords: string | readonly string[], options?: KeywordMatcherOptions) => void
+  /**
+   * Asserts that text excludes forbidden keywords.
+   *
+   * Example:
+   * `expect('calm answer').toMustExclude(['bestmove'])`
+   */
+  toMustExclude: (keywords: string | readonly string[], options?: KeywordMatcherOptions) => void
+  /**
+   * Asserts rubric score is greater than a threshold.
+   *
+   * Example:
+   * `expect({ score: 0.91 }).toScoreRubricGreaterThan(0.8)`
+   */
+  toScoreRubricGreaterThan: (threshold: number) => void
+  /**
+   * Asserts structured output satisfies a validator.
+   *
+   * Example:
+   * `expect(value).toSatisfyStructuredOutput(isMyShape)`
+   */
+  toSatisfyStructuredOutput: <TValue>(validator: (value: unknown) => value is TValue) => void
+  /**
+   * Asserts selected tool-call args satisfy validator.
+   *
+   * Example:
+   * `expect({ toolCalls }).toSatisfyToolCallArgs('builtIn_sparkCommand', isSparkArgs)`
+   */
+  toSatisfyToolCallArgs: (toolName: string, validator: (args: unknown) => boolean) => void
 }
+
+/* eslint-disable unused-imports/no-unused-vars */
+declare module '@vitest/expect' {
+  interface Matchers<T = any> extends VievalCustomMatchers {}
+  interface Assertion<T = any> extends VievalCustomMatchers {}
+}
+
+declare module 'vitest' {
+  interface Assertion extends VievalCustomMatchers {}
+  interface Matchers<T = any> extends VievalCustomMatchers {}
+}
+/* eslint-enable unused-imports/no-unused-vars */

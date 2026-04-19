@@ -14,7 +14,7 @@ import { runCompareCliOrExit } from './compare'
 import { parseCliArguments as parseRunCliArguments } from './eval-run'
 import { runReportAnalyzeCli } from './report-analyze'
 import { runReportIndexCli } from './report-index'
-import { formatVievalCliRunOutput, runVievalCli } from './run'
+import { formatVievalCliRunOutput, hasRunFailures, runVievalCli } from './run'
 
 type Command = 'compare' | 'report' | 'run'
 
@@ -118,10 +118,16 @@ export async function runTopLevelCli(argv: readonly string[]): Promise<void> {
 
   if (runArguments.json) {
     process.stdout.write(`${JSON.stringify(output, null, 2)}\n`)
+    if (hasRunFailures(output)) {
+      process.exitCode = 1
+    }
     return
   }
 
   process.stdout.write(`${formatVievalCliRunOutput(output)}\n`)
+  if (hasRunFailures(output)) {
+    process.exitCode = 1
+  }
 }
 
 function isDirectExecution(): boolean {

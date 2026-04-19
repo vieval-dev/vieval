@@ -6,23 +6,6 @@ import { createVitest } from 'vitest/node'
 
 import { beginModuleRegistration, consumeModuleRegistrations, endModuleRegistration } from '../dsl/registry'
 
-async function loadDefinitionsWithNativeImport(moduleHref: string): Promise<EvalDefinition[]> {
-  const importHref = `${moduleHref}?vieval_fallback=${Date.now()}`
-  beginModuleRegistration(importHref)
-
-  try {
-    const moduleValue = await import(importHref) as { default?: EvalDefinition }
-    const registeredDefinitions = consumeModuleRegistrations(importHref)
-    return [
-      ...registeredDefinitions,
-      ...(moduleValue.default == null ? [] : [moduleValue.default]),
-    ]
-  }
-  finally {
-    endModuleRegistration()
-  }
-}
-
 /**
  * Loads eval modules and returns a normalized eval-module map.
  *
@@ -43,6 +26,7 @@ export async function loadEvalModulesWithVitestRuntime(
 ): Promise<EvalModuleMap> {
   const loadedModules: EvalModuleMap = {}
   const runtime = await createVitest('test', {
+    config: false,
     root: projectRoot,
     run: false,
     silent: true,
@@ -59,14 +43,10 @@ export async function loadEvalModulesWithVitestRuntime(
         const registeredDefinitions = consumeModuleRegistrations(moduleHref)
         const defaultDefinition = moduleValue.default
 
-        let definitions = [
+        const definitions = [
           ...registeredDefinitions,
           ...(defaultDefinition == null ? [] : [defaultDefinition]),
         ]
-
-        if (definitions.length === 0) {
-          definitions = await loadDefinitionsWithNativeImport(moduleHref)
-        }
 
         const deduplicatedDefinitions = definitions.filter((definition, index) => {
           const key = `${definition.name}::${definition.description}::${definition.task?.id ?? ''}`

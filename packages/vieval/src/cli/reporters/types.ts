@@ -115,6 +115,10 @@ export interface CliReporterCaseEndPayload {
    * Terminal outcome for the case.
    */
   state: CliReporterCaseState
+  /**
+   * Optional failure message when `state` is `failed`.
+   */
+  errorMessage?: string
 }
 
 /**
