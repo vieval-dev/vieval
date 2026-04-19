@@ -178,4 +178,41 @@ describe('createTaskExecutionContext', () => {
 
     expect(() => context.model({ name: 'missing' })).toThrow('Unknown configured model "missing".')
   })
+
+  it('throws when multiple models are configured without explicit default selection', () => {
+    const modelA = chatModelFrom({
+      aliases: ['gpt-5-mini'],
+      inferenceExecutor: 'openai',
+      model: 'openai/gpt-5-mini',
+    })
+    const modelB = chatModelFrom({
+      aliases: ['gpt-5-nano'],
+      inferenceExecutor: 'openai',
+      model: 'openai/gpt-5-nano',
+    })
+    const context = createTaskExecutionContext({
+      models: [modelA, modelB],
+      task: {
+        entry: {
+          description: 'desc',
+          directory: 'd',
+          filePath: '/tmp/a.eval.ts',
+          id: 'entry',
+          name: 'entry',
+        },
+        id: 'task-1',
+        matrix: {
+          eval: {},
+          meta: {
+            evalRowId: 'default',
+            runRowId: 'default',
+          },
+          run: {},
+        },
+        inferenceExecutor: { id: 'default' },
+      },
+    })
+
+    expect(() => context.model()).toThrow('Multiple configured models are available')
+  })
 })

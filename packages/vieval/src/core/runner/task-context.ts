@@ -75,7 +75,19 @@ function resolveDefaultTaskModel(
     return matched
   }
 
-  if (models.length > 0) {
+  if (models.length > 1) {
+    throw new Error(
+      [
+        `Multiple configured models are available, but no default model is selected for inferenceExecutor "${task.inferenceExecutor.id}".`,
+        'Select one model explicitly by either:',
+        '- setting runMatrix.override.model (or task matrix run.model)',
+        '- setting project.inferenceExecutors to a matching model id',
+        '- calling context.model({ name: "your-model-id-or-alias" })',
+      ].join('\n'),
+    )
+  }
+
+  if (models.length === 1) {
     const firstModel = models[0]
     if (firstModel != null) {
       return firstModel

@@ -91,6 +91,45 @@ describe('loadVievalCliConfig', () => {
     expect(loaded.env.VIEVAL_TEST_ENV_KEY).toBe('from-config')
   })
 
+  it('uses one default inferenceExecutor when only models are configured', async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-cli-config-'))
+    temporaryDirectories.push(temporaryDirectory)
+
+    const configFilePath = join(temporaryDirectory, 'vieval.config.json')
+    await writeFile(
+      configFilePath,
+      JSON.stringify({
+        models: [
+          {
+            id: 'openai/gpt-5-mini',
+            inferenceExecutor: 'openai',
+            inferenceExecutorId: 'openai',
+            model: 'openai/gpt-5-mini',
+          },
+          {
+            id: 'openai/gpt-5-nano',
+            inferenceExecutor: 'openai',
+            inferenceExecutorId: 'openai',
+            model: 'openai/gpt-5-nano',
+          },
+        ],
+        projects: [{ name: 'fixture-project' }],
+      }),
+      'utf-8',
+    )
+
+    const loaded = await loadVievalCliConfig({
+      cwd: temporaryDirectory,
+    })
+
+    expect(loaded.configFilePath).toBe(configFilePath)
+    expect(loaded.projects[0]?.models.map(model => model.id)).toEqual([
+      'openai/gpt-5-mini',
+      'openai/gpt-5-nano',
+    ])
+    expect(loaded.projects[0]?.inferenceExecutors).toEqual([{ id: 'default' }])
+  })
+
   it('accepts runMatrix and evalMatrix layer objects', async () => {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-cli-config-'))
     temporaryDirectories.push(temporaryDirectory)

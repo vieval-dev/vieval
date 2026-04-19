@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { chatModelFrom, ChatModels, chatProviderFrom, ChatProviders } from './index'
+import { chatModelFrom, chatModelMatrix, ChatModels, chatProviderFrom, ChatProviders } from './index'
 
 describe('chatProviders', () => {
   it('resolves requiredEnv and optionalEnv provider parameters from config env', async () => {
@@ -67,6 +67,12 @@ describe('chatProviders', () => {
 })
 
 describe('chatModels', () => {
+  it('creates a model axis helper for runMatrix definitions', () => {
+    expect(chatModelMatrix('openai/gpt-5-mini', 'openai/gpt-5-nano', 'openai/gpt-5-mini')).toEqual({
+      model: ['openai/gpt-5-mini', 'openai/gpt-5-nano'],
+    })
+  })
+
   it('resolves provider-referenced models through registered chat providers', async () => {
     const providerPlugin = ChatProviders({
       providers: [

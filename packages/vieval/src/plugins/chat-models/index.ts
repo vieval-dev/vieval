@@ -1,3 +1,4 @@
+import type { MatrixDefinition } from '../../config'
 import type { ModelDefinition } from '../../config/models'
 import type { ConfigHookPlugin } from '../../config/plugin'
 import type { EnvFromOptions, RequiredEnvFromOptions } from '../../core/inference-executors/env'
@@ -496,6 +497,25 @@ export interface ChatModelsPluginOptions {
    * Chat model definitions to append to config.
    */
   models: readonly ChatModelDefinition[]
+}
+
+/**
+ * Creates a run-matrix `model` axis from configured chat model names.
+ *
+ * Use when:
+ * - run matrix should iterate over explicit chat model ids/aliases
+ * - project configs want a concise model-axis helper
+ *
+ * Expects:
+ * - each provided name to match a configured model id or alias at runtime
+ *
+ * Returns:
+ * - matrix axis object compatible with `runMatrix.extend/override`
+ */
+export function chatModelMatrix(...names: string[]): MatrixDefinition {
+  return {
+    model: Array.from(new Set(names)),
+  }
 }
 
 /**

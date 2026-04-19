@@ -529,11 +529,7 @@ function normalizeProjectConfig(
     '**/.git/**',
   ]
   const models = project.models ?? [...inheritedModels]
-  const inferenceExecutors = project.inferenceExecutors ?? (
-    models.length > 0
-      ? models.map(model => ({ id: model.id }))
-      : [{ id: 'default' }]
-  )
+  const inferenceExecutors = project.inferenceExecutors ?? [{ id: 'default' }]
   const root = project.root == null
     ? cwd
     : (isAbsolute(project.root) ? project.root : resolve(cwd, project.root))
