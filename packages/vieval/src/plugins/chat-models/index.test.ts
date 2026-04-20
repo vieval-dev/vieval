@@ -166,6 +166,48 @@ describe('chatModels', () => {
     ])
   })
 
+  it('resolves callback-based openrouter model executor parameters from config env', async () => {
+    const plugin = ChatModels({
+      models: [
+        chatModelFrom({
+          aliases: ['agent-openrouter-mini'],
+          apiKey: config => config.env.OPENROUTER_API_KEY,
+          baseURL: config => config.env.OPENROUTER_BASE_URL,
+          inferenceExecutor: 'openrouter',
+          model: 'openai/gpt-4.1-mini',
+        }),
+      ],
+    })
+
+    const result = await plugin.configVieval?.({
+      env: {
+        OPENROUTER_API_KEY: 'openrouter-api-key',
+        OPENROUTER_BASE_URL: 'https://openrouter.ai/api/v1',
+      },
+      models: [],
+    })
+
+    expect(result?.models).toEqual([
+      {
+        aliases: ['agent-openrouter-mini'],
+        id: 'openrouter:openai/gpt-4.1-mini',
+        inferenceExecutor: 'openrouter',
+        inferenceExecutorId: 'openrouter',
+        model: 'openai/gpt-4.1-mini',
+        parameters: {
+          apiKey: 'openrouter-api-key',
+          baseURL: 'https://openrouter.ai/api/v1',
+        },
+        provider: undefined,
+        runtimeResolvers: {
+          apiKey: expect.any(Function),
+          baseURL: expect.any(Function),
+          headers: undefined,
+        },
+      },
+    ])
+  })
+
   it('throws when a model references an unknown provider id', async () => {
     const plugin = ChatModels({
       models: [

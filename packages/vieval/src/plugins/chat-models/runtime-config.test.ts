@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { ollamaFromRunContext, openaiFromRunContext, toChatModelRuntimeConfig, toOllamaChatModelRuntimeConfig, toOpenAIChatModelRuntimeConfig } from './runtime-config'
+import { ollamaFromRunContext, openaiFromRunContext, openrouterFromRunContext, toChatModelRuntimeConfig } from './runtime-config'
 
 describe('toChatModelRuntimeConfig', () => {
   it('normalizes openai model runtime config', () => {
@@ -50,6 +50,35 @@ describe('toChatModelRuntimeConfig', () => {
     })
   })
 
+  it('normalizes openrouter model runtime config', () => {
+    const config = toChatModelRuntimeConfig({
+      aliases: ['agent-openrouter-mini'],
+      id: 'openrouter:openai/gpt-4.1-mini',
+      inferenceExecutor: 'openrouter',
+      inferenceExecutorId: 'openrouter',
+      model: 'openai/gpt-4.1-mini',
+      parameters: {
+        apiKey: 'openrouter-api-key',
+        baseURL: 'https://openrouter.ai/api/v1',
+        headers: {
+          'http-referer': 'https://example.com',
+          'x-title': 'Vieval',
+        },
+      },
+    })
+
+    expect(config).toEqual({
+      apiKey: 'openrouter-api-key',
+      baseURL: 'https://openrouter.ai/api/v1',
+      headers: {
+        'http-referer': 'https://example.com',
+        'x-title': 'Vieval',
+      },
+      inferenceExecutor: 'openrouter',
+      model: 'openai/gpt-4.1-mini',
+    })
+  })
+
   it('throws when openai apiKey is missing', () => {
     expect(() => toChatModelRuntimeConfig({
       aliases: [],
@@ -70,42 +99,6 @@ describe('toChatModelRuntimeConfig', () => {
       model: 'model',
       parameters: {},
     })).toThrow('Unsupported chat inference executor "custom" for model "custom:model".')
-  })
-})
-
-describe('toOpenAIChatModelRuntimeConfig', () => {
-  it('returns typed openai config', () => {
-    const config = toOpenAIChatModelRuntimeConfig({
-      aliases: [],
-      id: 'openai:gpt-4.1-mini',
-      inferenceExecutor: 'openai',
-      inferenceExecutorId: 'openai',
-      model: 'gpt-4.1-mini',
-      parameters: {
-        apiKey: 'test-api-key',
-      },
-    })
-
-    expect(config.inferenceExecutor).toBe('openai')
-    expect(config.apiKey).toBe('test-api-key')
-  })
-})
-
-describe('toOllamaChatModelRuntimeConfig', () => {
-  it('returns typed ollama config', () => {
-    const config = toOllamaChatModelRuntimeConfig({
-      aliases: [],
-      id: 'ollama:llama3.1',
-      inferenceExecutor: 'ollama',
-      inferenceExecutorId: 'ollama',
-      model: 'llama3.1',
-      parameters: {
-        baseURL: 'http://127.0.0.1:11434',
-      },
-    })
-
-    expect(config.inferenceExecutor).toBe('ollama')
-    expect(config.baseURL).toBe('http://127.0.0.1:11434')
   })
 })
 
@@ -150,6 +143,30 @@ describe('ollamaFromRunContext', () => {
       headers: undefined,
       inferenceExecutor: 'ollama',
       model: 'llama3.1',
+    })
+  })
+})
+
+describe('openrouterFromRunContext', () => {
+  it('resolves openrouter runtime config from run-context model', () => {
+    const config = openrouterFromRunContext({
+      aliases: [],
+      id: 'openrouter:openai/gpt-4.1-mini',
+      inferenceExecutor: 'openrouter',
+      inferenceExecutorId: 'openrouter',
+      model: 'openai/gpt-4.1-mini',
+      parameters: {
+        apiKey: 'openrouter-api-key',
+        baseURL: 'https://openrouter.ai/api/v1',
+      },
+    })
+
+    expect(config).toEqual({
+      apiKey: 'openrouter-api-key',
+      baseURL: 'https://openrouter.ai/api/v1',
+      headers: undefined,
+      inferenceExecutor: 'openrouter',
+      model: 'openai/gpt-4.1-mini',
     })
   })
 })

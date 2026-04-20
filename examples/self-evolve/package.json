@@ -1,0 +1,16 @@
+{
+  "name": "example-self-evolve",
+  "type": "module",
+  "private": true,
+  "description": "Examples of vieval, self-evolve",
+  "scripts": {
+    "eval:run": "vieval run"
+  },
+  "dependencies": {
+    "@xsai/providers": "catalog:",
+    "xsai": "catalog:"
+  },
+  "devDependencies": {
+    "vieval": "workspace:^"
+  }
+}

@@ -52,11 +52,38 @@ export interface OllamaChatModelRuntimeConfig {
 }
 
 /**
+ * Runtime config consumed by OpenRouter provider constructors.
+ */
+export interface OpenRouterChatModelRuntimeConfig {
+  /**
+   * Resolved inference executor kind.
+   */
+  inferenceExecutor: 'openrouter'
+  /**
+   * Concrete model name.
+   */
+  model: string
+  /**
+   * Required API key.
+   */
+  apiKey: string
+  /**
+   * Optional base URL override.
+   */
+  baseURL?: string
+  /**
+   * Optional request headers.
+   */
+  headers?: ChatModelHeaders
+}
+
+/**
  * Union of normalized runtime configs for supported chat-model executors.
  */
 export type ChatModelRuntimeConfig
   = OpenAIChatModelRuntimeConfig
     | OllamaChatModelRuntimeConfig
+    | OpenRouterChatModelRuntimeConfig
 
 function getParameters(model: ModelDefinition): Record<string, unknown> {
   return model.parameters ?? {}
@@ -157,49 +184,17 @@ export function toChatModelRuntimeConfig(model: ModelDefinition): ChatModelRunti
     }
   }
 
+  if (model.inferenceExecutorId === 'openrouter') {
+    return {
+      apiKey: parseRequiredStringParameter(parameters, 'apiKey', model.id),
+      baseURL: parseOptionalStringParameter(parameters, 'baseURL', model.id),
+      headers: parseHeadersParameter(parameters, model.id),
+      inferenceExecutor: 'openrouter',
+      model: model.model,
+    }
+  }
+
   throw new Error(`Unsupported chat inference executor "${model.inferenceExecutorId}" for model "${model.id}".`)
-}
-
-/**
- * Normalizes one configured model into OpenAI runtime config.
- *
- * Use when:
- * - calling OpenAI/OpenAI-compatible provider constructors directly
- *
- * Expects:
- * - `model.inferenceExecutorId` to be `openai`
- *
- * Returns:
- * - validated OpenAI runtime config
- */
-export function toOpenAIChatModelRuntimeConfig(model: ModelDefinition): OpenAIChatModelRuntimeConfig {
-  const runtimeConfig = toChatModelRuntimeConfig(model)
-  if (runtimeConfig.inferenceExecutor !== 'openai') {
-    throw new Error(`Expected openai model, got "${runtimeConfig.inferenceExecutor}" for "${model.id}".`)
-  }
-
-  return runtimeConfig
-}
-
-/**
- * Normalizes one configured model into Ollama runtime config.
- *
- * Use when:
- * - calling Ollama provider constructors directly
- *
- * Expects:
- * - `model.inferenceExecutorId` to be `ollama`
- *
- * Returns:
- * - validated Ollama runtime config
- */
-export function toOllamaChatModelRuntimeConfig(model: ModelDefinition): OllamaChatModelRuntimeConfig {
-  const runtimeConfig = toChatModelRuntimeConfig(model)
-  if (runtimeConfig.inferenceExecutor !== 'ollama') {
-    throw new Error(`Expected ollama model, got "${runtimeConfig.inferenceExecutor}" for "${model.id}".`)
-  }
-
-  return runtimeConfig
 }
 
 /**
@@ -216,7 +211,12 @@ export function toOllamaChatModelRuntimeConfig(model: ModelDefinition): OllamaCh
  * - validated OpenAI runtime config
  */
 export function openaiFromRunContext(model: ModelDefinition): OpenAIChatModelRuntimeConfig {
-  return toOpenAIChatModelRuntimeConfig(model)
+  const runtimeConfig = toChatModelRuntimeConfig(model)
+  if (runtimeConfig.inferenceExecutor !== 'openai') {
+    throw new Error(`Expected openai model, got "${runtimeConfig.inferenceExecutor}" for "${model.id}".`)
+  }
+
+  return runtimeConfig
 }
 
 /**
@@ -233,5 +233,32 @@ export function openaiFromRunContext(model: ModelDefinition): OpenAIChatModelRun
  * - validated Ollama runtime config
  */
 export function ollamaFromRunContext(model: ModelDefinition): OllamaChatModelRuntimeConfig {
-  return toOllamaChatModelRuntimeConfig(model)
+  const runtimeConfig = toChatModelRuntimeConfig(model)
+  if (runtimeConfig.inferenceExecutor !== 'ollama') {
+    throw new Error(`Expected ollama model, got "${runtimeConfig.inferenceExecutor}" for "${model.id}".`)
+  }
+
+  return runtimeConfig
+}
+
+/**
+ * Resolves OpenRouter runtime config from one resolved run-context model.
+ *
+ * Use when:
+ * - task execution already has `context.model()` output
+ * - eval code wants typed OpenRouter provider options with a concise helper name
+ *
+ * Expects:
+ * - `model` to resolve to an OpenRouter-backed chat model
+ *
+ * Returns:
+ * - validated OpenRouter runtime config
+ */
+export function openrouterFromRunContext(model: ModelDefinition): OpenRouterChatModelRuntimeConfig {
+  const runtimeConfig = toChatModelRuntimeConfig(model)
+  if (runtimeConfig.inferenceExecutor !== 'openrouter') {
+    throw new Error(`Expected openrouter model, got "${runtimeConfig.inferenceExecutor}" for "${model.id}".`)
+  }
+
+  return runtimeConfig
 }

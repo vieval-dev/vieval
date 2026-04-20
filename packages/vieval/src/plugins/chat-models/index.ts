@@ -56,6 +56,16 @@ export interface OllamaChatModelInferenceExecutor {
 }
 
 /**
+ * OpenRouter-specific inference executor config shape.
+ */
+export interface OpenRouterChatModelInferenceExecutor {
+  inferenceExecutor: 'openrouter'
+  apiKey?: ChatModelResolverValue<string>
+  baseURL?: ChatModelResolverValue<string>
+  headers?: ChatModelResolverValue<ChatModelHeaders>
+}
+
+/**
  * Generic inference executor config shape.
  */
 export interface GenericChatModelInferenceExecutor {
@@ -68,6 +78,7 @@ export interface GenericChatModelInferenceExecutor {
 export type ChatModelInferenceExecutor
   = OpenAIChatModelInferenceExecutor
     | OllamaChatModelInferenceExecutor
+    | OpenRouterChatModelInferenceExecutor
     | GenericChatModelInferenceExecutor
 
 /**
@@ -436,6 +447,12 @@ function isOllamaChatModelInferenceExecutor(
   return options.inferenceExecutor === 'ollama'
 }
 
+function isOpenRouterChatModelInferenceExecutor(
+  options: ChatModelFromOptions,
+): options is ChatModelFromBaseOptions & OpenRouterChatModelInferenceExecutor {
+  return options.inferenceExecutor === 'openrouter'
+}
+
 /**
  * Builds one normalized chat model definition.
  *
@@ -457,7 +474,13 @@ export function chatModelFrom(options: ChatModelFromOptions): ChatModelDefinitio
           baseURL: options.baseURL,
           headers: options.headers,
         }
-      : undefined
+      : isOpenRouterChatModelInferenceExecutor(options)
+        ? {
+            apiKey: options.apiKey,
+            baseURL: options.baseURL,
+            headers: options.headers,
+          }
+        : undefined
 
   return {
     aliases: options.aliases ?? [],
