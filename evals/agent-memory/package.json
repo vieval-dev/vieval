@@ -1,7 +1,6 @@
 {
   "name": "@vieval/eval-agent-memory",
   "type": "module",
-  "version": "0.0.2",
   "private": true,
   "description": "Agent-memory evaluation workspace with LoCoMo cases and backend test objects.",
   "exports": {
