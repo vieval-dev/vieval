@@ -2,6 +2,7 @@ import { defineConfig } from 'tsdown'
 
 export default defineConfig({
   entry: {
+    'bin/vieval': 'src/bin/vieval.ts',
     'index': 'src/index.ts',
     'config': 'src/config/index.ts',
     'cli/index': 'src/cli/index.ts',

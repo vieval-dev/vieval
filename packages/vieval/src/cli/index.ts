@@ -1,14 +1,6 @@
-#!/usr/bin/env node
-
-import path from 'node:path'
 import process from 'node:process'
 
-import { realpathSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-
 import meow from 'meow'
-
-import { errorMessageFrom } from '@moeru/std'
 
 import { runCompareCliOrExit } from './compare'
 import { runEvalRunCli } from './eval-run'
@@ -47,6 +39,19 @@ function normalizeCliArgv(argv: readonly string[]): string[] {
     : [...argv]
 }
 
+/**
+ * Parses top-level `vieval` CLI arguments into one command dispatch payload.
+ *
+ * Use when:
+ * - the executable needs to resolve which subcommand should run
+ * - tests need stable top-level argv normalization without invoking subcommands
+ *
+ * Expects:
+ * - argv excludes the node executable and script path
+ *
+ * Returns:
+ * - the normalized top-level command plus subcommand argv
+ */
 export function parseTopLevelCliArguments(argv: readonly string[]): ParsedTopLevelCliArguments {
   const normalizedArgv = normalizeCliArgv(argv)
   const command = normalizedArgv[0]
@@ -76,6 +81,25 @@ export function parseTopLevelCliArguments(argv: readonly string[]): ParsedTopLev
   }
 }
 
+/**
+ * Dispatches the top-level `vieval` command to one concrete subcommand module.
+ *
+ * Call stack:
+ *
+ * published executable (`../bin/vieval`)
+ *   -> {@link runTopLevelCli}
+ *     -> {@link runEvalRunCli} / report CLI / compare CLI
+ *
+ * Use when:
+ * - the executable or tests need import-safe CLI orchestration
+ * - subcommands should remain reusable without process-bound startup code
+ *
+ * Expects:
+ * - argv excludes the node executable and script path
+ *
+ * Returns:
+ * - resolves after the selected subcommand completes
+ */
 export async function runTopLevelCli(argv: readonly string[]): Promise<void> {
   const parsed = parseTopLevelCliArguments(argv)
 
@@ -106,42 +130,4 @@ export async function runTopLevelCli(argv: readonly string[]): Promise<void> {
   }
 
   await runEvalRunCli(parsed.commandArgv)
-}
-
-function isDirectExecution(): boolean {
-  if (!process.argv[1]) {
-    return false
-  }
-
-  const resolvedArgvPath = path.resolve(process.argv[1])
-  const currentModulePath = fileURLToPath(import.meta.url)
-
-  try {
-    if (realpathSync.native(resolvedArgvPath) === realpathSync.native(currentModulePath)) {
-      return true
-    }
-  }
-  catch {
-    if (resolvedArgvPath === currentModulePath) {
-      return true
-    }
-  }
-
-  const normalizedArgvPath = resolvedArgvPath.replaceAll('\\', '/')
-  return normalizedArgvPath.endsWith('/.bin/vieval')
-}
-
-async function main(): Promise<void> {
-  try {
-    await runTopLevelCli(process.argv.slice(2))
-  }
-  catch (error) {
-    const errorMessage = errorMessageFrom(error) ?? 'Unknown CLI failure.'
-    process.stderr.write(`[vieval] ${errorMessage}\n`)
-    process.exitCode = 1
-  }
-}
-
-if (isDirectExecution()) {
-  await main()
 }

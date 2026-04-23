@@ -93,7 +93,8 @@ Use these fields to group and compare runs across models, rubrics, and scenarios
 
 ```mermaid
 flowchart LR
-  CLI["src/cli/index.ts\n(runTopLevelCli)"] --> RUN["src/cli/run.ts\n(runVievalCli + formatter)"]
+  BIN["src/bin/vieval.ts\n(executable shim)"] --> CLI["src/cli/index.ts\n(runTopLevelCli)"]
+  CLI --> RUN["src/cli/run.ts\n(runVievalCli + formatter)"]
   RUN --> CFG["src/cli/config.ts\n(loadVievalCliConfig)"]
   RUN --> DISC["src/cli/discovery.ts\n(discoverEvalFiles)"]
   RUN --> REG["src/dsl/registry.ts\n(module registrations)"]
@@ -131,6 +132,7 @@ flowchart LR
 ```mermaid
 sequenceDiagram
   participant U as User
+  participant B as src/bin/vieval.ts
   participant C as src/cli/index.ts
   participant R as src/cli/run.ts
   participant L as src/cli/config.ts
@@ -139,7 +141,8 @@ sequenceDiagram
   participant T as src/dsl/task.ts
   participant P as src/cli/reporters/*
 
-  U->>C: pnpm run eval:run -- --config ...
+  U->>B: pnpm run eval:run -- --config ...
+  B->>C: runTopLevelCli(argv)
   C->>R: runVievalCli(options)
   R->>L: loadVievalCliConfig()
   R->>D: discoverEvalFiles()
@@ -235,7 +238,7 @@ pnpm -F vieval eval:run
 pnpm -F vieval eval:run -- --config ./vieval.config.ts
 pnpm -F vieval eval:run -- --config ./vieval.config.ts --project chess --project moderation
 pnpm -F vieval eval:run -- --json
-pnpm -F vieval exec tsx src/cli/index.ts compare --config ../../vieval.config.ts --comparison <comparison-id>
+pnpm -F vieval exec tsx src/bin/vieval.ts compare --config ../../vieval.config.ts --comparison <comparison-id>
 pnpm -F vieval eval:run -- --help
 ```
 

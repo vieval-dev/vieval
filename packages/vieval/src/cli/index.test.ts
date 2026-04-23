@@ -73,31 +73,33 @@ describe('parseTopLevelCliArguments', () => {
 
   /**
    * @example
-   * expect(['if (isDirectExecution$1()) await main$1();', 'if (isDirectExecution()) await main();']).toHaveLength(1)
+   * expect([]).toHaveLength(0)
    */
-  it('emits one self-executing CLI guard in the bundled artifact', async () => {
+  it('emits an import-safe cli module and a dedicated executable shim', async () => {
     execFileSync('pnpm', ['build'], {
       cwd: packageDirectory,
       stdio: 'pipe',
     })
 
     const bundledCliSource = await readFile(join(packageDirectory, 'dist', 'cli', 'index.mjs'), 'utf-8')
+    const bundledBinSource = await readFile(join(packageDirectory, 'dist', 'bin', 'vieval.mjs'), 'utf-8')
 
     // ROOT CAUSE:
     //
-    // `src/cli/index.ts` is the published `bin`, but `src/cli/eval-run.ts`
-    // also used to self-execute.
-    // After bundling, both modules share the same `import.meta.url`, so both
-    // direct-execution guards can match inside one `dist/cli/index.mjs` file.
+    // `src/cli/index.ts` used to be both the published `bin` and a reusable
+    // import target. That forced the module to carry direct-execution logic.
+    // When other CLI modules also self-executed, bundling collapsed them into
+    // one file and duplicated top-level entrypoint guards.
     //
-    // Before the patch, the bundled artifact contained two statements:
-    // `if (isDirectExecution$1()) await main$1();`
-    // `if (isDirectExecution()) await main();`
+    // The fix is architectural: keep `dist/cli/index.mjs` import-safe and move
+    // process-bound startup into `dist/bin/vieval.mjs`.
     //
-    // We fix this by keeping self-execution only at the published top-level CLI
-    // entrypoint and turning `eval-run.ts` into a reusable subcommand module.
+    // Before the refactor, `dist/bin/vieval.mjs` did not exist and
+    // `dist/cli/index.mjs` contained a direct-execution guard.
+    //
     const directExecutionGuards = [...bundledCliSource.matchAll(/if \(isDirectExecution(?:\$\d+)?\(\)\) await main(?:\$\d+)?\(\);/g)]
 
-    expect(directExecutionGuards).toHaveLength(1)
+    expect(directExecutionGuards).toHaveLength(0)
+    expect(bundledBinSource).toContain('runTopLevelCli(process.argv.slice(2)).catch')
   })
 })

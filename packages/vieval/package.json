@@ -59,7 +59,7 @@
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
   "bin": {
-    "vieval": "./dist/cli/index.mjs"
+    "vieval": "./dist/bin/vieval.mjs"
   },
   "files": [
     "README.md",
@@ -68,7 +68,7 @@
   ],
   "scripts": {
     "build": "tsdown",
-    "eval:run": "node --import tsx src/cli/index.ts run",
+    "eval:run": "node --import tsx src/bin/vieval.ts run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest",
     "test:run": "vitest run"
