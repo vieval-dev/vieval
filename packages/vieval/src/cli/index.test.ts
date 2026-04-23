@@ -1,6 +1,13 @@
+import { execFileSync } from 'node:child_process'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 import { describe, expect, it } from 'vitest'
 
 import { parseTopLevelCliArguments } from './index'
+
+const packageDirectory = fileURLToPath(new URL('../../', import.meta.url))
 
 describe('parseTopLevelCliArguments', () => {
   it('defaults to help when no command is provided', () => {
@@ -62,5 +69,35 @@ describe('parseTopLevelCliArguments', () => {
       command: 'compare',
       commandArgv: ['--config', 'vieval.cmp.config.ts'],
     })
+  })
+
+  /**
+   * @example
+   * expect(['if (isDirectExecution$1()) await main$1();', 'if (isDirectExecution()) await main();']).toHaveLength(1)
+   */
+  it('emits one self-executing CLI guard in the bundled artifact', async () => {
+    execFileSync('pnpm', ['build'], {
+      cwd: packageDirectory,
+      stdio: 'pipe',
+    })
+
+    const bundledCliSource = await readFile(join(packageDirectory, 'dist', 'cli', 'index.mjs'), 'utf-8')
+
+    // ROOT CAUSE:
+    //
+    // `src/cli/index.ts` is the published `bin`, but `src/cli/eval-run.ts`
+    // also used to self-execute.
+    // After bundling, both modules share the same `import.meta.url`, so both
+    // direct-execution guards can match inside one `dist/cli/index.mjs` file.
+    //
+    // Before the patch, the bundled artifact contained two statements:
+    // `if (isDirectExecution$1()) await main$1();`
+    // `if (isDirectExecution()) await main();`
+    //
+    // We fix this by keeping self-execution only at the published top-level CLI
+    // entrypoint and turning `eval-run.ts` into a reusable subcommand module.
+    const directExecutionGuards = [...bundledCliSource.matchAll(/if \(isDirectExecution(?:\$\d+)?\(\)\) await main(?:\$\d+)?\(\);/g)]
+
+    expect(directExecutionGuards).toHaveLength(1)
   })
 })

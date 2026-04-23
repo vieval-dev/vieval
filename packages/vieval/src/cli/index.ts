@@ -11,10 +11,9 @@ import meow from 'meow'
 import { errorMessageFrom } from '@moeru/std'
 
 import { runCompareCliOrExit } from './compare'
-import { parseCliArguments as parseRunCliArguments } from './eval-run'
+import { runEvalRunCli } from './eval-run'
 import { runReportAnalyzeCli } from './report-analyze'
 import { runReportIndexCli } from './report-index'
-import { formatVievalCliRunOutput, hasRunFailures, runVievalCli } from './run'
 
 type Command = 'compare' | 'report' | 'run'
 
@@ -106,28 +105,7 @@ export async function runTopLevelCli(argv: readonly string[]): Promise<void> {
     return
   }
 
-  const runArguments = parseRunCliArguments(parsed.commandArgv)
-  const output = await runVievalCli({
-    attempt: runArguments.attempt,
-    configFilePath: runArguments.configFilePath,
-    experiment: runArguments.experiment,
-    project: runArguments.project,
-    reportOut: runArguments.reportOut,
-    workspace: runArguments.workspace,
-  })
-
-  if (runArguments.json) {
-    process.stdout.write(`${JSON.stringify(output, null, 2)}\n`)
-    if (hasRunFailures(output)) {
-      process.exitCode = 1
-    }
-    return
-  }
-
-  process.stdout.write(`${formatVievalCliRunOutput(output)}\n`)
-  if (hasRunFailures(output)) {
-    process.exitCode = 1
-  }
+  await runEvalRunCli(parsed.commandArgv)
 }
 
 function isDirectExecution(): boolean {

@@ -1,9 +1,4 @@
-#!/usr/bin/env node
-
-import path from 'node:path'
 import process from 'node:process'
-
-import { fileURLToPath } from 'node:url'
 
 import meow from 'meow'
 
@@ -57,6 +52,19 @@ function normalizeProjectNames(projectNames: string | string[] | undefined): str
   return projectNames ?? []
 }
 
+/**
+ * Parses `vieval run` CLI arguments into one normalized execution payload.
+ *
+ * Use when:
+ * - the top-level CLI forwards `run` subcommand arguments
+ * - tests need stable flag normalization without executing the runner
+ *
+ * Expects:
+ * - argv in either direct `run` form or forwarded `-- ...` form
+ *
+ * Returns:
+ * - normalized run options ready for {@link runVievalCli}
+ */
 export function parseCliArguments(argv: readonly string[]): ParsedCliArguments {
   const cli = meow(evalRunHelpText, {
     argv: normalizeCliArgv(argv),
@@ -99,34 +107,36 @@ export function parseCliArguments(argv: readonly string[]): ParsedCliArguments {
   }
 }
 
-function isDirectExecution(): boolean {
-  if (!process.argv[1]) {
-    return false
-  }
-
-  return path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
-}
-
 /**
- * CLI entrypoint for `vieval run`.
+ * Executes the `vieval run` subcommand.
  *
  * Call stack:
  *
- * {@link main}
- *   -> {@link parseCliArguments}(`process.argv`)
- *   -> {@link runVievalCli}
- *   -> `process.stdout.write(...)` / `process.stderr.write(...)`
- *   -> `process.exitCode`
+ * top-level `vieval` CLI
+ *   -> {@link runTopLevelCli} (`./index`)
+ *     -> {@link runEvalRunCli}
+ *       -> {@link parseCliArguments}
+ *       -> {@link runVievalCli}
+ *       -> `process.stdout.write(...)` / `process.stderr.write(...)`
+ *       -> `process.exitCode`
  *
  * Use when:
- * - developers want project-style eval discovery and execution from one command
- * - manual `import.meta.glob` and runner wiring should stay internal
+ * - the published `vieval` binary needs to execute the `run` subcommand
+ * - callers want one reusable implementation without a second bundled entrypoint
+ *
+ * Expects:
+ * - argv that belongs to the `run` subcommand only
+ *
+ * Returns:
+ * - resolves after writing CLI output and updating `process.exitCode`
+ *
+ * NOTICE:
+ * - `src/cli/index.ts` is the only direct-execution entrypoint for the bundled
+ *   CLI artifact. Keeping `eval-run.ts` reusable avoids duplicate top-level
+ *   await guards once tsdown inlines both modules into `dist/cli/index.mjs`.
  */
-async function main(): Promise<void> {
-  // NOTICE:
-  // CLI arguments are read from process argv because this module is the
-  // user-facing executable entrypoint.
-  const parsed = parseCliArguments(process.argv.slice(2))
+export async function runEvalRunCli(argv: readonly string[]): Promise<void> {
+  const parsed = parseCliArguments(argv)
 
   try {
     const output = await runVievalCli({
@@ -156,8 +166,4 @@ async function main(): Promise<void> {
     process.stderr.write(`[${packageJSON.name}] ${errorMessage}\n`)
     process.exitCode = 1
   }
-}
-
-if (isDirectExecution()) {
-  await main()
 }
