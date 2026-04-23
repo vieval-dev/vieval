@@ -9,6 +9,11 @@
     "url": "https://github.com/vieval-dev"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vieval-dev/vieval.git",
+    "directory": "packages/vieval"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.mts",
