@@ -1,3 +1,5 @@
+import type { TaskExecutionPolicy } from './types'
+
 /**
  * Canonical model definition consumed by vieval runtime and config.
  *
@@ -36,6 +38,10 @@ export interface ModelDefinition {
    * Alias names that can resolve this model.
    */
   aliases: string[]
+  /**
+   * Optional execution policy hints attached to this model.
+   */
+  executionPolicy?: TaskExecutionPolicy
   /**
    * Optional model-level call parameters.
    */

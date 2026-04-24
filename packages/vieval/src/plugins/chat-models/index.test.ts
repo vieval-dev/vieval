@@ -222,4 +222,28 @@ describe('chatModels', () => {
       models: [],
     })).rejects.toThrow('Unknown chat provider "missing-provider" referenced by model "missing-provider:gpt-4.1-mini".')
   })
+
+  it('preserves explicit execution policy configured through chatModelFrom', () => {
+    expect(chatModelFrom({
+      autoAttempt: 2,
+      autoRetry: 1,
+      model: 'gpt-4.1-mini',
+      provider: 'openai-provider',
+      timeout: 3_000,
+    }).executionPolicy).toEqual({
+      autoAttempt: 2,
+      autoRetry: 1,
+      timeout: 3_000,
+    })
+  })
+
+  it('defaults judge-oriented chat models to autoRetry = 3', () => {
+    expect(chatModelFrom({
+      aliases: ['judge-mini'],
+      inferenceExecutor: 'openai',
+      model: 'gpt-4.1-mini',
+    }).executionPolicy).toEqual({
+      autoRetry: 3,
+    })
+  })
 })

@@ -12,6 +12,8 @@ import type {
 
 import c from 'tinyrainbow'
 
+import { formatDuration as formatDateFnsDuration, intervalToDuration } from 'date-fns'
+
 // NOTICE:
 // Adapted from Vitest's SummaryReporter state-model and live summary layout.
 // Source permalink: https://github.com/vitest-dev/vitest/blob/v4.1.1/packages/vitest/src/node/reporters/summary.ts
@@ -27,6 +29,7 @@ interface SummaryReporterCounterState {
   failed: number
   passed: number
   skipped: number
+  timeout: number
   total: number
 }
 
@@ -172,6 +175,11 @@ interface TaskRuntimeState {
   taskId: string
   taskResult: CliReporterTaskState | undefined
   totalCases: number
+}
+
+interface ProgressTimingState {
+  elapsedDurationMs: number
+  estimatedDurationMs?: number
 }
 
 class SummaryReporterStateMachine implements SummaryReporter {
@@ -332,6 +340,11 @@ class SummaryReporterStateMachine implements SummaryReporter {
       return
     }
 
+    if (payload.state === 'timeout') {
+      this.caseCounters.timeout += 1
+      return
+    }
+
     this.caseCounters.skipped += 1
   }
 
@@ -447,20 +460,21 @@ class SummaryReporterStateMachine implements SummaryReporter {
     const rows: string[] = []
 
     for (const task of activeTasks) {
+      const now = this.options.getNow()
       const suffix = task.state === 'queued'
         ? c.dim(' [queued]')
-        : ` ${task.completedCases}/${task.totalCases}`
+        : formatTaskProgressSuffix(task, now)
       const badge = formatProjectBadge(task.projectName, this.options.isTTY)
       rows.push(c.bold(c.yellow(` ${POINTER} `)) + badge + task.displayName + c.dim(suffix))
 
       const slowCases = Array
         .from(task.runningCases.values())
-        .filter(activeCase => this.options.getNow() - activeCase.startedAt >= this.options.slowThresholdMs)
+        .filter(activeCase => now - activeCase.startedAt >= this.options.slowThresholdMs)
         .sort((left, right) => left.order - right.order)
 
       for (const [index, activeCase] of slowCases.entries()) {
         const icon = index === slowCases.length - 1 ? TREE_NODE_END : TREE_NODE_MIDDLE
-        const elapsed = Math.max(0, this.options.getNow() - activeCase.startedAt)
+        const elapsed = Math.max(0, now - activeCase.startedAt)
         rows.push(
           c.bold(c.yellow(`   ${icon} `))
           + activeCase.caseName
@@ -473,11 +487,30 @@ class SummaryReporterStateMachine implements SummaryReporter {
   }
 
   private createFooterRows(): string[] {
+    const now = this.options.getNow()
+    const runElapsedDurationMs = Math.max(0, now - this.startedAtMs)
+    const taskRunningCount = countRunningTasks(this.tasks.values())
+    const caseRunningCount = countRunningCases(this.tasks.values())
+
     return [
-      padSummaryTitle('Tasks') + formatCounterState(this.taskCounters),
-      padSummaryTitle('Cases') + formatCounterState(this.caseCounters),
+      padSummaryTitle('Tasks') + formatCounterState(
+        this.taskCounters,
+        taskRunningCount,
+        {
+          elapsedDurationMs: runElapsedDurationMs,
+          estimatedDurationMs: estimateTotalDurationMs(this.taskCounters.completed, this.taskCounters.total, runElapsedDurationMs),
+        },
+      ),
+      padSummaryTitle('Cases') + formatCounterState(
+        this.caseCounters,
+        caseRunningCount,
+        {
+          elapsedDurationMs: runElapsedDurationMs,
+          estimatedDurationMs: estimateTotalDurationMs(this.caseCounters.completed, this.caseCounters.total, runElapsedDurationMs),
+        },
+      ),
       padSummaryTitle('Start at') + this.startTime,
-      padSummaryTitle('Duration') + formatDuration(Math.max(0, this.options.getNow() - this.startedAtMs)),
+      padSummaryTitle('Duration') + formatHumanDuration(runElapsedDurationMs),
     ]
   }
 
@@ -547,6 +580,7 @@ function createCounterState(): SummaryReporterCounterState {
     failed: 0,
     passed: 0,
     skipped: 0,
+    timeout: 0,
     total: 0,
   }
 }
@@ -556,6 +590,7 @@ function resetCounterState(counter: SummaryReporterCounterState, total: number):
   counter.failed = 0
   counter.passed = 0
   counter.skipped = 0
+  counter.timeout = 0
   counter.total = total
 }
 
@@ -590,12 +625,21 @@ function padSummaryTitle(label: string): string {
   return `${c.dim(label.padEnd(8))} `
 }
 
-function formatCounterState(counter: SummaryReporterCounterState): string {
+function formatCounterState(
+  counter: SummaryReporterCounterState,
+  runningCount: number,
+  timing: ProgressTimingState,
+): string {
+  const plannedCount = Math.max(0, counter.total - counter.completed - runningCount)
+
   return [
+    plannedCount > 0 ? c.bold(c.blue(`${plannedCount} planned`)) : c.dim(`${plannedCount} planned`),
+    runningCount > 0 ? c.bold(c.yellow(`${runningCount} running`)) : c.dim(`${runningCount} running`),
     c.bold(c.green(`${counter.passed} passed`)),
     counter.failed > 0 ? c.bold(c.red(`${counter.failed} failed`)) : c.dim(`${counter.failed} failed`),
+    counter.timeout > 0 ? c.bold(c.yellow(`${counter.timeout} timeout`)) : c.dim(`${counter.timeout} timeout`),
     counter.skipped > 0 ? c.yellow(`${counter.skipped} skipped`) : c.dim(`${counter.skipped} skipped`),
-  ].join(c.dim(' | ')) + c.gray(` (${counter.total})`)
+  ].join(c.dim(' | ')) + c.gray(` (${counter.total})`) + formatTimingSuffix(timing)
 }
 
 function formatTimeString(date: Date): string {
@@ -603,11 +647,24 @@ function formatTimeString(date: Date): string {
 }
 
 function formatDuration(durationMs: number): string {
-  if (durationMs >= 1_000) {
-    return `${(durationMs / 1_000).toFixed(2)}s`
+  return formatHumanDuration(durationMs)
+}
+
+function formatHumanDuration(durationMs: number): string {
+  if (durationMs < 1_000) {
+    return `${Math.round(durationMs)}ms`
   }
 
-  return `${Math.round(durationMs)}ms`
+  const formatted = formatDateFnsDuration(intervalToDuration({
+    end: durationMs,
+    start: 0,
+  }), {
+    delimiter: ' ',
+    format: ['hours', 'minutes', 'seconds'],
+    zero: false,
+  })
+
+  return formatted.length > 0 ? formatted : '0 seconds'
 }
 
 function formatProjectBadge(projectName: string | undefined, isTTY: boolean): string {
@@ -625,4 +682,72 @@ function formatProjectBadge(projectName: string | undefined, isTTY: boolean): st
     .reduce((accumulator, character, index) => accumulator + character.charCodeAt(0) + index, 0)
   const background = backgroundPool[seed % backgroundPool.length]
   return `${c.black(background(` ${projectName} `))} `
+}
+
+function countRunningCases(tasks: Iterable<TaskRuntimeState>): number {
+  let runningCount = 0
+
+  for (const task of tasks) {
+    runningCount += task.runningCases.size
+  }
+
+  return runningCount
+}
+
+function countRunningTasks(tasks: Iterable<TaskRuntimeState>): number {
+  let runningCount = 0
+
+  for (const task of tasks) {
+    if (task.state === 'running') {
+      runningCount += 1
+    }
+  }
+
+  return runningCount
+}
+
+function estimateTaskDurationMs(task: TaskRuntimeState, now: number): number | undefined {
+  if (task.startedAt == null) {
+    return undefined
+  }
+
+  return estimateTotalDurationMs(
+    task.completedCases,
+    task.totalCases,
+    Math.max(0, now - task.startedAt),
+  )
+}
+
+function estimateTotalDurationMs(
+  completedCount: number,
+  totalCount: number,
+  elapsedDurationMs: number,
+): number | undefined {
+  if (completedCount === 0 || totalCount === 0) {
+    return undefined
+  }
+
+  const averageDurationMs = elapsedDurationMs / completedCount
+  return Math.round(averageDurationMs * totalCount)
+}
+
+function formatTaskProgressSuffix(task: TaskRuntimeState, now: number): string {
+  const elapsedDurationMs = task.startedAt == null
+    ? 0
+    : Math.max(0, now - task.startedAt)
+
+  return ` ${task.completedCases}/${task.totalCases}${formatTimingSuffix({
+    elapsedDurationMs,
+    estimatedDurationMs: estimateTaskDurationMs(task, now),
+  })}`
+}
+
+function formatTimingSuffix(timing: ProgressTimingState): string {
+  const parts = [`elapsed ${formatHumanDuration(timing.elapsedDurationMs)}`]
+
+  if (timing.estimatedDurationMs != null) {
+    parts.push(`estimated ${formatHumanDuration(timing.estimatedDurationMs)}`)
+  }
+
+  return ` (${parts.join(', ')})`
 }

@@ -8,7 +8,7 @@
  * Expects:
  * - reporters treat the values as terminal case results
  */
-export type CliReporterCaseState = 'passed' | 'failed' | 'skipped'
+export type CliReporterCaseState = 'passed' | 'failed' | 'skipped' | 'timeout'
 
 /**
  * Allowed lifecycle outcomes for one task.
@@ -52,6 +52,10 @@ export interface CliReporterTaskQueuedPayload {
    * Stable task identifier.
    */
   taskId: string
+  /**
+   * Total number of cases currently known for the task.
+   */
+  totalCases?: number
 }
 
 /**

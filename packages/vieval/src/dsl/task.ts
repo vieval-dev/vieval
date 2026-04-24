@@ -1,9 +1,10 @@
-import type { TaskRunContext, TaskRunOutput } from '../config'
+import type { TaskConcurrencyConfig, TaskExecutionPolicy, TaskRunContext, TaskRunOutput } from '../config'
 import type { RunScoreKind } from '../core/runner'
 
 import { errorMessageFrom } from '@moeru/std'
 
 import { defineEval, defineTask } from '../config'
+import { createSchedulerQueue } from '../core/scheduler/queue'
 import { registerEvalDefinition } from './registry'
 
 /**
@@ -35,6 +36,10 @@ export interface CaseRunContext<TInput> extends TaskRunContext {
    * - `value` to be JSON-serializable
    */
   metric: (name: string, value: boolean | number | string | null) => void
+  /**
+   * Cooperative abort signal for the current case execution.
+   */
+  signal: AbortSignal
 }
 
 /**
@@ -43,9 +48,48 @@ export interface CaseRunContext<TInput> extends TaskRunContext {
 export type CaseRunner<TInput> = (context: CaseRunContext<TInput>) => Promise<void> | void
 
 interface RegisteredCase<TInput> {
+  concurrency?: number
+  executionPolicy?: TaskExecutionPolicy
   input: TInput
   name: string
+  queueKey?: object
   run: CaseRunner<TInput>
+}
+
+/**
+ * Per-group options for `casesFromInputs`.
+ *
+ * Use when:
+ * - one generated case group should run with a lower case concurrency than the task default
+ * - a task should keep a broader task-level cap while one expensive case family stays bounded
+ *
+ * Expects:
+ * - `concurrency` to be a positive integer when provided
+ *
+ * Returns:
+ * - one partial case-group execution descriptor
+ */
+export interface CasesFromInputsOptions extends TaskExecutionPolicy {
+  /**
+   * Case-level concurrency cap for cases registered by one `casesFromInputs(...)` call.
+   */
+  concurrency?: number
+}
+
+/**
+ * Per-case registration options for `caseOf`.
+ */
+export interface CaseRegistrationOptions<TInput> extends TaskExecutionPolicy {
+  /**
+   * Optional case input payload.
+   */
+  input: TInput
+}
+
+interface CaseExecutionOutcome {
+  errorMessage?: string
+  scoresByKind: Map<RunScoreKind, number>
+  state: 'failed' | 'passed' | 'timeout'
 }
 
 function cloneCaseMatrix(matrix: TaskRunContext['task']['matrix']): TaskRunContext['task']['matrix'] {
@@ -72,6 +116,18 @@ function assertValidScore(score: number): void {
   }
 }
 
+function assertNonNegativeInteger(value: number, label: string): void {
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value < 0) {
+    throw new Error(`Invalid ${label}: ${String(value)}`)
+  }
+}
+
+function assertPositiveInteger(value: number, label: string): void {
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value <= 0) {
+    throw new Error(`Invalid ${label}: ${String(value)}`)
+  }
+}
+
 function emitCaseStart(
   hooks: TaskRunContext['reporterHooks'] | undefined,
   payload: {
@@ -92,7 +148,7 @@ function emitCaseEnd(
   hooks: TaskRunContext['reporterHooks'] | undefined,
   payload: {
     index: number
-    state: 'passed' | 'failed'
+    state: 'passed' | 'failed' | 'timeout'
     name: string
     total: number
     errorMessage?: string
@@ -106,6 +162,175 @@ function emitCaseEnd(
   }
 }
 
+function createCaseTimeoutError(timeout: number): Error {
+  const error = new Error(`Case timed out after ${timeout}ms.`)
+  error.name = 'TimeoutError'
+  return error
+}
+
+function normalizeExecutionPolicy(policy: TaskExecutionPolicy | undefined, label: string): TaskExecutionPolicy | undefined {
+  if (policy == null) {
+    return undefined
+  }
+
+  if (policy.autoAttempt != null) {
+    assertNonNegativeInteger(policy.autoAttempt, `${label} autoAttempt`)
+  }
+
+  if (policy.autoRetry != null) {
+    assertNonNegativeInteger(policy.autoRetry, `${label} autoRetry`)
+  }
+
+  if (policy.timeout != null) {
+    assertPositiveInteger(policy.timeout, `${label} timeout`)
+  }
+
+  const normalized = {
+    autoAttempt: policy.autoAttempt,
+    autoRetry: policy.autoRetry,
+    timeout: policy.timeout,
+  }
+
+  return Object.values(normalized).some(value => value != null)
+    ? normalized
+    : undefined
+}
+
+function resolveCaseExecutionPolicy(
+  taskCase: RegisteredCase<unknown>,
+  taskExecutionPolicy: TaskExecutionPolicy | undefined,
+): Required<Pick<TaskExecutionPolicy, 'autoAttempt' | 'autoRetry'>> & Pick<TaskExecutionPolicy, 'timeout'> {
+  return {
+    autoAttempt: taskCase.executionPolicy?.autoAttempt ?? taskExecutionPolicy?.autoAttempt ?? 0,
+    autoRetry: taskCase.executionPolicy?.autoRetry ?? taskExecutionPolicy?.autoRetry ?? 0,
+    timeout: taskCase.executionPolicy?.timeout ?? taskExecutionPolicy?.timeout,
+  }
+}
+
+async function runCaseOnce(
+  context: TaskRunContext,
+  taskCase: RegisteredCase<unknown>,
+  index: number,
+  timeout: number | undefined,
+): Promise<CaseExecutionOutcome> {
+  const customScoresByKind = new Map<RunScoreKind, number>()
+  const abortController = new AbortController()
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+  let timedOut = false
+  let settled = false
+
+  try {
+    const runPromise = Promise.resolve(taskCase.run({
+      ...context,
+      matrix: {
+        ...cloneCaseMatrix(context.task.matrix),
+        inputs: taskCase.input,
+      },
+      metric(name, value) {
+        if (abortController.signal.aborted || settled) {
+          return
+        }
+
+        context.reporterHooks?.onEvent?.({
+          caseId: createTaskCaseReporterId(index, taskCase.name),
+          data: {
+            name,
+            value,
+          },
+          event: 'task.case.metric',
+        })
+      },
+      score(score, kind = 'exact') {
+        if (abortController.signal.aborted || settled) {
+          return
+        }
+
+        assertValidScore(score)
+        customScoresByKind.set(kind, score)
+      },
+      signal: abortController.signal,
+    }))
+
+    if (timeout != null) {
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          timedOut = true
+          abortController.abort(createCaseTimeoutError(timeout))
+          reject(createCaseTimeoutError(timeout))
+        }, timeout)
+      })
+
+      await Promise.race([runPromise, timeoutPromise])
+    }
+    else {
+      await runPromise
+    }
+
+    settled = true
+    return {
+      scoresByKind: customScoresByKind,
+      state: 'passed',
+    }
+  }
+  catch (error) {
+    settled = true
+    return {
+      errorMessage: errorMessageFrom(error) ?? (timedOut && timeout != null ? `Case timed out after ${timeout}ms.` : 'Unknown case failure.'),
+      scoresByKind: customScoresByKind,
+      state: timedOut ? 'timeout' : 'failed',
+    }
+  }
+  finally {
+    if (timeoutHandle != null) {
+      clearTimeout(timeoutHandle)
+    }
+  }
+}
+
+async function executeRegisteredCase(
+  context: TaskRunContext,
+  taskCase: RegisteredCase<unknown>,
+  index: number,
+  taskExecutionPolicy: TaskExecutionPolicy | undefined,
+): Promise<CaseExecutionOutcome> {
+  const resolvedPolicy = resolveCaseExecutionPolicy(taskCase, taskExecutionPolicy)
+  let lastOutcome: CaseExecutionOutcome | undefined
+
+  for (let retryIndex = 0; retryIndex <= resolvedPolicy.autoRetry; retryIndex += 1) {
+    lastOutcome = await runCaseOnce(context, taskCase, index, resolvedPolicy.timeout)
+    if (lastOutcome.state === 'passed') {
+      return lastOutcome
+    }
+  }
+
+  return lastOutcome ?? {
+    errorMessage: 'Unknown case failure.',
+    scoresByKind: new Map(),
+    state: 'failed',
+  }
+}
+
+function collectCaseOutcomeScores(
+  outcome: CaseExecutionOutcome,
+  scoreBucketsByKind: Record<RunScoreKind, number[]>,
+): void {
+  if (outcome.state !== 'passed') {
+    scoreBucketsByKind.exact.push(0)
+    return
+  }
+
+  if (outcome.scoresByKind.size === 0) {
+    scoreBucketsByKind.exact.push(1)
+    return
+  }
+
+  scoreBucketsByKind.exact.push(outcome.scoresByKind.get('exact') ?? 1)
+  const judgeScore = outcome.scoresByKind.get('judge')
+  if (judgeScore != null) {
+    scoreBucketsByKind.judge.push(judgeScore)
+  }
+}
+
 /**
  * Builder callbacks passed into `describeTask`.
  */
@@ -115,7 +340,7 @@ export interface DescribeTaskBuilder {
    */
   caseOf: {
     (name: string, run: CaseRunner<undefined>): void
-    <TInput>(name: string, run: CaseRunner<TInput>, options: { input: TInput }): void
+    <TInput>(name: string, run: CaseRunner<TInput>, options: CaseRegistrationOptions<TInput>): void
   }
   /**
    * Registers multiple cases from input list.
@@ -124,28 +349,43 @@ export interface DescribeTaskBuilder {
     namePrefix: string,
     inputs: readonly TInput[],
     run: CaseRunner<TInput>,
+    options?: CasesFromInputsOptions,
   ) => void
 }
 
 /**
  * Options for `describeTask`.
  */
-export interface DescribeTaskOptions {
+export interface DescribeTaskOptions extends TaskExecutionPolicy {
   /**
    * Optional description override.
    */
   description?: string
+  /**
+   * Optional task-local concurrency overrides.
+   *
+   * Use when:
+   * - one task should cap attempt fan-out independently from the surrounding project
+   * - one task should cap case fan-out without changing global scheduling defaults
+   *
+   * Expects:
+   * - each provided value to be a positive integer
+   *
+   * @default inherited from project or CLI concurrency settings
+   */
+  concurrency?: TaskConcurrencyConfig
 }
 
 function createCaseBuilder(registeredCases: RegisteredCase<unknown>[]): DescribeTaskBuilder {
   function registerCase(name: string, run: CaseRunner<undefined>): void
-  function registerCase<TInput>(name: string, run: CaseRunner<TInput>, options: { input: TInput }): void
+  function registerCase<TInput>(name: string, run: CaseRunner<TInput>, options: CaseRegistrationOptions<TInput>): void
   function registerCase<TInput>(
     name: string,
     run: CaseRunner<TInput> | CaseRunner<undefined>,
-    options?: { input: TInput },
+    options?: CaseRegistrationOptions<TInput>,
   ): void {
     registeredCases.push({
+      executionPolicy: normalizeExecutionPolicy(options, 'task case'),
       input: options?.input,
       name,
       run: run as CaseRunner<unknown>,
@@ -154,11 +394,16 @@ function createCaseBuilder(registeredCases: RegisteredCase<unknown>[]): Describe
 
   return {
     caseOf: registerCase,
-    casesFromInputs(namePrefix, inputs, run) {
+    casesFromInputs(namePrefix, inputs, run, options) {
+      const queueKey = options?.concurrency == null ? undefined : {}
+
       inputs.forEach((input, index) => {
         registeredCases.push({
+          concurrency: options?.concurrency,
+          executionPolicy: normalizeExecutionPolicy(options, 'casesFromInputs'),
           input,
           name: `${namePrefix} #${index + 1}`,
+          queueKey,
           run: run as CaseRunner<unknown>,
         })
       })
@@ -199,15 +444,16 @@ export function caseOf(
 export function caseOf<TInput>(
   name: string,
   run: CaseRunner<TInput>,
-  options: { input: TInput },
+  options: CaseRegistrationOptions<TInput>,
 ): void
 
 export function caseOf<TInput>(
   name: string,
   run: CaseRunner<TInput> | CaseRunner<undefined>,
-  options?: { input: TInput },
+  options?: CaseRegistrationOptions<TInput>,
 ): void {
   getActiveCases().push({
+    executionPolicy: normalizeExecutionPolicy(options, 'task case'),
     input: options?.input,
     name,
     run: run as CaseRunner<unknown>,
@@ -221,14 +467,51 @@ export function casesFromInputs<TInput>(
   namePrefix: string,
   inputs: readonly TInput[],
   run: CaseRunner<TInput>,
+  options?: CasesFromInputsOptions,
 ): void {
+  const queueKey = options?.concurrency == null ? undefined : {}
+
   inputs.forEach((input, index) => {
     getActiveCases().push({
+      concurrency: options?.concurrency,
+      executionPolicy: normalizeExecutionPolicy(options, 'casesFromInputs'),
       input,
       name: `${namePrefix} #${index + 1}`,
+      queueKey,
       run: run as CaseRunner<unknown>,
     })
   })
+}
+
+/**
+ * Resolves the effective case concurrency for one registered task case.
+ *
+ * Before:
+ * - registered case override `2`, task default `4`
+ * - registered case override `undefined`, task default `3`
+ *
+ * After:
+ * - `2`
+ * - `3`
+ */
+function resolveCaseConcurrency(
+  taskCase: RegisteredCase<unknown>,
+  taskConcurrency: TaskConcurrencyConfig | undefined,
+): number | undefined {
+  const concurrency = taskCase.concurrency ?? taskConcurrency?.case
+  if (concurrency == null) {
+    return undefined
+  }
+
+  if (!Number.isFinite(concurrency) || !Number.isInteger(concurrency) || concurrency <= 0) {
+    throw new Error(`Invalid task case concurrency: ${String(concurrency)}`)
+  }
+
+  return concurrency
+}
+
+function resolveCaseQueueKey(taskCase: RegisteredCase<unknown>, defaultQueueKey: object): object {
+  return taskCase.queueKey ?? defaultQueueKey
 }
 
 /**
@@ -255,11 +538,14 @@ export function describeTask(
   })
 
   const description = options.description ?? name
+  const taskExecutionPolicy = normalizeExecutionPolicy(options, 'describeTask')
 
   const definition = defineEval({
     description,
     name,
     task: defineTask({
+      concurrency: options.concurrency,
+      executionPolicy: taskExecutionPolicy,
       id: name,
       async run(context): Promise<TaskRunOutput> {
         if (registeredCases.length === 0) {
@@ -269,79 +555,112 @@ export function describeTask(
         }
 
         const totalCases = registeredCases.length
-
         const scoreBucketsByKind: Record<RunScoreKind, number[]> = {
           exact: [],
           judge: [],
         }
+        const defaultCaseQueueKey = {}
+        const caseQueues = new Map<object, ReturnType<typeof createSchedulerQueue>>()
+        const hasAutoAttempt = registeredCases.some(taskCase => resolveCaseExecutionPolicy(taskCase, taskExecutionPolicy).autoAttempt > 0)
 
-        await Promise.all(
-          registeredCases.map(async (taskCase, index) => {
+        if (!hasAutoAttempt) {
+          await Promise.all(
+            registeredCases.map(async (taskCase, index) => {
+              emitCaseStart(context.reporterHooks, {
+                index,
+                name: taskCase.name,
+                total: totalCases,
+              })
+
+              const executeCase = async () => {
+                const outcome = await executeRegisteredCase(context, taskCase, index, taskExecutionPolicy)
+                emitCaseEnd(context.reporterHooks, {
+                  ...(outcome.errorMessage == null ? {} : { errorMessage: outcome.errorMessage }),
+                  index,
+                  state: outcome.state,
+                  name: taskCase.name,
+                  total: totalCases,
+                })
+                collectCaseOutcomeScores(outcome, scoreBucketsByKind)
+              }
+
+              const concurrency = resolveCaseConcurrency(taskCase, options.concurrency)
+              if (concurrency == null) {
+                await executeCase()
+                return
+              }
+
+              const queueKey = resolveCaseQueueKey(taskCase, defaultCaseQueueKey)
+              const queue = caseQueues.get(queueKey) ?? createSchedulerQueue(concurrency)
+              caseQueues.set(queueKey, queue)
+              await queue.run(executeCase)
+            }),
+          )
+        }
+        else {
+          registeredCases.forEach((taskCase, index) => {
             emitCaseStart(context.reporterHooks, {
               index,
               name: taskCase.name,
               total: totalCases,
             })
+          })
 
-            let state: 'passed' | 'failed' = 'passed'
-            let errorMessage: string | undefined
-            const caseId = createTaskCaseReporterId(index, taskCase.name)
-            const customScoresByKind = new Map<RunScoreKind, number>()
+          let finalOutcomes: CaseExecutionOutcome[] = []
+          let attemptIndex = 0
 
-            try {
-              await taskCase.run({
-                ...context,
-                matrix: {
-                  ...cloneCaseMatrix(context.task.matrix),
-                  inputs: taskCase.input,
-                },
-                metric(name, value) {
-                  context.reporterHooks?.onEvent?.({
-                    caseId,
-                    data: {
-                      name,
-                      value,
-                    },
-                    event: 'task.case.metric',
-                  })
-                },
-                score(score, kind = 'exact') {
-                  assertValidScore(score)
-                  customScoresByKind.set(kind, score)
-                },
-              })
-            }
-            catch (error) {
-              state = 'failed'
-              errorMessage = errorMessageFrom(error) ?? 'Unknown case failure.'
-            }
-            finally {
-              emitCaseEnd(context.reporterHooks, {
-                ...(errorMessage == null ? {} : { errorMessage }),
-                index,
-                state,
-                name: taskCase.name,
-                total: totalCases,
-              })
+          for (;;) {
+            finalOutcomes = await Promise.all(
+              registeredCases.map(async (taskCase, index) => {
+                const executeCase = async () => await executeRegisteredCase(context, taskCase, index, taskExecutionPolicy)
+                const concurrency = resolveCaseConcurrency(taskCase, options.concurrency)
+                if (concurrency == null) {
+                  return await executeCase()
+                }
+
+                const queueKey = resolveCaseQueueKey(taskCase, defaultCaseQueueKey)
+                const queue = caseQueues.get(queueKey) ?? createSchedulerQueue(concurrency)
+                caseQueues.set(queueKey, queue)
+                return await queue.run(executeCase)
+              }),
+            )
+
+            const shouldContinue = finalOutcomes.some((outcome, index) => {
+              if (outcome.state === 'passed') {
+                return false
+              }
+
+              const taskCase = registeredCases[index]
+              if (taskCase == null) {
+                return false
+              }
+
+              return attemptIndex < resolveCaseExecutionPolicy(taskCase, taskExecutionPolicy).autoAttempt
+            })
+
+            if (!shouldContinue) {
+              break
             }
 
-            if (state === 'failed') {
-              scoreBucketsByKind.exact.push(0)
+            attemptIndex += 1
+          }
+
+          finalOutcomes.forEach((outcome, index) => {
+            const taskCase = registeredCases[index]
+            if (taskCase == null) {
               return
             }
 
-            if (customScoresByKind.size === 0) {
-              scoreBucketsByKind.exact.push(1)
-              return
-            }
-
-            scoreBucketsByKind.exact.push(customScoresByKind.get('exact') ?? 1)
-            const judgeScore = customScoresByKind.get('judge')
-            if (judgeScore != null) {
-              scoreBucketsByKind.judge.push(judgeScore)
-            }
-          }),
-        )
+            emitCaseEnd(context.reporterHooks, {
+              ...(outcome.errorMessage == null ? {} : { errorMessage: outcome.errorMessage }),
+              index,
+              state: outcome.state,
+              name: taskCase.name,
+              total: totalCases,
+            })
+            collectCaseOutcomeScores(outcome, scoreBucketsByKind)
+          })
+        }
 
         const scores = (Object.keys(scoreBucketsByKind) as RunScoreKind[])
           .filter(kind => scoreBucketsByKind[kind].length > 0)

@@ -1,4 +1,4 @@
-import type { MatrixDefinition } from '../../config'
+import type { MatrixDefinition, TaskExecutionPolicy } from '../../config'
 import type { ModelDefinition } from '../../config/models'
 import type { ConfigHookPlugin } from '../../config/plugin'
 import type { EnvFromOptions, RequiredEnvFromOptions } from '../../core/inference-executors/env'
@@ -120,6 +120,26 @@ export interface ChatModelFromBaseOptions {
    */
   aliases?: string[]
   /**
+   * Optional execution policy hints attached to this model.
+   */
+  executionPolicy?: TaskExecutionPolicy
+  /**
+   * Additional retries allowed within the current attempt.
+   *
+   * @default 0
+   */
+  autoRetry?: number
+  /**
+   * Additional full task attempts allowed after the current attempt settles.
+   *
+   * @default 0
+   */
+  autoAttempt?: number
+  /**
+   * Timeout in milliseconds for model-backed work.
+   */
+  timeout?: number
+  /**
    * Optional model-level call parameters.
    */
   parameters?: Record<string, unknown>
@@ -141,6 +161,52 @@ export type ChatModelDefinition = Omit<ModelDefinition, 'inferenceExecutor'> & {
     baseURL?: ChatModelResolverValue<string>
     headers?: ChatModelResolverValue<ChatModelHeaders>
   }
+}
+
+function normalizeExecutionPolicy(
+  policy: TaskExecutionPolicy | undefined,
+): TaskExecutionPolicy | undefined {
+  if (policy == null) {
+    return undefined
+  }
+
+  const normalized = {
+    autoAttempt: policy.autoAttempt,
+    autoRetry: policy.autoRetry,
+    timeout: policy.timeout,
+  }
+
+  return Object.values(normalized).some(value => value != null)
+    ? normalized
+    : undefined
+}
+
+function hasJudgeAlias(model: Pick<ChatModelFromBaseOptions, 'aliases' | 'id' | 'model'>): boolean {
+  return [
+    ...(model.aliases ?? []),
+    ...(model.id == null ? [] : [model.id]),
+    model.model,
+  ].some(value => value.toLowerCase().includes('judge'))
+}
+
+function resolveModelExecutionPolicy(options: ChatModelFromOptions): TaskExecutionPolicy | undefined {
+  const explicitPolicy = normalizeExecutionPolicy({
+    autoAttempt: options.autoAttempt ?? options.executionPolicy?.autoAttempt,
+    autoRetry: options.autoRetry ?? options.executionPolicy?.autoRetry,
+    timeout: options.timeout ?? options.executionPolicy?.timeout,
+  })
+
+  if (explicitPolicy != null && Object.keys(explicitPolicy).length > 0) {
+    return explicitPolicy
+  }
+
+  if (hasJudgeAlias(options)) {
+    return {
+      autoRetry: 3,
+    }
+  }
+
+  return undefined
 }
 
 /**
@@ -484,6 +550,7 @@ export function chatModelFrom(options: ChatModelFromOptions): ChatModelDefinitio
 
   return {
     aliases: options.aliases ?? [],
+    executionPolicy: resolveModelExecutionPolicy(options),
     id: options.id ?? createDefaultModelId(inferenceExecutorId, options.model),
     inferenceExecutor: fallbackInferenceExecutor,
     inferenceExecutorId,

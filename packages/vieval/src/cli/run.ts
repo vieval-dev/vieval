@@ -15,7 +15,7 @@ import c from 'tinyrainbow'
 
 import { errorMessageFrom } from '@moeru/std'
 
-import { collectEvalEntries, createFilesystemTaskCacheRuntime, createRunnerRuntimeContext, createRunnerSchedule, createTaskExecutionContext, RunnerExecutionError, runScheduledTasks } from '../core/runner'
+import { collectEvalEntries, createFilesystemTaskCacheRuntime, createRunnerRuntimeContext, createRunnerSchedule, createSchedulerRuntime, createTaskExecutionContext, RunnerExecutionError, runScheduledTasks } from '../core/runner'
 import { loadVievalCliConfig } from './config'
 import { discoverEvalFiles } from './discovery'
 import { loadEvalModulesWithVitestRuntime } from './module-runtime'
@@ -53,6 +53,7 @@ interface RunCliProjectCaseCounters {
   passed: number
   seenCaseIds: Set<string>
   skipped: number
+  timeout: number
 }
 
 type CliRunReporter = Omit<CliReporter, 'onCaseStart' | 'onTaskQueued'> & {
@@ -88,6 +89,14 @@ export interface RunVievalCliOptions extends LoadVievalCliConfigOptions {
    */
   attempt?: string
   /**
+   * Optional attempt-level concurrency cap parsed by the CLI.
+   */
+  attemptConcurrency?: number
+  /**
+   * Optional case-level concurrency cap parsed by the CLI.
+   */
+  caseConcurrency?: number
+  /**
    * Experiment id attached to report artifacts.
    */
   experiment?: string
@@ -97,6 +106,10 @@ export interface RunVievalCliOptions extends LoadVievalCliConfigOptions {
    * @default []
    */
   project?: string[]
+  /**
+   * Optional project-level concurrency cap parsed by the CLI.
+   */
+  projectConcurrency?: number
   /**
    * Optional report output root directory.
    */
@@ -109,6 +122,14 @@ export interface RunVievalCliOptions extends LoadVievalCliConfigOptions {
    * Workspace id attached to report artifacts.
    */
   workspace?: string
+  /**
+   * Optional task-level concurrency cap parsed by the CLI.
+   */
+  taskConcurrency?: number
+  /**
+   * Optional workspace-level concurrency cap parsed by the CLI.
+   */
+  workspaceConcurrency?: number
   /**
    * Cache project identifier override used to share benchmark cache across multiple method runs.
    */
@@ -139,6 +160,7 @@ export interface CliProjectCaseSummary {
   failed: number
   passed: number
   skipped: number
+  timeout: number
   total: number
 }
 
@@ -184,7 +206,7 @@ export function hasRunFailures(output: CliRunOutput): boolean {
       return true
     }
 
-    if (project.caseSummary != null && project.caseSummary.failed > 0) {
+    if (project.caseSummary != null && (project.caseSummary.failed > 0 || project.caseSummary.timeout > 0)) {
       return true
     }
 
@@ -231,6 +253,50 @@ interface CliColorPalette {
   green: (value: string) => string
   red: (value: string) => string
   yellow: (value: string) => string
+}
+
+function resolveCappedConcurrency(
+  defaultConcurrency: number | undefined,
+  cliConcurrency: number | undefined,
+  fallback: number,
+): number {
+  const effectiveDefault = defaultConcurrency ?? fallback
+  if (cliConcurrency == null) {
+    return effectiveDefault
+  }
+
+  return Math.min(effectiveDefault, cliConcurrency)
+}
+
+function resolveWorkspaceConcurrency(
+  loadedConfig: Awaited<ReturnType<typeof loadVievalCliConfig>>,
+  options: RunVievalCliOptions,
+): number {
+  return resolveCappedConcurrency(loadedConfig.concurrency?.workspace, options.workspaceConcurrency, 1)
+}
+
+function resolveProjectConcurrency(
+  project: NormalizedCliProjectConfig,
+  options: RunVievalCliOptions,
+): number {
+  return resolveCappedConcurrency(project.concurrency?.project, options.projectConcurrency, Number.POSITIVE_INFINITY)
+}
+
+function resolveTaskConcurrency(
+  project: NormalizedCliProjectConfig,
+  options: RunVievalCliOptions,
+): number {
+  return resolveCappedConcurrency(project.concurrency?.task, options.taskConcurrency, 1)
+}
+
+function resolveScheduledTaskConcurrency(
+  project: NormalizedCliProjectConfig,
+  options: RunVievalCliOptions,
+): number {
+  return Math.min(
+    resolveProjectConcurrency(project, options),
+    resolveTaskConcurrency(project, options),
+  )
 }
 
 function shouldUseColor(): boolean {
@@ -581,6 +647,9 @@ function createTaskReporterHooks(
           else if (payload.state === 'failed') {
             projectCaseCounters.failed += 1
           }
+          else if (payload.state === 'timeout') {
+            projectCaseCounters.timeout += 1
+          }
           else {
             projectCaseCounters.skipped += 1
           }
@@ -588,7 +657,7 @@ function createTaskReporterHooks(
       }
 
       syncCaseTotal(payload.total)
-      if (payload.state === 'failed' && payload.errorMessage != null && projectCaseFailures != null) {
+      if ((payload.state === 'failed' || payload.state === 'timeout') && payload.errorMessage != null && projectCaseFailures != null) {
         projectCaseFailures.push({
           caseId,
           caseName: payload.name,
@@ -834,6 +903,7 @@ async function executePreparedProject(
   reporter: CliRunReporter,
   counters: RunCliReporterCounters,
   recordEvent: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void,
+  options: RunVievalCliOptions,
 ): Promise<CliProjectSummary> {
   const settledTaskIds = new Set<string>()
   const projectCaseCounters: RunCliProjectCaseCounters = {
@@ -841,6 +911,7 @@ async function executePreparedProject(
     passed: 0,
     seenCaseIds: new Set<string>(),
     skipped: 0,
+    timeout: 0,
   }
   const projectCaseFailures: CliProjectCaseFailure[] = []
   const vitestCompatReporter = await createVievalVitestCompatReporterBridge({
@@ -915,6 +986,7 @@ async function executePreparedProject(
           taskId: task.id,
         })
       },
+      maxConcurrency: resolveScheduledTaskConcurrency(prepared.project, options),
     })
 
     await vitestCompatReporter?.onRunEnd({
@@ -926,6 +998,7 @@ async function executePreparedProject(
         failed: projectCaseCounters.failed,
         passed: projectCaseCounters.passed,
         skipped: projectCaseCounters.skipped,
+        timeout: projectCaseCounters.timeout,
         total: projectCaseCounters.seenCaseIds.size,
       },
       caseFailures: projectCaseFailures,
@@ -982,6 +1055,7 @@ async function executePreparedProject(
         failed: projectCaseCounters.failed,
         passed: projectCaseCounters.passed,
         skipped: projectCaseCounters.skipped,
+        timeout: projectCaseCounters.timeout,
         total: projectCaseCounters.seenCaseIds.size,
       },
       caseFailures: projectCaseFailures,
@@ -1058,6 +1132,11 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
 
   try {
     const selectedProjects = filterProjectsByName(loadedConfig.projects, options.project ?? [])
+    const workspaceScheduler = createSchedulerRuntime({
+      concurrency: {
+        workspace: resolveWorkspaceConcurrency(loadedConfig, options),
+      },
+    })
     const preparedProjects = await Promise.all(selectedProjects.map(async project => prepareProject(project)))
     const executableProjects = preparedProjects
       .filter(project => project.kind === 'prepared')
@@ -1092,23 +1171,35 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
       }
     }
 
-    const projectSummaries: CliProjectSummary[] = []
-
-    for (const preparedProject of preparedProjects) {
+    const projectSummaryPairs = await Promise.all(preparedProjects.map(async (preparedProject, index) => {
       if (preparedProject.kind === 'summary') {
-        projectSummaries.push(preparedProject.summary)
-        continue
+        return {
+          index,
+          summary: preparedProject.summary,
+        }
       }
 
-      projectSummaries.push(await executePreparedProject(
-        preparedProject.prepared,
-        identity,
-        options.cacheProjectName,
-        reporter,
-        reporterCounters,
-        eventRecorder.record,
-      ))
-    }
+      return {
+        index,
+        summary: await workspaceScheduler.runCase({
+          experimentId: identity.experimentId,
+          projectName: preparedProject.prepared.name,
+          scope: 'workspace',
+          workspaceId: identity.workspaceId,
+        }, async () => executePreparedProject(
+          preparedProject.prepared,
+          identity,
+          options.cacheProjectName,
+          reporter,
+          reporterCounters,
+          eventRecorder.record,
+          options,
+        )),
+      }
+    }))
+    const projectSummaries = projectSummaryPairs
+      .sort((left, right) => left.index - right.index)
+      .map(item => item.summary)
 
     reporter.onRunEnd({
       failedTasks: reporterCounters.failedTasks,
@@ -1209,7 +1300,7 @@ export function formatVievalCliRunOutput(output: CliRunOutput): string {
 
     const badge = createProjectBadge(project.name, colors, colorEnabled)
     const isFailed = project.errorMessage != null
-    const hasFailedCases = (project.caseSummary?.failed ?? 0) > 0 || (project.caseFailures?.length ?? 0) > 0
+    const hasFailedCases = (project.caseSummary?.failed ?? 0) > 0 || (project.caseSummary?.timeout ?? 0) > 0 || (project.caseFailures?.length ?? 0) > 0
     if (isFailed) {
       failedProjects += 1
       lines.push(` ${colors.red('❯')} ${badge}${formatDuration(project.durationMs, colors)}`)
@@ -1245,7 +1336,7 @@ export function formatVievalCliRunOutput(output: CliRunOutput): string {
     const countLabel = colors.dim(`(${project.taskCount} tasks)`)
     const caseSummaryLabel = project.caseSummary == null
       ? ''
-      : `, cases ${project.caseSummary.passed} passed | ${project.caseSummary.failed} failed`
+      : `, cases ${project.caseSummary.passed} passed | ${project.caseSummary.failed} failed | ${project.caseSummary.timeout} timeout`
     const detailsLabel = colors.dim(` ${project.discoveredEvalFileCount} files, ${project.entryCount} entries, ${runCount} runs${caseSummaryLabel}, hybrid ${hybridAverageLabel}`)
     const matrixSummary = formatMatrixSummary(project.matrixSummary)
     lines.push(` ${hasFailedCases ? colors.red('❯') : colors.green('✓')} ${badge}${countLabel}${detailsLabel}${formatDuration(project.durationMs, colors)}`)

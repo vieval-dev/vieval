@@ -31,6 +31,10 @@
       "types": "./dist/core/runner/index.d.mts",
       "default": "./dist/core/runner/index.mjs"
     },
+    "./core/scheduler": {
+      "types": "./dist/core/scheduler/index.d.mts",
+      "default": "./dist/core/scheduler/index.mjs"
+    },
     "./core/assertions": {
       "types": "./dist/core/assertions/index.d.mts",
       "default": "./dist/core/assertions/index.mjs"
@@ -74,6 +78,7 @@
     "test:run": "vitest run"
   },
   "dependencies": {
+    "@henrygd/queue": "catalog:",
     "@moeru/std": "catalog:",
     "@pnpm/find-workspace-dir": "catalog:",
     "@vitest/expect": "catalog:vitest",
@@ -81,6 +86,7 @@
     "@xsai-ext/providers": "catalog:",
     "@xsai/generate-text": "catalog:",
     "c12": "catalog:",
+    "date-fns": "catalog:",
     "es-toolkit": "catalog:",
     "fast-string-width": "catalog:",
     "meow": "catalog:",

@@ -20,6 +20,7 @@ overrides:
 catalog:
   '@antfu/eslint-config': ^8.2.0
   '@arethetypeswrong/core': ^0.18.2
+  '@henrygd/queue': ^1.2.0
   '@moeru/eslint-config': 0.1.0-beta.15
   '@moeru/std': 0.1.0-beta.17
   '@pnpm/find-workspace-dir': ^1000.1.5
@@ -30,6 +31,7 @@ catalog:
   '@xsai/providers': ^0.1.0-beta.5
   bumpp: ^11.0.1
   c12: ^4.0.0-beta.4
+  date-fns: ^4.1.0
   es-toolkit: 1.43.0
   eslint: ^10.2.0
   eslint-plugin-oxlint: ^1.60.0

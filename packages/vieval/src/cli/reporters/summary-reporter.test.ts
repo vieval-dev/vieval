@@ -41,7 +41,7 @@ describe('createSummaryReporter', () => {
    * @example
    * it('shows a running task progress row and task/case counters', () => {})
    */
-  it('shows a running task progress row and task/case counters', () => {
+  it('shows planned and running counters plus elapsed and estimated timing in active task rows', () => {
     let now = 1_000
     const reporter = createSummaryReporter({
       getColumns: () => 120,
@@ -65,6 +65,7 @@ describe('createSummaryReporter', () => {
 
     now = 1_120
     reporter.onCaseEnd({ caseId: 'case-1', state: 'passed', taskId: 'task-a' })
+    reporter.onCaseStart({ caseId: 'case-2', caseName: 'case 2', taskId: 'task-a' })
 
     const rows = reporter.getWindowRows()
     const activeRow = findRow(rows, 'task.test.ts')
@@ -81,21 +82,59 @@ describe('createSummaryReporter', () => {
      * expect(activeRow).toContain('1/4')
      */
     expect(activeRow).toContain('1/4')
+    expect(activeRow).toContain('elapsed')
+    expect(activeRow).toContain('estimated')
     /**
      * @example
      * expect(tasksRow).toContain('(2)')
      */
     expect(tasksRow).toContain('(2)')
+    expect(tasksRow).toContain('1 running')
+    expect(tasksRow).toContain('1 planned')
+    expect(tasksRow).toContain('elapsed')
     /**
      * @example
      * expect(casesRow).toContain('1 passed')
      */
     expect(casesRow).toContain('1 passed')
+    expect(casesRow).toContain('2 planned')
+    expect(casesRow).toContain('1 running')
+    expect(casesRow).toContain('estimated')
     /**
      * @example
      * expect(casesRow).toContain('(4)')
      */
     expect(casesRow).toContain('(4)')
+  })
+
+  it('keeps task ETA undefined until at least one case has completed', () => {
+    let now = 2_000
+    const reporter = createSummaryReporter({
+      getColumns: () => 120,
+      getNow: () => now,
+      getWallClockNow: () => new Date(2026, 3, 15, 9, 30, 0, 0).getTime(),
+      isTTY: true,
+      slowThresholdMs: 300,
+      writeError: () => {},
+      writeOutput: () => {},
+    })
+
+    reporter.onRunStart({ totalTasks: 1 })
+    reporter.onTaskQueued({
+      displayName: 'eta-pending.eval.ts',
+      projectName: 'vieval',
+      taskId: 'task-eta-pending',
+      totalCases: 3,
+    })
+    reporter.onTaskStart({ taskId: 'task-eta-pending' })
+    reporter.onCaseStart({ caseId: 'case-1', caseName: 'case 1', taskId: 'task-eta-pending' })
+
+    now = 2_450
+
+    const activeRow = findRow(reporter.getWindowRows(), 'eta-pending.eval.ts')
+
+    expect(activeRow).toContain('elapsed')
+    expect(activeRow).not.toContain('estimated')
   })
 
   /**
@@ -302,9 +341,40 @@ describe('createSummaryReporter', () => {
     expect(findRow(rows, 'Start at')).toContain('01:02:03')
     /**
      * @example
-     * expect(findRow(rows, 'Duration')).toContain('1.00s')
+     * expect(findRow(rows, 'Duration')).toContain('1 second')
      */
-    expect(findRow(rows, 'Duration')).toContain('1.00s')
+    expect(findRow(rows, 'Duration')).toContain('1 second')
+  })
+
+  it('renders planned, running, terminal counts, elapsed, and estimated duration in footer rows', () => {
+    let now = 5_000
+    const reporter = createSummaryReporter({
+      getColumns: () => 120,
+      getNow: () => now,
+      getWallClockNow: () => new Date('2026-04-24T23:52:53Z').valueOf(),
+      isTTY: true,
+      slowThresholdMs: 300,
+      writeError: () => {},
+      writeOutput: () => {},
+    })
+
+    reporter.onRunStart({ totalTasks: 4 })
+    reporter.onTaskQueued({ taskId: 'task-1', totalCases: 4 })
+    reporter.onTaskQueued({ taskId: 'task-2', totalCases: 2 })
+    reporter.onTaskStart({ taskId: 'task-1' })
+    reporter.onCaseStart({ caseId: 'case-1', caseName: 'case 1', taskId: 'task-1' })
+
+    now = 6_000
+    reporter.onCaseEnd({ caseId: 'case-1', state: 'passed', taskId: 'task-1' })
+    reporter.onTaskStart({ taskId: 'task-2' })
+    reporter.onTaskEnd({ state: 'passed', taskId: 'task-2' })
+
+    const rows = reporter.getWindowRows().map(stripAnsi).join('\n')
+
+    expect(rows).toContain('planned')
+    expect(rows).toContain('running')
+    expect(rows).toContain('elapsed')
+    expect(rows).toContain('estimated')
   })
 
   /**

@@ -1,4 +1,5 @@
 export * from '../cache'
+export * from '../scheduler'
 export * from './aggregate'
 export * from './collect'
 export * from './run'

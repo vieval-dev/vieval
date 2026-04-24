@@ -25,6 +25,42 @@ const require = createRequire(import.meta.url)
 export type CliConfigPlugin = ConfigHookPlugin<CliConfig>
 
 /**
+ * Concurrency limits that can be declared in CLI-facing config.
+ *
+ * Use when:
+ * - the CLI needs independent caps for workspace, project, task, attempt, or case scheduling scopes
+ * - config authors want to define concurrency without wiring runtime execution yet
+ *
+ * Expects:
+ * - each provided value to be a positive integer chosen by the caller
+ *
+ * Returns:
+ * - one partial concurrency descriptor keyed by scheduling scope
+ */
+export interface CliConcurrencyConfig {
+  /**
+   * Workspace-level concurrency cap.
+   */
+  workspace?: number
+  /**
+   * Project-level concurrency cap.
+   */
+  project?: number
+  /**
+   * Task-level concurrency cap.
+   */
+  task?: number
+  /**
+   * Attempt-level concurrency cap.
+   */
+  attempt?: number
+  /**
+   * Case-level concurrency cap.
+   */
+  case?: number
+}
+
+/**
  * Defines one project block for `vieval run`.
  */
 export interface CliProjectConfig {
@@ -73,6 +109,12 @@ export interface CliProjectConfig {
    * Optional eval-time matrix dimensions.
    */
   evalMatrix?: MatrixDefinition | MatrixLayer
+  /**
+   * Optional project-scoped concurrency overrides.
+   *
+   * @default inherited from top-level or CLI execution settings
+   */
+  concurrency?: Omit<CliConcurrencyConfig, 'workspace'>
   /**
    * Optional task executor.
    *
@@ -197,6 +239,19 @@ interface CliConfigBase {
    */
   models?: ModelDefinition[]
   /**
+   * Global concurrency defaults inherited by projects and tasks.
+   *
+   * Use when:
+   * - config authors want one shared concurrency policy across workspace, project, task, attempt, and case scopes
+   * - project-local overrides should start from a top-level baseline
+   *
+   * Expects:
+   * - each provided value to be a positive integer chosen by the caller
+   *
+   * @default undefined
+   */
+  concurrency?: CliConcurrencyConfig
+  /**
    * Global config plugins.
    *
    * @default []
@@ -273,6 +328,7 @@ export interface LoadedRawCliConfig {
  * Normalized CLI project used by runtime orchestration.
  */
 export interface NormalizedCliProjectConfig {
+  concurrency?: Omit<CliConcurrencyConfig, 'workspace'>
   exclude: string[]
   executor?: (task: ScheduledTask, context: CliProjectExecutorContext) => Promise<RunResult>
   include: string[]
@@ -289,6 +345,7 @@ export interface NormalizedCliProjectConfig {
  * Result of loading and normalizing a config file.
  */
 export interface LoadedCliConfig {
+  concurrency?: CliConcurrencyConfig
   configFilePath: string | null
   env: NodeJS.ProcessEnv
   projects: NormalizedCliProjectConfig[]
@@ -509,9 +566,41 @@ function normalizeMatrixLayerInput(matrix: MatrixDefinition | MatrixLayer | unde
   }
 }
 
+function toProjectConcurrencyDefaults(
+  concurrency: CliConcurrencyConfig | undefined,
+): Omit<CliConcurrencyConfig, 'workspace'> | undefined {
+  if (concurrency == null) {
+    return undefined
+  }
+
+  return {
+    attempt: concurrency.attempt,
+    case: concurrency.case,
+    project: concurrency.project,
+    task: concurrency.task,
+  }
+}
+
+function mergeProjectConcurrency(
+  inheritedConcurrency: Omit<CliConcurrencyConfig, 'workspace'> | undefined,
+  projectConcurrency: Omit<CliConcurrencyConfig, 'workspace'> | undefined,
+): Omit<CliConcurrencyConfig, 'workspace'> | undefined {
+  if (inheritedConcurrency == null && projectConcurrency == null) {
+    return undefined
+  }
+
+  return {
+    attempt: projectConcurrency?.attempt ?? inheritedConcurrency?.attempt,
+    case: projectConcurrency?.case ?? inheritedConcurrency?.case,
+    project: projectConcurrency?.project ?? inheritedConcurrency?.project,
+    task: projectConcurrency?.task ?? inheritedConcurrency?.task,
+  }
+}
+
 function normalizeProjectConfig(
   project: CliProjectConfig,
   cwd: string,
+  inheritedConcurrency: Omit<CliConcurrencyConfig, 'workspace'> | undefined,
   inheritedModels: readonly ModelDefinition[],
   inheritedReporterReferences: readonly VievalVitestCompatReporterReference[],
 ): NormalizedCliProjectConfig {
@@ -534,8 +623,10 @@ function normalizeProjectConfig(
     ? cwd
     : (isAbsolute(project.root) ? project.root : resolve(cwd, project.root))
   const reporters = project.reporters ?? [...inheritedReporterReferences]
+  const concurrency = mergeProjectConcurrency(inheritedConcurrency, project.concurrency)
 
   return {
+    concurrency,
     exclude,
     executor: project.executor,
     include,
@@ -561,10 +652,17 @@ function normalizeConfig(config: CliConfig | null | undefined, cwd: string): Nor
   }
 
   const projects = config?.projects ?? [{ name: 'default' }]
+  const inheritedConcurrency = toProjectConcurrencyDefaults(config?.concurrency)
   const inheritedModels = config?.models ?? []
   const inheritedReporterReferences = config?.reporters ?? []
 
-  return projects.map(project => normalizeProjectConfig(project, cwd, inheritedModels, inheritedReporterReferences))
+  return projects.map(project => normalizeProjectConfig(
+    project,
+    cwd,
+    inheritedConcurrency,
+    inheritedModels,
+    inheritedReporterReferences,
+  ))
 }
 
 /**
@@ -647,6 +745,7 @@ export async function loadVievalCliConfig(options: LoadVievalCliConfigOptions = 
     const loadedConfig = await loadRawVievalConfig(options)
     if (loadedConfig.configFilePath == null || loadedConfig.config == null) {
       return {
+        concurrency: undefined,
         configFilePath: null,
         env: {},
         projects: normalizeConfig(null, cwd),
@@ -656,6 +755,7 @@ export async function loadVievalCliConfig(options: LoadVievalCliConfigOptions = 
     const config = loadedConfig.config
 
     return {
+      concurrency: config.concurrency,
       configFilePath: loadedConfig.configFilePath,
       env: config.env ?? {},
       projects: normalizeConfig(config, dirname(loadedConfig.configFilePath)),

@@ -7,6 +7,7 @@ export default defineConfig({
     'config': 'src/config/index.ts',
     'cli/index': 'src/cli/index.ts',
     'core/runner/index': 'src/core/runner/index.ts',
+    'core/scheduler/index': 'src/core/scheduler/index.ts',
     'core/assertions/index': 'src/core/assertions/index.ts',
     'core/processors/results/index': 'src/core/processors/results/index.ts',
     'core/inference-executors/index': 'src/core/inference-executors/index.ts',

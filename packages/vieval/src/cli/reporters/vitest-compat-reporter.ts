@@ -226,7 +226,7 @@ export async function createVievalVitestCompatReporterBridge(options: {
   return {
     async onCaseEnd(payload) {
       const taskCase = getOrCreateCase(payload.taskId, payload.caseId)
-      taskCase.state = payload.state
+      taskCase.state = payload.state === 'timeout' ? 'failed' : payload.state
       await emitToReporters(loadedReporters, reporter => reporter.onTestCaseResult?.(taskCase))
     },
 

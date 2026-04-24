@@ -10,12 +10,75 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { formatVievalCliRunOutput, runVievalCli } from './run'
 
 const packageDirectory = fileURLToPath(new URL('../../', import.meta.url))
+const concurrencyCasesFromInputsProjectDirectory = join(packageDirectory, 'tests', 'projects', 'concurrency-cases-from-inputs')
+const concurrencyCliOverridesProjectDirectory = join(packageDirectory, 'tests', 'projects', 'concurrency-cli-overrides')
+const concurrencyExperimentMetadataProjectDirectory = join(packageDirectory, 'tests', 'projects', 'concurrency-experiment-metadata')
+const concurrencyTaskProjectDirectory = join(packageDirectory, 'tests', 'projects', 'concurrency-task')
+const executionPolicyAutoAttemptProjectDirectory = join(packageDirectory, 'tests', 'projects', 'execution-policy-auto-attempt')
+const executionPolicyAutoRetryProjectDirectory = join(packageDirectory, 'tests', 'projects', 'execution-policy-auto-retry')
+const executionPolicyTimeoutProjectDirectory = join(packageDirectory, 'tests', 'projects', 'execution-policy-timeout')
 const fixtureProjectDirectory = join(packageDirectory, 'tests', 'projects', 'example-pattern-byoa-bring-your-own-agent')
 const taskProjectDirectory = join(packageDirectory, 'tests', 'projects', 'example-api-defining-new-task')
 const temporaryDirectories: string[] = []
+const blockingRunStateKey = '__VIEVAL_BLOCKING_RUN_STATE__'
+
+interface BlockingRunState {
+  active: number
+  peak: number
+  projectActive: Record<string, number>
+  projectPeak: Record<string, number>
+  releases: Array<() => void>
+  started: string[]
+}
+
+interface BlockingProjectFixtureOptions {
+  concurrencySource?: string
+  evalNames: string[]
+  name: string
+}
+
+function createBlockingRunState(): BlockingRunState {
+  return {
+    active: 0,
+    peak: 0,
+    projectActive: {},
+    projectPeak: {},
+    releases: [],
+    started: [],
+  }
+}
+
+function setBlockingRunState(state: BlockingRunState): void {
+  ;(globalThis as typeof globalThis & {
+    [blockingRunStateKey]?: BlockingRunState
+  })[blockingRunStateKey] = state
+}
+
+function clearBlockingRunState(): void {
+  delete (globalThis as typeof globalThis & {
+    [blockingRunStateKey]?: BlockingRunState
+  })[blockingRunStateKey]
+}
 
 function stripAnsi(value: string): string {
   return stripVTControlCharacters(value)
+}
+
+async function waitForExpectation(assertion: () => void, attempts = 30): Promise<void> {
+  let lastError: unknown
+
+  for (let index = 0; index < attempts; index += 1) {
+    try {
+      assertion()
+      return
+    }
+    catch (error) {
+      lastError = error
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+  }
+
+  throw lastError
 }
 
 async function createDslTaskProject(): Promise<string> {
@@ -122,8 +185,117 @@ export default defineConfig({
   return temporaryDirectory
 }
 
+async function createBlockingExecutorProject(options: {
+  concurrencySource?: string
+  projects: BlockingProjectFixtureOptions[]
+  topLevelConcurrencySource?: string
+}): Promise<string> {
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-blocking-run-'))
+  temporaryDirectories.push(temporaryDirectory)
+
+  const cliConfigImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
+  const evalConfigImportPath = join(packageDirectory, 'src', 'config', 'index.ts').replaceAll('\\', '/')
+
+  await Promise.all(options.projects.map(async (project) => {
+    const projectDirectory = join(temporaryDirectory, project.name, 'evals')
+    await mkdir(projectDirectory, { recursive: true })
+
+    await Promise.all(project.evalNames.map(async (evalName) => {
+      await writeFile(
+        join(projectDirectory, `${evalName}.eval.ts`),
+        `
+import { defineEval, defineTask } from '${evalConfigImportPath}'
+
+export default defineEval({
+  description: '${project.name} ${evalName}',
+  name: '${evalName}',
+  task: defineTask({
+    id: '${evalName}',
+    run() {
+      return {
+        scores: [
+          {
+            kind: 'exact',
+            score: 1,
+          },
+        ],
+      }
+    },
+  }),
+})
+`,
+        'utf-8',
+      )
+    }))
+  }))
+
+  const projectEntries = options.projects.map(project => `
+    {
+      name: '${project.name}',
+      root: './${project.name}',
+      include: ['evals/*.eval.ts'],
+      ${project.concurrencySource == null ? '' : `concurrency: ${project.concurrencySource},`}
+      executor: async (task) => {
+        const state = globalThis.${blockingRunStateKey}
+
+        if (state == null) {
+          throw new Error('Missing blocking run state.')
+        }
+
+        state.active += 1
+        state.peak = Math.max(state.peak, state.active)
+        state.started.push('${project.name}:' + task.entry.name)
+        state.projectActive['${project.name}'] = (state.projectActive['${project.name}'] ?? 0) + 1
+        state.projectPeak['${project.name}'] = Math.max(
+          state.projectPeak['${project.name}'] ?? 0,
+          state.projectActive['${project.name}'],
+        )
+
+        await new Promise<void>((resolve) => {
+          state.releases.push(() => {
+            state.active -= 1
+            state.projectActive['${project.name}'] -= 1
+            resolve()
+          })
+        })
+
+        return {
+          entryId: task.entry.id,
+          id: task.id,
+          inferenceExecutorId: task.inferenceExecutor.id,
+          matrix: task.matrix,
+          scores: [
+            {
+              kind: 'exact',
+              score: 1,
+            },
+          ],
+        }
+      },
+    }
+  `).join(',\n')
+
+  await writeFile(
+    join(temporaryDirectory, 'vieval.config.ts'),
+    `
+import { defineConfig } from '${cliConfigImportPath}'
+
+export default defineConfig({
+  ${options.topLevelConcurrencySource == null ? '' : `concurrency: ${options.topLevelConcurrencySource},`}
+  projects: [
+${projectEntries}
+  ],
+})
+`,
+    'utf-8',
+  )
+
+  return temporaryDirectory
+}
+
 describe('runVievalCli', () => {
   afterEach(async () => {
+    clearBlockingRunState()
     await Promise.all(
       temporaryDirectories.map(async (temporaryDirectory) => {
         await rm(temporaryDirectory, { force: true, recursive: true })
@@ -510,6 +682,272 @@ export default defineConfig({
     expect(output.projects[0].result?.overall.hybridAverage).toBe(1)
   })
 
+  it('runs tasks from multiple projects concurrently while honoring workspace and project caps', async () => {
+    const state = createBlockingRunState()
+    setBlockingRunState(state)
+
+    const projectDirectory = await createBlockingExecutorProject({
+      projects: [
+        {
+          concurrencySource: '{ project: 1, task: 2 }',
+          evalNames: ['alpha-1', 'alpha-2'],
+          name: 'alpha',
+        },
+        {
+          concurrencySource: '{ project: 1, task: 2 }',
+          evalNames: ['beta-1', 'beta-2'],
+          name: 'beta',
+        },
+      ],
+      topLevelConcurrencySource: '{ workspace: 2 }',
+    })
+
+    const runPromise = runVievalCli({
+      configFilePath: join(projectDirectory, 'vieval.config.ts'),
+      cwd: projectDirectory,
+    })
+
+    await waitForExpectation(() => {
+      expect(state.started).toHaveLength(2)
+      expect(state.started.some(entry => entry.startsWith('alpha:'))).toBe(true)
+      expect(state.started.some(entry => entry.startsWith('beta:'))).toBe(true)
+      expect(state.projectPeak.alpha).toBe(1)
+      expect(state.projectPeak.beta).toBe(1)
+      expect(state.peak).toBe(2)
+    })
+
+    await Promise.resolve()
+    expect(state.started).toHaveLength(2)
+
+    state.releases.splice(0).forEach(release => release())
+
+    await waitForExpectation(() => {
+      expect(state.started).toHaveLength(4)
+    })
+
+    state.releases.splice(0).forEach(release => release())
+
+    const output = await runPromise
+
+    expect(output.projects).toHaveLength(2)
+    expect(output.projects.every(project => project.executed)).toBe(true)
+  })
+
+  it('caps task execution concurrency with CLI taskConcurrency over higher project defaults', async () => {
+    const state = createBlockingRunState()
+    setBlockingRunState(state)
+
+    const projectDirectory = await createBlockingExecutorProject({
+      projects: [
+        {
+          concurrencySource: '{ task: 3 }',
+          evalNames: ['task-1', 'task-2', 'task-3'],
+          name: 'alpha',
+        },
+      ],
+    })
+
+    const runPromise = runVievalCli({
+      configFilePath: join(projectDirectory, 'vieval.config.ts'),
+      cwd: projectDirectory,
+      taskConcurrency: 2,
+    })
+
+    await waitForExpectation(() => {
+      expect(state.started).toHaveLength(2)
+      expect(state.peak).toBe(2)
+    })
+
+    await Promise.resolve()
+    expect(state.started).toHaveLength(2)
+
+    state.releases.splice(0).forEach(release => release())
+
+    await waitForExpectation(() => {
+      expect(state.started).toHaveLength(3)
+    })
+
+    state.releases.splice(0).forEach(release => release())
+
+    const output = await runPromise
+
+    expect(output.projects[0]?.executed).toBe(true)
+  })
+
+  it('does not raise task execution concurrency above the configured project default', async () => {
+    const state = createBlockingRunState()
+    setBlockingRunState(state)
+
+    const projectDirectory = await createBlockingExecutorProject({
+      projects: [
+        {
+          concurrencySource: '{ task: 1 }',
+          evalNames: ['task-1', 'task-2'],
+          name: 'alpha',
+        },
+      ],
+    })
+
+    const runPromise = runVievalCli({
+      configFilePath: join(projectDirectory, 'vieval.config.ts'),
+      cwd: projectDirectory,
+      taskConcurrency: 3,
+    })
+
+    await waitForExpectation(() => {
+      expect(state.started).toHaveLength(1)
+      expect(state.peak).toBe(1)
+    })
+
+    await Promise.resolve()
+    expect(state.started).toHaveLength(1)
+
+    state.releases.splice(0).forEach(release => release())
+
+    await waitForExpectation(() => {
+      expect(state.started).toHaveLength(2)
+    })
+
+    state.releases.splice(0).forEach(release => release())
+
+    const output = await runPromise
+
+    expect(output.projects[0]?.executed).toBe(true)
+  })
+
+  it('runs the concurrency-cases-from-inputs fixture as an executable example', async () => {
+    const output = await runVievalCli({
+      configFilePath: join(concurrencyCasesFromInputsProjectDirectory, 'vieval.config.ts'),
+      cwd: concurrencyCasesFromInputsProjectDirectory,
+    })
+
+    expect(output.projects[0]?.executed).toBe(true)
+    expect(output.projects[0]?.taskCount).toBe(1)
+  }, 60_000)
+
+  it('runs the concurrency-task fixture as an executable example', async () => {
+    const output = await runVievalCli({
+      configFilePath: join(concurrencyTaskProjectDirectory, 'vieval.config.ts'),
+      cwd: concurrencyTaskProjectDirectory,
+    })
+
+    expect(output.projects[0]?.executed).toBe(true)
+    expect(output.projects[0]?.taskCount).toBe(1)
+  })
+
+  it('runs the concurrency-cli-overrides fixture with CLI caps as an executable example', async () => {
+    const output = await runVievalCli({
+      configFilePath: join(concurrencyCliOverridesProjectDirectory, 'vieval.config.ts'),
+      cwd: concurrencyCliOverridesProjectDirectory,
+      projectConcurrency: 1,
+      taskConcurrency: 1,
+      workspaceConcurrency: 1,
+    })
+
+    expect(output.projects).toHaveLength(1)
+    expect(output.projects[0]?.executed).toBe(true)
+  })
+
+  it('keeps experiment as run metadata and not as a scheduling scope', async () => {
+    const output = await runVievalCli({
+      configFilePath: join(taskProjectDirectory, 'vieval.config.ts'),
+      cwd: taskProjectDirectory,
+      experiment: 'baseline-exp',
+    })
+
+    expect(output.experimentId).toBe('baseline-exp')
+    expect(output.projects[0]?.executed).toBe(true)
+  })
+
+  it('runs the concurrency-experiment-metadata fixture and keeps experiment as metadata', async () => {
+    const output = await runVievalCli({
+      configFilePath: join(concurrencyExperimentMetadataProjectDirectory, 'vieval.config.ts'),
+      cwd: concurrencyExperimentMetadataProjectDirectory,
+      experiment: 'fixture-exp',
+    })
+
+    expect(output.experimentId).toBe('fixture-exp')
+    expect(output.projects[0]?.executed).toBe(true)
+  })
+
+  it('runs the execution-policy-timeout fixture and reports timeout cases distinctly', async () => {
+    const output = await runVievalCli({
+      configFilePath: join(executionPolicyTimeoutProjectDirectory, 'vieval.config.ts'),
+      cwd: executionPolicyTimeoutProjectDirectory,
+    })
+
+    expect(output.projects[0]?.executed).toBe(true)
+    expect(output.projects[0]?.caseSummary).toEqual({
+      failed: 0,
+      passed: 1,
+      skipped: 0,
+      timeout: 1,
+      total: 2,
+    })
+    expect(output.projects[0]?.caseFailures?.[0]?.errorMessage).toContain('timed out')
+  })
+
+  it('runs the execution-policy-auto-retry fixture and recovers after in-attempt retries', async () => {
+    const output = await runVievalCli({
+      configFilePath: join(executionPolicyAutoRetryProjectDirectory, 'vieval.config.ts'),
+      cwd: executionPolicyAutoRetryProjectDirectory,
+    })
+
+    expect(output.projects[0]?.executed).toBe(true)
+    expect(output.projects[0]?.caseSummary).toEqual({
+      failed: 0,
+      passed: 1,
+      skipped: 0,
+      timeout: 0,
+      total: 1,
+    })
+    expect(output.projects[0]?.caseFailures).toEqual([])
+  })
+
+  it('runs the execution-policy-auto-attempt fixture and waits for the first attempt to settle before retrying the task', async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-auto-attempt-log-'))
+    temporaryDirectories.push(temporaryDirectory)
+    const logFilePath = join(temporaryDirectory, 'attempt-log.json')
+
+    process.env.VIEVAL_TEST_LOG_PATH = logFilePath
+
+    try {
+      const output = await runVievalCli({
+        configFilePath: join(executionPolicyAutoAttemptProjectDirectory, 'vieval.config.ts'),
+        cwd: executionPolicyAutoAttemptProjectDirectory,
+      })
+
+      expect(output.projects[0]?.executed).toBe(true)
+      expect(output.projects[0]?.caseSummary).toEqual({
+        failed: 0,
+        passed: 2,
+        skipped: 0,
+        timeout: 0,
+        total: 2,
+      })
+
+      const logEntries = (await readFile(logFilePath, 'utf-8'))
+        .split('\n')
+        .filter(Boolean)
+      const attemptZeroEndIndex = Math.max(
+        logEntries.indexOf('end:case-a:0'),
+        logEntries.indexOf('end:case-b:0:failed'),
+      )
+      const attemptOneStartIndex = Math.min(
+        logEntries.indexOf('start:case-a:1'),
+        logEntries.indexOf('start:case-b:1'),
+      )
+
+      expect(attemptZeroEndIndex).toBeGreaterThan(-1)
+      expect(attemptOneStartIndex).toBeGreaterThan(-1)
+      expect(attemptOneStartIndex).toBeGreaterThan(logEntries.indexOf('end:case-a:0'))
+      expect(attemptOneStartIndex).toBeGreaterThan(logEntries.indexOf('end:case-b:0:failed'))
+    }
+    finally {
+      delete process.env.VIEVAL_TEST_LOG_PATH
+    }
+  })
+
   it('includes case pass/fail counts in executed project summary lines', async () => {
     const output = await runVievalCli({
       configFilePath: join(taskProjectDirectory, 'vieval.config.ts'),
@@ -768,6 +1206,10 @@ export default defineConfig({
      * expect(terminalOutput).toContain('(1)')
      */
     expect(terminalOutput).toContain('(1)')
+    expect(terminalOutput).toContain('planned')
+    expect(terminalOutput).toContain('running')
+    expect(terminalOutput).toContain('elapsed')
+    expect(terminalOutput).toContain('estimated')
   })
 
   /**
@@ -871,7 +1313,9 @@ describeTask('custom-live-task', () => {
     const terminalOutput = stripAnsi(writes.join(''))
 
     expect(terminalOutput).toContain('0/1')
-    expect(terminalOutput).toContain('Cases    1 passed | 0 failed | 0 skipped (1)')
+    expect(terminalOutput).toContain('Cases')
+    expect(terminalOutput).toContain('1 passed')
+    expect(terminalOutput).toContain('estimated')
   })
 
   /**

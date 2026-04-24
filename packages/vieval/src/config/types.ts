@@ -226,6 +226,63 @@ export interface TaskRunOutput {
 }
 
 /**
+ * Execution policy applied to task and case callbacks.
+ *
+ * Use when:
+ * - one task or case should time out after a bounded duration
+ * - failures should retry within the current attempt or trigger a later full task attempt
+ *
+ * Expects:
+ * - `timeout` to be a positive integer when provided
+ * - `autoRetry` and `autoAttempt` to be non-negative integers when provided
+ *
+ * Returns:
+ * - one partial execution policy descriptor
+ */
+export interface TaskExecutionPolicy {
+  /**
+   * Additional retries allowed within the current attempt.
+   *
+   * @default 0
+   */
+  autoRetry?: number
+  /**
+   * Additional full task attempts allowed after the current attempt settles.
+   *
+   * @default 0
+   */
+  autoAttempt?: number
+  /**
+   * Timeout in milliseconds for one case execution.
+   */
+  timeout?: number
+}
+
+/**
+ * Task-local concurrency metadata.
+ *
+ * Use when:
+ * - task declarations need to preserve attempt and case caps for later runtime coordination
+ * - DSL execution needs to resolve the default task-level case concurrency for registered cases
+ *
+ * Expects:
+ * - each provided value to be a positive integer chosen by the caller
+ *
+ * Returns:
+ * - one partial task-local concurrency descriptor
+ */
+export interface TaskConcurrencyConfig {
+  /**
+   * Attempt-level concurrency cap for this task.
+   */
+  attempt?: number
+  /**
+   * Case-level concurrency cap for this task.
+   */
+  case?: number
+}
+
+/**
  * Runtime context passed into eval task `run`.
  */
 export interface TaskRunContext {
@@ -300,6 +357,10 @@ export interface TaskRunContext {
    * - hooks are best-effort observers and should not affect task scoring
    */
   reporterHooks?: TaskReporterHooks
+  /**
+   * Cooperative abort signal for the current execution.
+   */
+  signal?: AbortSignal
 }
 
 /**
@@ -311,7 +372,7 @@ export interface TaskRunContext {
  * Expects:
  * - consumers treat the value as the final state for the case
  */
-export type TaskCaseState = 'passed' | 'failed'
+export type TaskCaseState = 'passed' | 'failed' | 'timeout'
 
 /**
  * Payload emitted when a task case starts.
@@ -425,6 +486,24 @@ export interface TaskDefinition {
    * Stable task id for diagnostics.
    */
   id: string
+  /**
+   * Optional task-local concurrency metadata.
+   *
+   * Use when:
+   * - task declarations need to preserve task-scoped attempt/case caps for later scheduler wiring
+   * - higher-level orchestration wants to inspect task-local concurrency without executing the task
+   *
+   * Expects:
+   * - each provided value to be a positive integer chosen by the caller
+   *
+   * Returns:
+   * - one partial task-local concurrency descriptor
+   */
+  concurrency?: TaskConcurrencyConfig
+  /**
+   * Optional task-local execution policy.
+   */
+  executionPolicy?: TaskExecutionPolicy
   /**
    * Optional matrix layering for this task definition.
    *

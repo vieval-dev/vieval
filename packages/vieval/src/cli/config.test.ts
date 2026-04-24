@@ -214,6 +214,52 @@ describe('loadVievalCliConfig', () => {
     expect(loaded.projects[1]?.reporters).toEqual(['./custom-reporter.js'])
   })
 
+  it('merges project concurrency overrides with inherited top-level defaults field by field', async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-cli-config-'))
+    temporaryDirectories.push(temporaryDirectory)
+
+    const configFilePath = join(temporaryDirectory, 'vieval.config.json')
+    await writeFile(
+      configFilePath,
+      JSON.stringify({
+        concurrency: {
+          attempt: 5,
+          case: 6,
+          project: 3,
+          task: 4,
+          workspace: 2,
+        },
+        projects: [
+          {
+            concurrency: {
+              case: 9,
+            },
+            name: 'fixture-project',
+          },
+        ],
+      }),
+      'utf-8',
+    )
+
+    const loaded = await loadVievalCliConfig({
+      cwd: temporaryDirectory,
+    })
+
+    expect(loaded.concurrency).toEqual({
+      attempt: 5,
+      case: 6,
+      project: 3,
+      task: 4,
+      workspace: 2,
+    })
+    expect(loaded.projects[0]?.concurrency).toEqual({
+      attempt: 5,
+      case: 9,
+      project: 3,
+      task: 4,
+    })
+  })
+
   it('normalizes flat runMatrix shorthand to a layered extend object', async () => {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-cli-config-'))
     temporaryDirectories.push(temporaryDirectory)
