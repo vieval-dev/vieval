@@ -223,9 +223,11 @@ export interface CliComparisonConfig {
  * Expects:
  * - `model` resolves configured models for the current task
  * - `reporterHooks` follows `TaskRunContext['reporterHooks']`
+ * - `runtimeConcurrency` follows `TaskRunContext['runtimeConcurrency']`
  */
 export interface CliProjectExecutorContext extends TaskExecutionContext {
   reporterHooks?: TaskRunContext['reporterHooks']
+  runtimeConcurrency?: TaskRunContext['runtimeConcurrency']
 }
 
 /**

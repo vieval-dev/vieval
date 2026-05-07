@@ -497,8 +497,9 @@ export function casesFromInputs<TInput>(
 function resolveCaseConcurrency(
   taskCase: RegisteredCase<unknown>,
   taskConcurrency: TaskConcurrencyConfig | undefined,
+  runtimeConcurrency: TaskConcurrencyConfig | undefined,
 ): number | undefined {
-  const concurrency = taskCase.concurrency ?? taskConcurrency?.case
+  const concurrency = runtimeConcurrency?.case ?? taskCase.concurrency ?? taskConcurrency?.case
   if (concurrency == null) {
     return undefined
   }
@@ -585,7 +586,7 @@ export function describeTask(
                 collectCaseOutcomeScores(outcome, scoreBucketsByKind)
               }
 
-              const concurrency = resolveCaseConcurrency(taskCase, runtimeTaskConcurrency)
+              const concurrency = resolveCaseConcurrency(taskCase, runtimeTaskConcurrency, context.runtimeConcurrency)
               if (concurrency == null) {
                 await executeCase()
                 return
@@ -614,7 +615,7 @@ export function describeTask(
             finalOutcomes = await Promise.all(
               registeredCases.map(async (taskCase, index) => {
                 const executeCase = async () => await executeRegisteredCase(context, taskCase, index, taskExecutionPolicy)
-                const concurrency = resolveCaseConcurrency(taskCase, runtimeTaskConcurrency)
+                const concurrency = resolveCaseConcurrency(taskCase, runtimeTaskConcurrency, context.runtimeConcurrency)
                 if (concurrency == null) {
                   return await executeCase()
                 }

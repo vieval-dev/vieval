@@ -269,15 +269,11 @@ function resolveCappedConcurrency(
   return Math.min(effectiveDefault, cliConcurrency)
 }
 
-function resolveOptionalCappedConcurrency(
+function resolveOptionalRuntimeTaskConcurrency(
   defaultConcurrency: number | undefined,
   cliConcurrency: number | undefined,
 ): number | undefined {
-  if (defaultConcurrency == null && cliConcurrency == null) {
-    return undefined
-  }
-
-  return resolveCappedConcurrency(defaultConcurrency, cliConcurrency, Number.POSITIVE_INFINITY)
+  return cliConcurrency ?? defaultConcurrency
 }
 
 function resolveWorkspaceConcurrency(
@@ -316,11 +312,11 @@ function resolveRuntimeTaskConcurrency(
   project: NormalizedCliProjectConfig,
   options: RunVievalCliOptions,
 ): TaskConcurrencyConfig | undefined {
-  const attempt = resolveOptionalCappedConcurrency(
+  const attempt = resolveOptionalRuntimeTaskConcurrency(
     taskConcurrency?.attempt ?? project.concurrency?.attempt,
     options.attemptConcurrency,
   )
-  const caseConcurrency = resolveOptionalCappedConcurrency(
+  const caseConcurrency = resolveOptionalRuntimeTaskConcurrency(
     taskConcurrency?.case ?? project.concurrency?.case,
     options.caseConcurrency,
   )
@@ -356,6 +352,17 @@ function createScheduledTaskWithRuntimeConcurrency(
         concurrency,
       },
     },
+  }
+}
+
+function resolveCliRuntimeConcurrency(options: RunVievalCliOptions): TaskConcurrencyConfig | undefined {
+  if (options.attemptConcurrency == null && options.caseConcurrency == null) {
+    return undefined
+  }
+
+  return {
+    attempt: options.attemptConcurrency,
+    case: options.caseConcurrency,
   }
 }
 
@@ -798,6 +805,7 @@ function createCliTaskExecutionContext(
   recordEvent: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void,
   projectCaseCounters: RunCliProjectCaseCounters,
   projectCaseFailures: CliProjectCaseFailure[],
+  runtimeConcurrency: TaskConcurrencyConfig | undefined,
   vitestCompatReporter?: VievalVitestCompatReporterBridge | null,
 ): CliTaskExecutionContext {
   return {
@@ -811,6 +819,7 @@ function createCliTaskExecutionContext(
       task,
     }),
     reporterHooks: createTaskReporterHooks(task, reporter, projectName, recordEvent, projectCaseCounters, projectCaseFailures, vitestCompatReporter),
+    runtimeConcurrency,
   }
 }
 
@@ -1044,6 +1053,7 @@ async function executePreparedProject(
           recordEvent,
           projectCaseCounters,
           projectCaseFailures,
+          resolveCliRuntimeConcurrency(options),
           vitestCompatReporter,
         )
       },

@@ -358,6 +358,19 @@ export interface TaskRunContext {
    */
   reporterHooks?: TaskReporterHooks
   /**
+   * Optional runtime scheduling overrides supplied by CLI or host execution.
+   *
+   * Use when:
+   * - run operators need to override task/case concurrency without editing eval code
+   * - DSL task runners need to distinguish runtime flags from code defaults
+   *
+   * Expects:
+   * - values are positive integers when provided
+   *
+   * @default undefined
+   */
+  runtimeConcurrency?: TaskConcurrencyConfig
+  /**
    * Cooperative abort signal for the current execution.
    */
   signal?: AbortSignal

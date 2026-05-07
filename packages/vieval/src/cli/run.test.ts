@@ -127,7 +127,7 @@ describeTask('live-task', () => {
     input: {
       source: 'live-case',
     },
-  })
+  }, { concurrency: 4 })
 })
 `,
     'utf-8',
