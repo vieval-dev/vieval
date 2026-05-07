@@ -1,6 +1,11 @@
-import { defineConfig } from 'vieval'
+import { cwd } from 'node:process'
+
+import { defineConfig, loadEnv } from 'vieval'
 
 export default defineConfig({
+  concurrency: {
+    case: 4,
+  },
   models: [
     {
       aliases: ['default-locomo-model'],
@@ -10,6 +15,7 @@ export default defineConfig({
       model: 'default-locomo-model',
     },
   ],
+  env: loadEnv('test', cwd(), ''),
   projects: [
     {
       include: ['tasks/**/*.eval.ts'],

@@ -1,6 +1,9 @@
 import { defineConfig } from 'vieval'
 
 export default defineConfig({
+  concurrency: {
+    case: 4,
+  },
   models: [
     {
       aliases: ['default-locomo-model'],

@@ -1,6 +1,23 @@
 import type { LoCoMoCase, LoCoMoSample } from '../types.ts'
 
+import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
+
+/**
+ * Repository-local fallback dataset for smoke-sized LoCoMo runs.
+ *
+ * Use when:
+ * - `LOCOMO_DATA_FILE` is not set
+ * - tests and examples need a portable default that does not depend on a local clone path
+ *
+ * Expects:
+ * - full benchmark runs to pass `LOCOMO_DATA_FILE` with a complete `locomo10.json`
+ *
+ * Returns:
+ * - absolute path to the checked-in first-sample fixture
+ */
+export const DEFAULT_LOCOMO_DATA_FILE = fileURLToPath(new URL('./fixtures/locomo10-first-sample.json', import.meta.url))
 
 interface LoCoMoRawQuestionAnswer {
   answer: number | string
@@ -69,8 +86,35 @@ export async function loadLoCoMoSamplesFromSnapDataset(args: {
   maxSamples?: number
 }): Promise<LoCoMoSample[]> {
   const rawContent = await readFile(args.dataFile, 'utf8')
+  return parseLoCoMoSamplesFromSnapJson(rawContent, args.maxSamples)
+}
+
+/**
+ * Loads Snap LoCoMo dataset JSON synchronously and returns normalized sample objects.
+ *
+ * Use when:
+ * - eval DSL cases must be registered during module evaluation
+ * - async top-level case discovery is not available
+ *
+ * Expects:
+ * - `dataFile` to be readable before the task module is imported
+ *
+ * Returns:
+ * - normalized sample objects ready for deterministic case derivation
+ */
+export function loadLoCoMoSamplesFromSnapDatasetSync(args: {
+  dataFile: string
+  maxSamples?: number
+}): LoCoMoSample[] {
+  // The Vieval DSL registers cases while importing task modules, so this
+  // synchronous read keeps dynamic case registration inside the current DSL.
+  const rawContent = readFileSync(args.dataFile, 'utf8')
+  return parseLoCoMoSamplesFromSnapJson(rawContent, args.maxSamples)
+}
+
+function parseLoCoMoSamplesFromSnapJson(rawContent: string, maxSamples?: number): LoCoMoSample[] {
   const rawSamples = JSON.parse(rawContent) as LoCoMoRawSample[]
-  const limitedRawSamples = args.maxSamples == null ? rawSamples : rawSamples.slice(0, args.maxSamples)
+  const limitedRawSamples = maxSamples == null ? rawSamples : rawSamples.slice(0, maxSamples)
 
   const normalizedSamples: LoCoMoSample[] = limitedRawSamples.map(sample => ({
     qa: sample.qa.map(qa => ({

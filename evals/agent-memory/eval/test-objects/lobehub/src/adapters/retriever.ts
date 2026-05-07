@@ -2,16 +2,53 @@ import type { LoCoMoRetrieverAdapter } from '@vieval/eval-agent-memory'
 
 import { env } from 'node:process'
 
+/**
+ * Configures the LobeHub LoCoMo retriever adapter.
+ *
+ * Use when:
+ * - Vieval needs to query a local or deployed LobeHub memory benchmark endpoint
+ * - benchmark runs need to pass local webhook auth headers
+ *
+ * Expects:
+ * - `baseUrl` to point at a LobeHub server with benchmark LoCoMo enabled
+ * - `path` to accept the benchmark search request body
+ *
+ * Returns:
+ * - options consumed by {@link createLobeHubRetrieverAdapter}
+ */
 export interface LobeHubRetrieverAdapterOptions {
+  /**
+   * Base URL for the LobeHub server.
+   *
+   * @default process.env.LOBEHUB_BASE_URL ?? 'http://localhost:3210'
+   */
   baseUrl?: string
+  /**
+   * API route for the LobeHub benchmark memory search endpoint.
+   *
+   * @default '/api/dev/memory-user-memory/benchmark-locomo'
+   */
   path?: string
+  /**
+   * Default number of memories requested from LobeHub when the task input does not override it.
+   *
+   * @default 10
+   */
   topK?: number
+  /**
+   * Fixed LobeHub user ID. Leave unset for LoCoMo sample-based lookup.
+   */
   userId?: string
 }
 
 interface LobeHubMemoryRecord {
   id?: string
-  memory?: string
+  layer?: string
+  memory?: string | {
+    details?: string | null
+    summary?: string | null
+    title?: string | null
+  }
   score?: number
 }
 
@@ -20,24 +57,84 @@ interface LobeHubRetrieveResponse {
 }
 
 /**
- * Creates a LobeHub retriever adapter mapped to LoCoMo benchmark contract.
+ * Parses comma-separated header pairs.
+ *
+ * Before:
+ * - "Authorization=Bearer token,X-Benchmark=locomo"
+ *
+ * After:
+ * - { Authorization: "Bearer token", "X-Benchmark": "locomo" }
+ */
+function parseHeaderPairs(value?: string): Record<string, string> {
+  return value
+    ?.split(',')
+    .filter(Boolean)
+    .reduce<Record<string, string>>((headers, pair) => {
+      const [key, ...valueParts] = pair.split('=')
+      const headerName = key?.trim()
+      const headerValue = valueParts.join('=').trim()
+
+      if (headerName && headerValue) {
+        headers[headerName] = headerValue
+      }
+
+      return headers
+    }, {}) ?? {}
+}
+
+function formatMemoryRecord(item: LobeHubMemoryRecord): string {
+  if (typeof item.memory === 'string')
+    return item.memory
+
+  const parts = [
+    item.layer ? `Layer: ${item.layer}` : undefined,
+    item.memory?.title ? `Title: ${item.memory.title}` : undefined,
+    item.memory?.summary ? `Summary: ${item.memory.summary}` : undefined,
+    item.memory?.details ? `Details: ${item.memory.details}` : undefined,
+  ]
+
+  return parts.filter((part): part is string => Boolean(part)).join('\n')
+}
+
+/**
+ * Creates a LobeHub retriever adapter mapped to the LoCoMo benchmark contract.
+ *
+ * Use when:
+ * - evaluating LobeHub memory retrieval with Vieval LoCoMo cases
+ * - comparing LobeHub memory against other memory-agent test objects
+ *
+ * Expects:
+ * - LobeHub benchmark LoCoMo routes to be enabled
+ * - imported memories to use `locomo-user-${sampleId}` unless `userId` is fixed
+ *
+ * Returns:
+ * - a retriever adapter that emits text context and source IDs for answer generation
  */
 export function createLobeHubRetrieverAdapter(options: LobeHubRetrieverAdapterOptions = {}): LoCoMoRetrieverAdapter {
   const baseUrl = (options.baseUrl ?? env.LOBEHUB_BASE_URL ?? 'http://localhost:3210').replace(/\/$/, '')
-  const path = options.path ?? '/api/dev/memory-user-memory/eval-agent-memory'
-  const topK = options.topK ?? 10
-  const userId = options.userId ?? env.LOBEHUB_USER_ID ?? 'benchmark-locomo'
+  const path = options.path ?? '/api/dev/memory-user-memory/benchmark-locomo'
+  const webhookHeaders = parseHeaderPairs(env.MEMORY_USER_MEMORY_WEBHOOK_HEADERS)
+  const userId = options.userId ?? env.LOBEHUB_USER_ID
 
   return {
     id: 'lobehub-retriever',
     async retrieveContext(input) {
+      const topK = options.topK ?? input.topK ?? 10
       const response = await fetch(`${baseUrl}${path}`, {
-        body: JSON.stringify({
-          limit: topK,
-          query: input.question,
-          userId,
-        }),
+        body: JSON.stringify(userId
+          ? {
+              query: input.question,
+              topK,
+              userId,
+            }
+          : {
+              query: input.question,
+              sampleId: input.sampleId,
+              topK,
+            }),
         headers: {
+          ...webhookHeaders,
+          // LobeHub benchmark endpoints accept JSON POST bodies for retrieval.
           'content-type': 'application/json',
         },
         method: 'POST',
@@ -55,7 +152,7 @@ export function createLobeHubRetrieverAdapter(options: LobeHubRetrieverAdapterOp
         contextText: items
           .map((item, index) => {
             const scoreLabel = typeof item.score === 'number' ? ` score=${item.score.toFixed(4)}` : ''
-            return `#${index + 1}${scoreLabel}\n${item.memory ?? ''}`
+            return `#${index + 1}${scoreLabel}\n${formatMemoryRecord(item)}`
           })
           .join('\n\n'),
       }

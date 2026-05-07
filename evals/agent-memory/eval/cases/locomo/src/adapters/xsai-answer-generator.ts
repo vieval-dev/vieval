@@ -1,6 +1,7 @@
 import type { LoCoMoAnswerGeneratorAdapter } from '../contracts.ts'
 import type { LoCoMoCategory } from '../types.ts'
 
+import { createHash } from 'node:crypto'
 import { env } from 'node:process'
 
 import { generateText } from '@xsai/generate-text'
@@ -24,6 +25,10 @@ function getCategoryInstruction(category: LoCoMoCategory): string {
   // Default QA path uses short-phrase answers in
   // `snap-research/locomo/task_eval/gpt_utils.py:25-29`.
   return 'Answer in a short phrase under 10 words.'
+}
+
+function hashRuntimeIdentity(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, 8)
 }
 
 /**
@@ -56,7 +61,7 @@ export function createXsaiLoCoMoAnswerGenerator(
   })
 
   return {
-    id: 'xsai-openai-compatible-answer-generator',
+    id: `xsai-openai-compatible-answer-generator:${model}:${hashRuntimeIdentity(baseUrl)}`,
     async generateAnswer(input) {
       const response = await runtime.adapter.runWithRetry(async () => await generateText({
         ...runtime.adapter.provider.chat(runtime.model),

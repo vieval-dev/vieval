@@ -1,3 +1,4 @@
+export * from './adapters/cached-answer-generator.ts'
 export * from './adapters/xsai-answer-generator.ts'
 export * from './cases/cache-keys.ts'
 export * from './cases/derive-cases.ts'

@@ -8,7 +8,9 @@ import { loadEnv } from 'vite'
 
 import { createXsaiLoCoMoAnswerGenerator } from '../adapters/xsai-answer-generator.ts'
 import { evaluateLoCoMoCases } from '../pipeline/evaluate-locomo.ts'
-import { deriveLoCoMoCases, loadLoCoMoSamplesFromSnapDataset } from './derive-cases.ts'
+import { DEFAULT_LOCOMO_DATA_FILE, deriveLoCoMoCases, loadLoCoMoSamplesFromSnapDataset } from './derive-cases.ts'
+
+const DEFAULT_STANDALONE_CONCURRENCY = 4
 
 interface LoCoMoConversationTurn {
   blip_caption?: string
@@ -103,10 +105,10 @@ async function runSnapLiveQa(): Promise<void> {
     process.env[key] ??= value
   }
 
-  const dataFile = process.env.LOCOMO_DATA_FILE ?? '/Users/neko/Git/github.com/snap-research/locomo/data/locomo10.json'
+  const dataFile = process.env.LOCOMO_DATA_FILE ?? DEFAULT_LOCOMO_DATA_FILE
   const maxSamples = Number(process.env.LOCOMO_MAX_SAMPLES ?? '1')
   const maxQuestions = Number(process.env.LOCOMO_MAX_QUESTIONS ?? '5')
-  const concurrency = Number(process.env.LOCOMO_EVAL_CONCURRENCY ?? '4')
+  const concurrency = DEFAULT_STANDALONE_CONCURRENCY
   const topK = Number(process.env.LOCOMO_TOP_K ?? '10')
 
   const normalizedSamples = await loadLoCoMoSamplesFromSnapDataset({ dataFile, maxSamples })
