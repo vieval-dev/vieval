@@ -86,9 +86,17 @@ export interface CliReporterTaskStartPayload {
  */
 export interface CliReporterCaseStartPayload {
   /**
+   * Maximum retry count configured for this case.
+   */
+  autoRetry?: number
+  /**
    * Stable task identifier.
    */
   taskId: string
+  /**
+   * Current retry attempt index, where `0` is the first try.
+   */
+  retryIndex?: number
   /**
    * Stable case identifier within the task.
    */

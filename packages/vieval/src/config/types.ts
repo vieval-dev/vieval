@@ -400,9 +400,17 @@ export type TaskCaseState = 'passed' | 'failed' | 'timeout'
  */
 export interface TaskCaseReporterPayload {
   /**
+   * Maximum retry count configured for this case.
+   */
+  autoRetry?: number
+  /**
    * Declared case label.
    */
   name: string
+  /**
+   * Current retry attempt index, where `0` is the first try.
+   */
+  retryIndex?: number
   /**
    * Zero-based case position within the task.
    */

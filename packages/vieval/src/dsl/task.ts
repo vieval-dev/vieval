@@ -131,8 +131,10 @@ function assertPositiveInteger(value: number, label: string): void {
 function emitCaseStart(
   hooks: TaskRunContext['reporterHooks'] | undefined,
   payload: {
+    autoRetry?: number
     index: number
     name: string
+    retryIndex?: number
     total: number
   },
 ): void {
@@ -291,12 +293,24 @@ async function executeRegisteredCase(
   context: TaskRunContext,
   taskCase: RegisteredCase<unknown>,
   index: number,
+  totalCases: number,
   taskExecutionPolicy: TaskExecutionPolicy | undefined,
 ): Promise<CaseExecutionOutcome> {
   const resolvedPolicy = resolveCaseExecutionPolicy(taskCase, taskExecutionPolicy)
   let lastOutcome: CaseExecutionOutcome | undefined
 
   for (let retryIndex = 0; retryIndex <= resolvedPolicy.autoRetry; retryIndex += 1) {
+    emitCaseStart(context.reporterHooks, {
+      ...(resolvedPolicy.autoRetry > 0
+        ? {
+            autoRetry: resolvedPolicy.autoRetry,
+            retryIndex,
+          }
+        : {}),
+      index,
+      name: taskCase.name,
+      total: totalCases,
+    })
     lastOutcome = await runCaseOnce(context, taskCase, index, resolvedPolicy.timeout)
     if (lastOutcome.state === 'passed') {
       return lastOutcome
@@ -569,13 +583,7 @@ export function describeTask(
           await Promise.all(
             registeredCases.map(async (taskCase, index) => {
               const executeCase = async () => {
-                emitCaseStart(context.reporterHooks, {
-                  index,
-                  name: taskCase.name,
-                  total: totalCases,
-                })
-
-                const outcome = await executeRegisteredCase(context, taskCase, index, taskExecutionPolicy)
+                const outcome = await executeRegisteredCase(context, taskCase, index, totalCases, taskExecutionPolicy)
                 emitCaseEnd(context.reporterHooks, {
                   ...(outcome.errorMessage == null ? {} : { errorMessage: outcome.errorMessage }),
                   index,
@@ -600,21 +608,13 @@ export function describeTask(
           )
         }
         else {
-          registeredCases.forEach((taskCase, index) => {
-            emitCaseStart(context.reporterHooks, {
-              index,
-              name: taskCase.name,
-              total: totalCases,
-            })
-          })
-
           let finalOutcomes: CaseExecutionOutcome[] = []
           let attemptIndex = 0
 
           for (;;) {
             finalOutcomes = await Promise.all(
               registeredCases.map(async (taskCase, index) => {
-                const executeCase = async () => await executeRegisteredCase(context, taskCase, index, taskExecutionPolicy)
+                const executeCase = async () => await executeRegisteredCase(context, taskCase, index, totalCases, taskExecutionPolicy)
                 const concurrency = resolveCaseConcurrency(taskCase, runtimeTaskConcurrency, context.runtimeConcurrency)
                 if (concurrency == null) {
                   return await executeCase()

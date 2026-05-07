@@ -775,8 +775,10 @@ function createTaskReporterHooks(
       const caseId = createTaskCaseReporterId(payload)
       syncCaseTotal(payload.total)
       reporter.onCaseStart({
+        autoRetry: payload.autoRetry,
         caseId,
         caseName: payload.name,
+        retryIndex: payload.retryIndex,
         taskId: task.id,
       })
       void vitestCompatReporter?.onCaseStart({

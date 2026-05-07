@@ -281,6 +281,47 @@ describe('createSummaryReporter', () => {
 
   /**
    * @example
+   * it('updates slow running case rows with the current retry attempt', () => {})
+   */
+  it('updates slow running case rows with the current retry attempt', () => {
+    let now = 0
+    const reporter = createTestReporter(() => now)
+
+    reporter.onRunStart({ totalTasks: 1 })
+    reporter.onTaskQueued({
+      displayName: 'retry.eval.ts',
+      projectName: 'vieval',
+      taskId: 'task-retry',
+      totalCases: 1,
+    })
+    reporter.onTaskStart({ taskId: 'task-retry' })
+    reporter.onCaseStart({
+      autoRetry: 5,
+      caseId: 'case-retry',
+      caseName: 'fetches memory',
+      retryIndex: 0,
+      taskId: 'task-retry',
+    })
+    reporter.onCaseStart({
+      autoRetry: 5,
+      caseId: 'case-retry',
+      caseName: 'fetches memory',
+      retryIndex: 2,
+      taskId: 'task-retry',
+    })
+
+    now = 350
+    const rows = reporter.getWindowRows().map(stripAnsi)
+
+    /**
+     * @example
+     * expect(rows.join('\n')).toContain('retry 2/5')
+     */
+    expect(rows.join('\n')).toContain('retry 2/5')
+  })
+
+  /**
+   * @example
    * it('always shows passed, failed, and skipped counters even when they are zero', () => {})
    */
   it('always shows passed, failed, and skipped counters even when they are zero', () => {

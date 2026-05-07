@@ -746,6 +746,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
   it('retries a failing case within the same task attempt until it passes', async () => {
     let runs = 0
+    const startPayloads: Array<{ autoRetry?: number, index: number, name: string, retryIndex?: number, total: number }> = []
 
     const taskDefinition = describeTask('dsl-case-auto-retry', () => {
       caseOf('retry-case', async () => {
@@ -768,6 +769,11 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
         inferenceExecutor: 'openai',
         inferenceExecutorId: 'openai',
       }),
+      reporterHooks: {
+        onCaseStart(payload) {
+          startPayloads.push(payload)
+        },
+      },
       task: {
         entry: {
           description: 'd',
@@ -785,6 +791,14 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
     })
 
     expect(runs).toBe(3)
+    expect(startPayloads.map(payload => ({
+      autoRetry: payload.autoRetry,
+      retryIndex: payload.retryIndex,
+    }))).toEqual([
+      { autoRetry: 2, retryIndex: 0 },
+      { autoRetry: 2, retryIndex: 1 },
+      { autoRetry: 2, retryIndex: 2 },
+    ])
     expect(runResult?.scores[0]?.score).toBe(1)
   })
 

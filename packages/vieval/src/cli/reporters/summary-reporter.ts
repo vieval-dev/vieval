@@ -154,9 +154,11 @@ export interface SummaryReporter extends CliReporter {
 }
 
 interface ActiveCaseState {
+  autoRetry: number | undefined
   caseId: string
   caseName: string
   order: number
+  retryIndex: number | undefined
   startedAt: number
 }
 
@@ -285,15 +287,25 @@ class SummaryReporterStateMachine implements SummaryReporter {
     task.state = 'running'
     task.startedAt ??= this.options.getNow()
 
-    if (task.settledCaseIds.has(payload.caseId) || task.runningCases.has(payload.caseId)) {
+    if (task.settledCaseIds.has(payload.caseId)) {
+      return
+    }
+
+    const existingCase = task.runningCases.get(payload.caseId)
+    if (existingCase != null) {
+      existingCase.autoRetry = payload.autoRetry
+      existingCase.caseName = payload.caseName ?? payload.caseId
+      existingCase.retryIndex = payload.retryIndex
       return
     }
 
     task.caseOrderCounter += 1
     task.runningCases.set(payload.caseId, {
+      autoRetry: payload.autoRetry,
       caseId: payload.caseId,
       caseName: payload.caseName ?? payload.caseId,
       order: task.caseOrderCounter,
+      retryIndex: payload.retryIndex,
       startedAt: this.options.getNow(),
     })
 
@@ -478,6 +490,7 @@ class SummaryReporterStateMachine implements SummaryReporter {
         rows.push(
           c.bold(c.yellow(`   ${icon} `))
           + activeCase.caseName
+          + formatRetrySuffix(activeCase)
           + c.bold(c.yellow(` ${formatDuration(elapsed)}`)),
         )
       }
@@ -706,6 +719,14 @@ function formatActiveConcurrencyState(options: {
 
 function pluralize(noun: string, count: number): string {
   return count === 1 ? noun : `${noun}s`
+}
+
+function formatRetrySuffix(activeCase: ActiveCaseState): string {
+  if (activeCase.retryIndex == null || activeCase.retryIndex <= 0 || activeCase.autoRetry == null || activeCase.autoRetry <= 0) {
+    return ''
+  }
+
+  return c.dim(` retry ${activeCase.retryIndex}/${activeCase.autoRetry}`)
 }
 
 function formatTimeString(date: Date): string {
