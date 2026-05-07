@@ -490,6 +490,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
   it('limits casesFromInputs execution to the configured per-group case concurrency override', async () => {
     const startedInputs: number[] = []
+    const startPayloads: Array<{ index: number, name: string, total: number }> = []
     const pendingCases = new Map<number, ReturnType<typeof createDeferredPromise>>()
 
     const taskDefinition = describeTask('dsl-cases-from-inputs-concurrency-override', (task) => {
@@ -516,6 +517,11 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
     const runPromise = taskDefinition.task!.run({
       cache: createTestTaskCacheRuntime(),
       model: {} as never,
+      reporterHooks: {
+        onCaseStart(payload) {
+          startPayloads.push(payload)
+        },
+      },
       task: {
         entry: {
           description: 'd',
@@ -536,12 +542,14 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     await Promise.resolve()
     expect(startedInputs).toEqual([1, 2])
+    expect(startPayloads.map(payload => payload.index)).toEqual([0, 1])
 
     pendingCases.get(1)?.resolve()
 
     await waitForExpectation(() => {
       expect(startedInputs).toEqual([1, 2, 3])
     })
+    expect(startPayloads.map(payload => payload.index)).toEqual([0, 1, 2])
 
     pendingCases.get(2)?.resolve()
 

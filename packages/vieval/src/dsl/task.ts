@@ -566,13 +566,13 @@ export function describeTask(
         if (!hasAutoAttempt) {
           await Promise.all(
             registeredCases.map(async (taskCase, index) => {
-              emitCaseStart(context.reporterHooks, {
-                index,
-                name: taskCase.name,
-                total: totalCases,
-              })
-
               const executeCase = async () => {
+                emitCaseStart(context.reporterHooks, {
+                  index,
+                  name: taskCase.name,
+                  total: totalCases,
+                })
+
                 const outcome = await executeRegisteredCase(context, taskCase, index, taskExecutionPolicy)
                 emitCaseEnd(context.reporterHooks, {
                   ...(outcome.errorMessage == null ? {} : { errorMessage: outcome.errorMessage }),

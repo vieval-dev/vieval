@@ -509,6 +509,10 @@ class SummaryReporterStateMachine implements SummaryReporter {
           estimatedDurationMs: estimateTotalDurationMs(this.caseCounters.completed, this.caseCounters.total, runElapsedDurationMs),
         },
       ),
+      padSummaryTitle('Concurrency') + formatActiveConcurrencyState({
+        caseRunningCount,
+        taskRunningCount,
+      }),
       padSummaryTitle('Start at') + this.startTime,
       padSummaryTitle('Duration') + formatHumanDuration(runElapsedDurationMs),
     ]
@@ -686,6 +690,24 @@ function formatCounterState(
   ].join(c.dim(' | ')) + c.gray(` (${counter.total})`) + formatTimingSuffix(timing)
 }
 
+function formatActiveConcurrencyState(options: {
+  caseRunningCount: number
+  taskRunningCount: number
+}): string {
+  return [
+    options.taskRunningCount > 0
+      ? c.bold(c.yellow(`${options.taskRunningCount} ${pluralize('task', options.taskRunningCount)} running`))
+      : c.dim('0 tasks running'),
+    options.caseRunningCount > 0
+      ? c.bold(c.yellow(`${options.caseRunningCount} ${pluralize('case', options.caseRunningCount)} running`))
+      : c.dim('0 cases running'),
+  ].join(c.dim(' | '))
+}
+
+function pluralize(noun: string, count: number): string {
+  return count === 1 ? noun : `${noun}s`
+}
+
 function formatTimeString(date: Date): string {
   return date.toTimeString().split(' ')[0] ?? ''
 }
@@ -780,7 +802,7 @@ function formatTaskProgressSuffix(task: TaskRuntimeState, now: number): string {
     ? 0
     : Math.max(0, now - task.startedAt)
 
-  return ` ${task.completedCases}/${task.totalCases}${formatTimingSuffix({
+  return ` ${task.completedCases}/${task.totalCases}, ${task.runningCases.size} ${pluralize('case', task.runningCases.size)} running${formatTimingSuffix({
     elapsedDurationMs,
     estimatedDurationMs: estimateTaskDurationMs(task, now),
   })}`

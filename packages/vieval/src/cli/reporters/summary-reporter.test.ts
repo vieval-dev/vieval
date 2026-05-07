@@ -71,6 +71,7 @@ describe('createSummaryReporter', () => {
     const activeRow = findRow(rows, 'task.test.ts')
     const tasksRow = findRow(rows, 'Tasks')
     const casesRow = findRow(rows, 'Cases')
+    const concurrencyRow = findRow(rows, 'Concurrency')
 
     /**
      * @example
@@ -82,6 +83,11 @@ describe('createSummaryReporter', () => {
      * expect(activeRow).toContain('1/4')
      */
     expect(activeRow).toContain('1/4')
+    /**
+     * @example
+     * expect(activeRow).toContain('1 case running')
+     */
+    expect(activeRow).toContain('1 case running')
     expect(activeRow).toContain('elapsed')
     expect(activeRow).toContain('estimated')
     /**
@@ -105,6 +111,11 @@ describe('createSummaryReporter', () => {
      * expect(casesRow).toContain('(4)')
      */
     expect(casesRow).toContain('(4)')
+    /**
+     * @example
+     * expect(concurrencyRow).toContain('1 case running')
+     */
+    expect(concurrencyRow).toContain('1 case running')
   })
 
   it('keeps task ETA undefined until at least one case has completed', () => {
@@ -539,7 +550,7 @@ describe('createSummaryReporter', () => {
     reporter.onTaskStart({ taskId: 'task-gamma' })
 
     now = 13_500
-    const compactRows = reporter.getWindowRows({ maxRows: 5 }).map(stripAnsi)
+    const compactRows = reporter.getWindowRows({ maxRows: 6 }).map(stripAnsi)
     const tinyRows = reporter.getWindowRows({ maxRows: 2 }).map(stripAnsi)
 
     /**
@@ -596,6 +607,7 @@ describe('createSummaryReporter', () => {
 
     now = 2_000
     const rows = reporter.getWindowRows({ maxRows: 14 }).map(stripAnsi)
+    const concurrencyRow = findRow(rows, 'Concurrency')
 
     /**
      * @example
@@ -604,9 +616,9 @@ describe('createSummaryReporter', () => {
     expect(rows).toHaveLength(14)
     /**
      * @example
-     * expect(rows.join('\n')).toContain('14 more running rows hidden')
+     * expect(rows.join('\n')).toContain('15 more running rows hidden')
      */
-    expect(rows.join('\n')).toContain('14 more running rows hidden')
+    expect(rows.join('\n')).toContain('15 more running rows hidden')
     /**
      * @example
      * expect(rows.join('\n')).toContain('Tasks')
@@ -617,5 +629,10 @@ describe('createSummaryReporter', () => {
      * expect(rows.join('\n')).toContain('Duration')
      */
     expect(rows.join('\n')).toContain('Duration')
+    /**
+     * @example
+     * expect(concurrencyRow).toContain('20 cases running')
+     */
+    expect(concurrencyRow).toContain('20 cases running')
   })
 })
