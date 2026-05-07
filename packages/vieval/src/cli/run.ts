@@ -71,6 +71,7 @@ export interface RunVievalCliReporterOptions {
   createInterval?: (callback: () => void, intervalMs: number) => WindowRendererTimer
   getColumns?: () => number
   getNow?: () => number
+  getRows?: () => number | undefined
   getWallClockNow?: () => number
   isTTY?: boolean
   queueRenderReset?: (callback: () => void) => void
@@ -527,6 +528,7 @@ function isSummaryReporter(reporter: CliReporter): reporter is SummaryReporter {
 }
 
 function createRunReporter(options: RunVievalCliReporterOptions | undefined): CliRunReporter {
+  const getRows = options?.getRows ?? (() => process.stdout.rows)
   const reporter = createCliReporter({
     getColumns: options?.getColumns ?? (() => process.stdout.columns ?? 80),
     getNow: options?.getNow ?? (() => Date.now()),
@@ -551,7 +553,9 @@ function createRunReporter(options: RunVievalCliReporterOptions | undefined): Cl
 
   const rendererBaseOptions = {
     getColumns: options?.getColumns ?? (() => process.stdout.columns ?? 80),
-    getWindow: () => reporter.getWindowRows(),
+    getWindow: () => reporter.getWindowRows({
+      maxRows: normalizeLiveReporterMaxRows(getRows()),
+    }),
     queueRenderReset: options?.queueRenderReset,
     supportsAnsiWindowing: options?.supportsAnsiWindowing,
     writeOutput: options?.writeOutput ?? (value => process.stdout.write(value)),
@@ -604,6 +608,29 @@ function createRunReporter(options: RunVievalCliReporterOptions | undefined): Cl
       scheduleRender()
     },
   }
+}
+
+/**
+ * Normalizes terminal row count into the live reporter window height.
+ *
+ * Before:
+ * - undefined
+ * - 4
+ * - 40
+ *
+ * After:
+ * - 23
+ * - 6
+ * - 39
+ */
+function normalizeLiveReporterMaxRows(rows: number | undefined): number {
+  const visibleRows = rows == null || !Number.isFinite(rows) || rows <= 0
+    ? 24
+    : Math.floor(rows)
+
+  // Keep one physical terminal row free so cursor-up based redraws do not
+  // scroll the previous frame out of the region that can be cleared.
+  return Math.max(6, visibleRows - 1)
 }
 
 function createTaskQueuePayload(task: ScheduledTask, projectName: string): SummaryReporterTaskQueuedPayload {

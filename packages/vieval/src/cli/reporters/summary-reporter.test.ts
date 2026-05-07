@@ -568,4 +568,54 @@ describe('createSummaryReporter', () => {
      */
     expect(tinyRows).toHaveLength(2)
   })
+
+  /**
+   * @example
+   * it('shows a hidden running case count when active case rows exceed the live window', () => {})
+   */
+  it('shows a hidden running case count when active case rows exceed the live window', () => {
+    let now = 1_000
+    const reporter = createTestReporter(() => now)
+
+    reporter.onRunStart({ totalTasks: 1 })
+    reporter.onTaskQueued({
+      displayName: 'locomo.eval.ts',
+      projectName: 'locomo-lobehub',
+      taskId: 'task-locomo',
+      totalCases: 20,
+    })
+    reporter.onTaskStart({ taskId: 'task-locomo' })
+
+    for (let index = 1; index <= 20; index += 1) {
+      reporter.onCaseStart({
+        caseId: `case-${index}`,
+        caseName: `snap-locomo-retrieval-generation-scoring #${index}`,
+        taskId: 'task-locomo',
+      })
+    }
+
+    now = 2_000
+    const rows = reporter.getWindowRows({ maxRows: 14 }).map(stripAnsi)
+
+    /**
+     * @example
+     * expect(rows).toHaveLength(14)
+     */
+    expect(rows).toHaveLength(14)
+    /**
+     * @example
+     * expect(rows.join('\n')).toContain('14 more running rows hidden')
+     */
+    expect(rows.join('\n')).toContain('14 more running rows hidden')
+    /**
+     * @example
+     * expect(rows.join('\n')).toContain('Tasks')
+     */
+    expect(rows.join('\n')).toContain('Tasks')
+    /**
+     * @example
+     * expect(rows.join('\n')).toContain('Duration')
+     */
+    expect(rows.join('\n')).toContain('Duration')
+  })
 })

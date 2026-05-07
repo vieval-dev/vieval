@@ -436,10 +436,10 @@ class SummaryReporterStateMachine implements SummaryReporter {
     const activeRows = this.createActiveRows()
     const footerRows = this.createFooterRows()
     const maxRows = options?.maxRows
-    const activeBlock = ['', ...activeRows, ...(activeRows.length > 0 ? [''] : [])]
     const footerBlock = [...footerRows, '']
 
     if (maxRows == null || maxRows <= 0) {
+      const activeBlock = ['', ...activeRows, ...(activeRows.length > 0 ? [''] : [])]
       return [...activeBlock, ...footerBlock]
     }
 
@@ -448,7 +448,7 @@ class SummaryReporterStateMachine implements SummaryReporter {
     }
 
     const availableActiveRows = Math.max(0, maxRows - footerBlock.length)
-    return [...activeBlock.slice(0, availableActiveRows), ...footerBlock]
+    return [...createBoundedActiveBlock(activeRows, availableActiveRows), ...footerBlock]
   }
 
   private createActiveRows(): string[] {
@@ -546,6 +546,50 @@ class SummaryReporterStateMachine implements SummaryReporter {
     task.totalCases = Math.max(task.totalCases, reportedTotalCases ?? 0, observedTotalCases)
     this.caseCounters.total = sumTaskCaseTotals(this.tasks.values())
   }
+}
+
+/**
+ * Creates the active task block while keeping room for summary footer rows.
+ *
+ * Use when:
+ * - the live TTY window is smaller than the number of running task/case rows
+ * - active rows need a visible truncation marker instead of silently disappearing
+ *
+ * Expects:
+ * - `activeRows` contains already-formatted task and slow-case rows
+ * - `maxRows` counts the leading spacer and truncation marker
+ *
+ * Returns:
+ * - rows that fit inside `maxRows`
+ * - a final hidden-row marker when active rows were omitted
+ */
+function createBoundedActiveBlock(activeRows: readonly string[], maxRows: number): string[] {
+  if (maxRows <= 0) {
+    return []
+  }
+
+  if (activeRows.length === 0) {
+    return ['']
+  }
+
+  const fullBlock = ['', ...activeRows, '']
+
+  if (fullBlock.length <= maxRows) {
+    return fullBlock
+  }
+
+  if (maxRows === 1) {
+    return ['']
+  }
+
+  const visibleActiveRows = Math.max(0, maxRows - 2)
+  const hiddenRows = Math.max(0, activeRows.length - visibleActiveRows)
+
+  return [
+    '',
+    ...activeRows.slice(0, visibleActiveRows),
+    c.dim(`   ${TREE_NODE_END} ... ${hiddenRows} more running rows hidden`),
+  ]
 }
 
 /**
