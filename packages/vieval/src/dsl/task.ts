@@ -562,6 +562,7 @@ export function describeTask(
         const defaultCaseQueueKey = {}
         const caseQueues = new Map<object, ReturnType<typeof createSchedulerQueue>>()
         const hasAutoAttempt = registeredCases.some(taskCase => resolveCaseExecutionPolicy(taskCase, taskExecutionPolicy).autoAttempt > 0)
+        const runtimeTaskConcurrency = context.task.entry.task?.concurrency ?? options.concurrency
 
         if (!hasAutoAttempt) {
           await Promise.all(
@@ -584,7 +585,7 @@ export function describeTask(
                 collectCaseOutcomeScores(outcome, scoreBucketsByKind)
               }
 
-              const concurrency = resolveCaseConcurrency(taskCase, options.concurrency)
+              const concurrency = resolveCaseConcurrency(taskCase, runtimeTaskConcurrency)
               if (concurrency == null) {
                 await executeCase()
                 return
@@ -613,7 +614,7 @@ export function describeTask(
             finalOutcomes = await Promise.all(
               registeredCases.map(async (taskCase, index) => {
                 const executeCase = async () => await executeRegisteredCase(context, taskCase, index, taskExecutionPolicy)
-                const concurrency = resolveCaseConcurrency(taskCase, options.concurrency)
+                const concurrency = resolveCaseConcurrency(taskCase, runtimeTaskConcurrency)
                 if (concurrency == null) {
                   return await executeCase()
                 }

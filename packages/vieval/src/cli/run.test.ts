@@ -21,6 +21,7 @@ const fixtureProjectDirectory = join(packageDirectory, 'tests', 'projects', 'exa
 const taskProjectDirectory = join(packageDirectory, 'tests', 'projects', 'example-api-defining-new-task')
 const temporaryDirectories: string[] = []
 const blockingRunStateKey = '__VIEVAL_BLOCKING_RUN_STATE__'
+const caseConcurrencyRunStateKey = '__VIEVAL_CASE_CONCURRENCY_RUN_STATE__'
 
 interface BlockingRunState {
   active: number
@@ -35,6 +36,13 @@ interface BlockingProjectFixtureOptions {
   concurrencySource?: string
   evalNames: string[]
   name: string
+}
+
+interface CaseConcurrencyRunState {
+  active: number
+  peak: number
+  releases: Array<() => void>
+  started: number[]
 }
 
 function createBlockingRunState(): BlockingRunState {
@@ -58,6 +66,27 @@ function clearBlockingRunState(): void {
   delete (globalThis as typeof globalThis & {
     [blockingRunStateKey]?: BlockingRunState
   })[blockingRunStateKey]
+}
+
+function createCaseConcurrencyRunState(): CaseConcurrencyRunState {
+  return {
+    active: 0,
+    peak: 0,
+    releases: [],
+    started: [],
+  }
+}
+
+function setCaseConcurrencyRunState(state: CaseConcurrencyRunState): void {
+  ;(globalThis as typeof globalThis & {
+    [caseConcurrencyRunStateKey]?: CaseConcurrencyRunState
+  })[caseConcurrencyRunStateKey] = state
+}
+
+function clearCaseConcurrencyRunState(): void {
+  delete (globalThis as typeof globalThis & {
+    [caseConcurrencyRunStateKey]?: CaseConcurrencyRunState
+  })[caseConcurrencyRunStateKey]
 }
 
 function stripAnsi(value: string): string {
@@ -296,6 +325,7 @@ ${projectEntries}
 describe('runVievalCli', () => {
   afterEach(async () => {
     clearBlockingRunState()
+    clearCaseConcurrencyRunState()
     await Promise.all(
       temporaryDirectories.map(async (temporaryDirectory) => {
         await rm(temporaryDirectory, { force: true, recursive: true })
@@ -845,6 +875,75 @@ export default defineConfig({
     })
 
     expect(output.projects).toHaveLength(1)
+    expect(output.projects[0]?.executed).toBe(true)
+  })
+
+  it('applies CLI caseConcurrency to DSL casesFromInputs task execution', async () => {
+    const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
+    const state = createCaseConcurrencyRunState()
+    setCaseConcurrencyRunState(state)
+
+    const projectDirectory = await createDslProject({
+      evalFiles: {
+        'cli-case-concurrency.eval.ts': `
+import { describeTask } from '${vievalImportPath}'
+
+describeTask('cli-case-concurrency', (task) => {
+  task.casesFromInputs('sample', [1, 2, 3, 4], async (context) => {
+    const state = globalThis.${caseConcurrencyRunStateKey}
+
+    if (state == null) {
+      throw new Error('Missing case concurrency run state.')
+    }
+
+    const input = context.matrix.inputs
+    state.active += 1
+    state.peak = Math.max(state.peak, state.active)
+    state.started.push(input)
+
+    await new Promise<void>((resolve) => {
+      state.releases.push(() => {
+        state.active -= 1
+        resolve()
+      })
+    })
+  })
+})
+`,
+      },
+      projectName: 'cli-case-concurrency',
+    })
+
+    const runPromise = runVievalCli({
+      caseConcurrency: 2,
+      configFilePath: join(projectDirectory, 'vieval.config.ts'),
+      cwd: projectDirectory,
+    })
+
+    await waitForExpectation(() => {
+      expect(state.started).toEqual([1, 2])
+    })
+    expect(state.peak).toBe(2)
+
+    state.releases.shift()?.()
+
+    await waitForExpectation(() => {
+      expect(state.started).toEqual([1, 2, 3])
+    })
+    expect(state.peak).toBe(2)
+
+    state.releases.shift()?.()
+
+    await waitForExpectation(() => {
+      expect(state.started).toEqual([1, 2, 3, 4])
+    })
+    expect(state.peak).toBe(2)
+
+    while (state.releases.length > 0) {
+      state.releases.shift()?.()
+    }
+
+    const output = await runPromise
     expect(output.projects[0]?.executed).toBe(true)
   })
 

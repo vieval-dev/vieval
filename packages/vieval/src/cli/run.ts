@@ -1,4 +1,4 @@
-import type { TaskCaseReporterEndPayload, TaskCaseReporterPayload, TaskReporterEventPayload, TaskReporterHooks } from '../config'
+import type { TaskCaseReporterEndPayload, TaskCaseReporterPayload, TaskConcurrencyConfig, TaskReporterEventPayload, TaskReporterHooks } from '../config'
 import type { AggregatedRunResults, ScheduledTask, ScheduledTaskExecutor, TaskExecutionContext } from '../core/runner'
 import type { CliProjectExecutorContext, LoadVievalCliConfigOptions, NormalizedCliProjectConfig } from './config'
 import type { CliReporter, SummaryReporter, SummaryReporterCaseStartPayload, SummaryReporterTaskQueuedPayload } from './reporters'
@@ -269,6 +269,17 @@ function resolveCappedConcurrency(
   return Math.min(effectiveDefault, cliConcurrency)
 }
 
+function resolveOptionalCappedConcurrency(
+  defaultConcurrency: number | undefined,
+  cliConcurrency: number | undefined,
+): number | undefined {
+  if (defaultConcurrency == null && cliConcurrency == null) {
+    return undefined
+  }
+
+  return resolveCappedConcurrency(defaultConcurrency, cliConcurrency, Number.POSITIVE_INFINITY)
+}
+
 function resolveWorkspaceConcurrency(
   loadedConfig: Awaited<ReturnType<typeof loadVievalCliConfig>>,
   options: RunVievalCliOptions,
@@ -298,6 +309,54 @@ function resolveScheduledTaskConcurrency(
     resolveProjectConcurrency(project, options),
     resolveTaskConcurrency(project, options),
   )
+}
+
+function resolveRuntimeTaskConcurrency(
+  taskConcurrency: TaskConcurrencyConfig | undefined,
+  project: NormalizedCliProjectConfig,
+  options: RunVievalCliOptions,
+): TaskConcurrencyConfig | undefined {
+  const attempt = resolveOptionalCappedConcurrency(
+    taskConcurrency?.attempt ?? project.concurrency?.attempt,
+    options.attemptConcurrency,
+  )
+  const caseConcurrency = resolveOptionalCappedConcurrency(
+    taskConcurrency?.case ?? project.concurrency?.case,
+    options.caseConcurrency,
+  )
+
+  if (attempt == null && caseConcurrency == null) {
+    return undefined
+  }
+
+  return {
+    attempt,
+    case: caseConcurrency,
+  }
+}
+
+function createScheduledTaskWithRuntimeConcurrency(
+  task: ScheduledTask,
+  project: NormalizedCliProjectConfig,
+  options: RunVievalCliOptions,
+): ScheduledTask {
+  const taskDefinition = task.entry.task
+  if (taskDefinition == null) {
+    return task
+  }
+
+  const concurrency = resolveRuntimeTaskConcurrency(taskDefinition.concurrency, project, options)
+
+  return {
+    ...task,
+    entry: {
+      ...task.entry,
+      task: {
+        ...taskDefinition,
+        concurrency,
+      },
+    },
+  }
 }
 
 function shouldUseColor(): boolean {
@@ -954,11 +1013,12 @@ async function executePreparedProject(
     vitestCompatReporter,
   )
   const taskExecutor: ScheduledTaskExecutor = async (task, context) => {
-    const result = await rawTaskExecutor(task, context)
+    const runtimeTask = createScheduledTaskWithRuntimeConcurrency(task, prepared.project, options)
+    const result = await rawTaskExecutor(runtimeTask, context)
 
     return {
       ...result,
-      matrix: cloneScheduledTaskMatrix(task),
+      matrix: cloneScheduledTaskMatrix(runtimeTask),
     }
   }
 
