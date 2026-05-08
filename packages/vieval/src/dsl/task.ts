@@ -2,7 +2,7 @@ import type { TaskConcurrencyConfig, TaskExecutionPolicy, TaskReporterEventPaylo
 import type { RunScoreKind } from '../core/runner'
 import type { TelemetryAttributeValue } from '../core/telemetry'
 
-import { errorMessageFrom } from '@moeru/std'
+import { errorMessageFrom, sleep } from '@moeru/std'
 
 import { defineEval, defineTask } from '../config'
 import { createSchedulerQueue } from '../core/scheduler/queue'
@@ -141,10 +141,31 @@ function assertNonNegativeInteger(value: number, label: string): void {
   }
 }
 
+function assertNonNegativeNumber(value: number, label: string): void {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`Invalid ${label}: ${String(value)}`)
+  }
+}
+
 function assertPositiveInteger(value: number, label: string): void {
   if (!Number.isFinite(value) || !Number.isInteger(value) || value <= 0) {
     throw new Error(`Invalid ${label}: ${String(value)}`)
   }
+}
+
+function autoRetryDelayMs(retryIndex: number): number {
+  // Retry index 1 is the first retry after the initial case failure.
+  return 500 * 2 ** (retryIndex - 1)
+}
+
+function resolveAutoRetryDelay(policy: TaskExecutionPolicy, retryIndex: number): number {
+  const delay = policy.autoRetryDelay
+
+  if (delay == null) {
+    return autoRetryDelayMs(retryIndex)
+  }
+
+  return typeof delay === 'number' ? delay : delay(retryIndex)
 }
 
 function emitCaseStart(
@@ -216,6 +237,10 @@ function normalizeExecutionPolicy(policy: TaskExecutionPolicy | undefined, label
     assertNonNegativeInteger(policy.autoRetry, `${label} autoRetry`)
   }
 
+  if (typeof policy.autoRetryDelay === 'number') {
+    assertNonNegativeNumber(policy.autoRetryDelay, `${label} autoRetryDelay`)
+  }
+
   if (policy.timeout != null) {
     assertPositiveInteger(policy.timeout, `${label} timeout`)
   }
@@ -223,6 +248,7 @@ function normalizeExecutionPolicy(policy: TaskExecutionPolicy | undefined, label
   const normalized = {
     autoAttempt: policy.autoAttempt,
     autoRetry: policy.autoRetry,
+    autoRetryDelay: policy.autoRetryDelay,
     timeout: policy.timeout,
   }
 
@@ -234,10 +260,11 @@ function normalizeExecutionPolicy(policy: TaskExecutionPolicy | undefined, label
 function resolveCaseExecutionPolicy(
   taskCase: RegisteredCase<unknown>,
   taskExecutionPolicy: TaskExecutionPolicy | undefined,
-): Required<Pick<TaskExecutionPolicy, 'autoAttempt' | 'autoRetry'>> & Pick<TaskExecutionPolicy, 'timeout'> {
+): Required<Pick<TaskExecutionPolicy, 'autoAttempt' | 'autoRetry'>> & Pick<TaskExecutionPolicy, 'autoRetryDelay' | 'timeout'> {
   return {
     autoAttempt: taskCase.executionPolicy?.autoAttempt ?? taskExecutionPolicy?.autoAttempt ?? 0,
     autoRetry: taskCase.executionPolicy?.autoRetry ?? taskExecutionPolicy?.autoRetry ?? 0,
+    autoRetryDelay: taskCase.executionPolicy?.autoRetryDelay ?? taskExecutionPolicy?.autoRetryDelay,
     timeout: taskCase.executionPolicy?.timeout ?? taskExecutionPolicy?.timeout,
   }
 }
@@ -360,6 +387,15 @@ async function executeRegisteredCase(
   let lastOutcome: CaseExecutionOutcome | undefined
 
   for (let retryIndex = 0; retryIndex <= resolvedPolicy.autoRetry; retryIndex += 1) {
+    if (retryIndex > 0) {
+      const retryDelayMs = resolveAutoRetryDelay(resolvedPolicy, retryIndex)
+      assertNonNegativeNumber(retryDelayMs, 'autoRetryDelay result')
+
+      if (retryDelayMs > 0) {
+        await sleep(retryDelayMs)
+      }
+    }
+
     emitCaseStart(context.reporterHooks, {
       ...(resolvedPolicy.autoRetry > 0
         ? {

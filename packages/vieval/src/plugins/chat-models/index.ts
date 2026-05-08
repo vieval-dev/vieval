@@ -130,6 +130,12 @@ export interface ChatModelFromBaseOptions {
    */
   autoRetry?: number
   /**
+   * Delay in milliseconds before a retry starts.
+   *
+   * @default retryIndex => 500 * 2 ** (retryIndex - 1)
+   */
+  autoRetryDelay?: TaskExecutionPolicy['autoRetryDelay']
+  /**
    * Additional full task attempts allowed after the current attempt settles.
    *
    * @default 0
@@ -173,6 +179,7 @@ function normalizeExecutionPolicy(
   const normalized = {
     autoAttempt: policy.autoAttempt,
     autoRetry: policy.autoRetry,
+    autoRetryDelay: policy.autoRetryDelay,
     timeout: policy.timeout,
   }
 
@@ -193,6 +200,7 @@ function resolveModelExecutionPolicy(options: ChatModelFromOptions): TaskExecuti
   const explicitPolicy = normalizeExecutionPolicy({
     autoAttempt: options.autoAttempt ?? options.executionPolicy?.autoAttempt,
     autoRetry: options.autoRetry ?? options.executionPolicy?.autoRetry,
+    autoRetryDelay: options.autoRetryDelay ?? options.executionPolicy?.autoRetryDelay,
     timeout: options.timeout ?? options.executionPolicy?.timeout,
   })
 

@@ -991,6 +991,177 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
     expect(runResult?.scores[0]?.score).toBe(1)
   })
 
+  /**
+   * it('backs off exponentially between case auto retries') verifies case-level retry pacing.
+   *
+   * @example
+   * autoRetry: 2 -> first retry waits 500ms, second retry waits 1000ms.
+   */
+  it('backs off exponentially between case auto retries', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+
+    try {
+      let runs = 0
+      const startedAt: number[] = []
+
+      const taskDefinition = describeTask('dsl-case-auto-retry-backoff', () => {
+        caseOf('retry-case', async () => {
+          runs += 1
+          startedAt.push(Date.now())
+
+          if (runs < 3) {
+            throw new Error(`retry-${runs}`)
+          }
+        }, {
+          autoRetry: 2,
+          input: 'retry',
+        })
+      })
+
+      const runPromise = taskDefinition.task!.run({
+        cache: createTestTaskCacheRuntime(),
+        model: () => ({
+          aliases: [],
+          id: 'openai:gpt-4.1-mini',
+          model: 'gpt-4.1-mini',
+          inferenceExecutor: 'openai',
+          inferenceExecutorId: 'openai',
+        }),
+        task: {
+          entry: {
+            description: 'd',
+            directory: 'x',
+            filePath: '/tmp/x.eval.ts',
+            id: 'x',
+            name: 'x',
+          },
+          id: 'task-retry-backoff',
+          matrix: createScheduledTaskMatrix(),
+          inferenceExecutor: {
+            id: 'openai:gpt-4.1-mini',
+          },
+        },
+      })
+
+      await Promise.resolve()
+
+      expect(runs).toBe(1)
+      expect(startedAt).toEqual([0])
+
+      await vi.advanceTimersByTimeAsync(499)
+
+      expect(runs).toBe(1)
+      expect(startedAt).toEqual([0])
+
+      await vi.advanceTimersByTimeAsync(1)
+
+      expect(runs).toBe(2)
+      expect(startedAt).toEqual([0, 500])
+
+      await vi.advanceTimersByTimeAsync(999)
+
+      expect(runs).toBe(2)
+      expect(startedAt).toEqual([0, 500])
+
+      await vi.advanceTimersByTimeAsync(1)
+      const runResult = await runPromise
+
+      expect(runs).toBe(3)
+      expect(startedAt).toEqual([0, 500, 1500])
+      expect(runResult.scores[0]?.score).toBe(1)
+    }
+    finally {
+      vi.useRealTimers()
+    }
+  })
+
+  /**
+   * it('uses a custom case auto retry delay function') verifies per-case retry pacing configuration.
+   *
+   * @example
+   * autoRetryDelay: retryIndex => retryIndex * 100.
+   */
+  it('uses a custom case auto retry delay function', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+
+    try {
+      let runs = 0
+      const retryDelayIndexes: number[] = []
+      const startedAt: number[] = []
+
+      const taskDefinition = describeTask('dsl-case-custom-auto-retry-delay', () => {
+        caseOf('retry-case', async () => {
+          runs += 1
+          startedAt.push(Date.now())
+
+          if (runs < 3) {
+            throw new Error(`retry-${runs}`)
+          }
+        }, {
+          autoRetry: 2,
+          autoRetryDelay: (retryIndex) => {
+            retryDelayIndexes.push(retryIndex)
+            return retryIndex * 100
+          },
+          input: 'retry',
+        })
+      })
+
+      const runPromise = taskDefinition.task!.run({
+        cache: createTestTaskCacheRuntime(),
+        model: () => ({
+          aliases: [],
+          id: 'openai:gpt-4.1-mini',
+          model: 'gpt-4.1-mini',
+          inferenceExecutor: 'openai',
+          inferenceExecutorId: 'openai',
+        }),
+        task: {
+          entry: {
+            description: 'd',
+            directory: 'x',
+            filePath: '/tmp/x.eval.ts',
+            id: 'x',
+            name: 'x',
+          },
+          id: 'task-custom-retry-delay',
+          matrix: createScheduledTaskMatrix(),
+          inferenceExecutor: {
+            id: 'openai:gpt-4.1-mini',
+          },
+        },
+      })
+
+      await Promise.resolve()
+
+      expect(startedAt).toEqual([0])
+
+      await vi.advanceTimersByTimeAsync(99)
+
+      expect(startedAt).toEqual([0])
+
+      await vi.advanceTimersByTimeAsync(1)
+
+      expect(startedAt).toEqual([0, 100])
+
+      await vi.advanceTimersByTimeAsync(199)
+
+      expect(startedAt).toEqual([0, 100])
+
+      await vi.advanceTimersByTimeAsync(1)
+      const runResult = await runPromise
+
+      expect(retryDelayIndexes).toEqual([1, 2])
+      expect(startedAt).toEqual([0, 100, 300])
+      expect(runResult.scores[0]?.score).toBe(1)
+    }
+    finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('starts the next auto attempt only after the current task attempt fully settles', async () => {
     const releasesByAttempt = new Map<string, ReturnType<typeof createDeferredPromise>>()
     const started: string[] = []

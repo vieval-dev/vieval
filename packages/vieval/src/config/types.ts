@@ -234,6 +234,13 @@ export interface TaskRunOutput {
 }
 
 /**
+ * Delay policy for retries within one task case attempt.
+ *
+ * @param retryIndex Retry number where `1` is the first retry after the initial failure.
+ */
+export type TaskAutoRetryDelay = number | ((retryIndex: number) => number)
+
+/**
  * Execution policy applied to task and case callbacks.
  *
  * Use when:
@@ -254,6 +261,15 @@ export interface TaskExecutionPolicy {
    * @default 0
    */
   autoRetry?: number
+  /**
+   * Delay in milliseconds before a case auto retry starts.
+   *
+   * A number applies the same delay to every retry. A function receives the
+   * retry index where `1` is the first retry after the initial failure.
+   *
+   * @default retryIndex => 500 * 2 ** (retryIndex - 1)
+   */
+  autoRetryDelay?: TaskAutoRetryDelay
   /**
    * Additional full task attempts allowed after the current attempt settles.
    *

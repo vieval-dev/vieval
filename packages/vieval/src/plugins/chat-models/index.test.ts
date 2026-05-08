@@ -224,15 +224,19 @@ describe('chatModels', () => {
   })
 
   it('preserves explicit execution policy configured through chatModelFrom', () => {
+    const autoRetryDelay = (retryIndex: number) => retryIndex * 100
+
     expect(chatModelFrom({
       autoAttempt: 2,
       autoRetry: 1,
+      autoRetryDelay,
       model: 'gpt-4.1-mini',
       provider: 'openai-provider',
       timeout: 3_000,
     }).executionPolicy).toEqual({
       autoAttempt: 2,
       autoRetry: 1,
+      autoRetryDelay,
       timeout: 3_000,
     })
   })
