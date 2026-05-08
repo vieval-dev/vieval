@@ -1,6 +1,14 @@
 import type { RunScore } from '../core/runner'
 import type { ScheduledTask } from '../core/runner/schedule'
 import type { TaskExecutionContext } from '../core/runner/task-context'
+import type { TelemetryRuntime } from '../core/telemetry'
+
+/**
+ * Value that can be returned directly or through a promise.
+ *
+ * @param T - Resolved value type.
+ */
+export type Awaitable<T> = Promise<T> | T
 
 /**
  * Primitive value allowed in one matrix cell.
@@ -283,6 +291,32 @@ export interface TaskConcurrencyConfig {
 }
 
 /**
+ * Reporting configuration for local artifacts and optional OpenTelemetry integration.
+ */
+export interface CliReportingConfig {
+  /**
+   * Optional OpenTelemetry API integration.
+   */
+  openTelemetry?: CliOpenTelemetryReportingConfig
+}
+
+/**
+ * OpenTelemetry reporting configuration managed by user config setup.
+ */
+export interface CliOpenTelemetryReportingConfig {
+  /**
+   * Enables Vieval active span wrapping through `@opentelemetry/api`.
+   *
+   * @default false
+   */
+  enabled?: boolean
+  /**
+   * Called after all telemetry events and local report artifacts have been emitted.
+   */
+  onRunEnd?: () => Awaitable<void>
+}
+
+/**
  * Runtime context passed into eval task `run`.
  */
 export interface TaskRunContext {
@@ -358,6 +392,17 @@ export interface TaskRunContext {
    */
   reporterHooks?: TaskReporterHooks
   /**
+   * Optional telemetry runtime shared by runner, DSL, and reporter integrations.
+   *
+   * Use when:
+   * - task execution should emit events to the currently active telemetry runtime
+   * - enabled and disabled telemetry should keep the same execution path
+   *
+   * Expects:
+   * - callers inject a no-op runtime when telemetry is disabled
+   */
+  telemetry?: TelemetryRuntime
+  /**
    * Optional runtime scheduling overrides supplied by CLI or host execution.
    *
    * Use when:
@@ -404,6 +449,10 @@ export interface TaskCaseReporterPayload {
    */
   autoRetry?: number
   /**
+   * Optional case input payload registered by the task DSL.
+   */
+  input?: unknown
+  /**
    * Declared case label.
    */
   name: string
@@ -434,6 +483,10 @@ export interface TaskCaseReporterPayload {
  * - `state` describes the final case result
  */
 export interface TaskCaseReporterEndPayload extends TaskCaseReporterPayload {
+  /**
+   * Optional case output returned by the task case callback.
+   */
+  output?: unknown
   /**
    * Final case state.
    */

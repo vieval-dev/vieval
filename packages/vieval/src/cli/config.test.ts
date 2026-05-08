@@ -324,6 +324,54 @@ describe('loadVievalCliConfig', () => {
     })
   })
 
+  /**
+   * @example
+   * it('normalizes open telemetry reporting config') verifies enabled reporting config survives c12 loading.
+   */
+  it('normalizes open telemetry reporting config', async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-cli-config-'))
+    temporaryDirectories.push(temporaryDirectory)
+
+    const configFilePath = join(temporaryDirectory, 'vieval.config.mjs')
+    await writeFile(
+      configFilePath,
+      [
+        'export default {',
+        '  reporting: {',
+        '    openTelemetry: {',
+        '      enabled: true,',
+        '      onRunEnd: async () => {},',
+        '    },',
+        '  },',
+        '  projects: [{ name: "fixture-project" }],',
+        '}',
+      ].join('\n'),
+      'utf-8',
+    )
+
+    const loaded = await loadVievalCliConfig({
+      cwd: temporaryDirectory,
+    })
+
+    expect(loaded.reporting?.openTelemetry?.enabled).toBe(true)
+    expect(loaded.reporting?.openTelemetry?.onRunEnd).toEqual(expect.any(Function))
+  })
+
+  /**
+   * @example
+   * it('leaves reporting disabled by default') documents deterministic file reporting without OTel.
+   */
+  it('leaves reporting disabled by default', async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-cli-config-'))
+    temporaryDirectories.push(temporaryDirectory)
+
+    const loaded = await loadVievalCliConfig({
+      cwd: temporaryDirectory,
+    })
+
+    expect(loaded.reporting?.openTelemetry?.enabled ?? false).toBe(false)
+  })
+
   it('throws for ambiguous mixed-key runMatrix config objects', async () => {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-cli-config-'))
     temporaryDirectories.push(temporaryDirectory)

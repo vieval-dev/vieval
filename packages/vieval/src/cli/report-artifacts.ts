@@ -1,9 +1,13 @@
 import type { CliRunOutput } from './run'
 
 import { existsSync, readFileSync } from 'node:fs'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 import { glob } from 'tinyglobby'
+
+import { buildLocalOtlpProjection } from './report-otlp'
+import { buildCaseRecords, buildMetricsSummary, encodeJsonl } from './report-records'
 
 export interface ReportRunArtifact {
   eventsCount: number
@@ -17,10 +21,29 @@ export interface ReportRunArtifact {
  * Minimal event envelope used by report analysis.
  */
 export interface ReportRunEvent {
+  attemptId?: string
   caseId?: string
   data?: unknown
   event: string
+  experimentId?: string
+  projectId?: string
+  projectName?: string
+  runId?: string
   taskId?: string
+  timestamp?: string
+  workspaceId?: string
+}
+
+/** Identity segments used to place report artifacts on disk. */
+export interface ReportArtifactIdentity {
+  /** Attempt id path segment and default case record identity. */
+  attemptId: string
+  /** Experiment id path segment and default case record identity. */
+  experimentId: string
+  /** Run id path segment and default case record identity. */
+  runId: string
+  /** Workspace id path segment and default case record identity. */
+  workspaceId: string
 }
 
 export interface ReportRunSummaryRow {
@@ -83,10 +106,17 @@ export function readReportRunArtifact(summaryFilePath: string): ReportRunArtifac
         .map((line) => {
           const event = JSON.parse(line) as ReportRunEvent
           return {
+            attemptId: event.attemptId,
             caseId: event.caseId,
             data: event.data,
             event: event.event,
+            experimentId: event.experimentId,
+            projectId: event.projectId,
+            projectName: event.projectName,
+            runId: event.runId,
             taskId: event.taskId,
+            timestamp: event.timestamp,
+            workspaceId: event.workspaceId,
           } satisfies ReportRunEvent
         })
     : []
@@ -137,4 +167,94 @@ export function summarizeReportRunArtifact(artifact: ReportRunArtifact): ReportR
     totalTasks,
     workspaceId: artifact.summary.workspaceId ?? null,
   }
+}
+
+/**
+ * Writes one complete local run report artifact set.
+ *
+ * Use when:
+ * - CLI runs need deterministic local artifacts under workspace/project/experiment/attempt/run
+ * - report commands need normalized case, metrics, and OTLP-shaped files
+ *
+ * Expects:
+ * - `events` are the same envelopes written to `events.jsonl`
+ * - `output` already contains run identity fields
+ *
+ * Returns:
+ * - absolute report directory path containing the written artifacts
+ */
+export async function writeRunReportArtifacts(
+  output: CliRunOutput,
+  events: readonly ReportRunEvent[],
+  identity: ReportArtifactIdentity,
+  reportOut: string,
+): Promise<string> {
+  const projectId = deriveReportProjectId(output)
+  const reportDirectory = resolve(
+    reportOut,
+    identity.workspaceId,
+    projectId,
+    identity.experimentId,
+    identity.attemptId,
+    identity.runId,
+  )
+  const persistedOutput: CliRunOutput = {
+    ...output,
+    reportDirectory,
+  }
+
+  await mkdir(reportDirectory, { recursive: true })
+  await writeFile(
+    resolve(reportDirectory, 'run-summary.json'),
+    `${JSON.stringify(persistedOutput, null, 2)}\n`,
+    'utf-8',
+  )
+  await writeFile(
+    resolve(reportDirectory, 'events.jsonl'),
+    events.map(event => JSON.stringify(event)).join('\n').concat(events.length > 0 ? '\n' : ''),
+    'utf-8',
+  )
+
+  const caseRecords = buildCaseRecords({
+    attemptId: identity.attemptId,
+    events,
+    experimentId: identity.experimentId,
+    projectName: projectId,
+    runId: identity.runId,
+    workspaceId: identity.workspaceId,
+  })
+  const metricsSummary = buildMetricsSummary(caseRecords, [])
+  const otlp = buildLocalOtlpProjection({ records: caseRecords, runId: identity.runId })
+
+  await writeFile(resolve(reportDirectory, 'cases.jsonl'), encodeJsonl(caseRecords), 'utf-8')
+  await writeFile(
+    resolve(reportDirectory, 'metrics-summary.json'),
+    `${JSON.stringify(metricsSummary, null, 2)}\n`,
+    'utf-8',
+  )
+  await mkdir(resolve(reportDirectory, 'otlp'), { recursive: true })
+  await mkdir(resolve(reportDirectory, 'benchmark'), { recursive: true })
+  await writeFile(resolve(reportDirectory, 'otlp', 'traces.json'), `${JSON.stringify(otlp.traces, null, 2)}\n`, 'utf-8')
+  await writeFile(resolve(reportDirectory, 'otlp', 'logs.json'), `${JSON.stringify(otlp.logs, null, 2)}\n`, 'utf-8')
+  await writeFile(resolve(reportDirectory, 'otlp', 'metrics.json'), `${JSON.stringify(otlp.metrics, null, 2)}\n`, 'utf-8')
+
+  return reportDirectory
+}
+
+function deriveReportProjectId(output: CliRunOutput): string {
+  const uniqueProjectNames = [...new Set(output.projects.map(project => project.name))]
+  if (uniqueProjectNames.length === 1) {
+    return sanitizeIdentitySegment(uniqueProjectNames[0] ?? 'default-project')
+  }
+
+  return 'multi-project'
+}
+
+function sanitizeIdentitySegment(value: string): string {
+  const normalized = value.trim()
+  if (normalized.length === 0) {
+    return 'default'
+  }
+
+  return normalized.replace(/[^\w.-]+/g, '-')
 }

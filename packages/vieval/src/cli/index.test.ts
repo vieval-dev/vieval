@@ -64,6 +64,28 @@ describe('parseTopLevelCliArguments', () => {
     })
   })
 
+  /**
+   * @example
+   * it('accepts report cases as a report subcommand') verifies case inspection is routed from the top-level CLI.
+   */
+  it('accepts report cases as a report subcommand', () => {
+    expect(parseTopLevelCliArguments(['report', 'cases', '.vieval/reports/run-1'])).toEqual({
+      command: 'report',
+      commandArgv: ['cases', '.vieval/reports/run-1'],
+    })
+  })
+
+  /**
+   * @example
+   * it('accepts report compare as a report subcommand') verifies local artifact comparison routing.
+   */
+  it('accepts report compare as a report subcommand', () => {
+    expect(parseTopLevelCliArguments(['report', 'compare', '.vieval/reports/left', '.vieval/reports/right'])).toEqual({
+      command: 'report',
+      commandArgv: ['compare', '.vieval/reports/left', '.vieval/reports/right'],
+    })
+  })
+
   it('parses compare command and forwards remaining argv', () => {
     expect(parseTopLevelCliArguments(['compare', '--config', 'vieval.cmp.config.ts'])).toEqual({
       command: 'compare',

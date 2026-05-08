@@ -5,6 +5,8 @@ import meow from 'meow'
 import { runCompareCliOrExit } from './compare'
 import { runEvalRunCli } from './eval-run'
 import { runReportAnalyzeCli } from './report-analyze'
+import { runReportCompareCli } from './report-case-compare'
+import { runReportCasesCli } from './report-cases'
 import { runReportIndexCli } from './report-index'
 
 type Command = 'compare' | 'report' | 'run'
@@ -121,7 +123,17 @@ export async function runTopLevelCli(argv: readonly string[]): Promise<void> {
       return
     }
 
-    throw new Error(`Unsupported vieval report command "${reportSubcommand ?? '(none)'}". Expected "analyze" or "index".`)
+    if (reportSubcommand === 'cases') {
+      await runReportCasesCli(parsed.commandArgv)
+      return
+    }
+
+    if (reportSubcommand === 'compare') {
+      await runReportCompareCli(parsed.commandArgv)
+      return
+    }
+
+    throw new Error(`Unsupported vieval report command "${reportSubcommand ?? '(none)'}". Expected "analyze", "index", "cases", or "compare".`)
   }
 
   if (parsed.command === 'compare') {

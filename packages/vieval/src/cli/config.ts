@@ -1,4 +1,4 @@
-import type { ConfigHookPlugin, MatrixDefinition, MatrixLayer, TaskRunContext } from '../config'
+import type { CliReportingConfig, ConfigHookPlugin, MatrixDefinition, MatrixLayer, TaskRunContext } from '../config'
 import type { ModelDefinition } from '../config/models'
 import type { RunResult, TaskExecutionContext } from '../core/runner'
 import type { InferenceExecutor, ScheduledTask } from '../core/runner/schedule'
@@ -223,10 +223,12 @@ export interface CliComparisonConfig {
  * Expects:
  * - `model` resolves configured models for the current task
  * - `reporterHooks` follows `TaskRunContext['reporterHooks']`
+ * - `telemetry` follows `TaskRunContext['telemetry']`
  * - `runtimeConcurrency` follows `TaskRunContext['runtimeConcurrency']`
  */
 export interface CliProjectExecutorContext extends TaskExecutionContext {
   reporterHooks?: TaskRunContext['reporterHooks']
+  telemetry?: TaskRunContext['telemetry']
   runtimeConcurrency?: TaskRunContext['runtimeConcurrency']
 }
 
@@ -275,6 +277,12 @@ interface CliConfigBase {
    * @default {}
    */
   env?: NodeJS.ProcessEnv
+  /**
+   * Optional reporting integrations shared by CLI run orchestration.
+   *
+   * @default undefined
+   */
+  reporting?: CliReportingConfig
 }
 
 /**
@@ -351,6 +359,7 @@ export interface LoadedCliConfig {
   configFilePath: string | null
   env: NodeJS.ProcessEnv
   projects: NormalizedCliProjectConfig[]
+  reporting?: CliReportingConfig
 }
 
 /**
@@ -667,6 +676,21 @@ function normalizeConfig(config: CliConfig | null | undefined, cwd: string): Nor
   ))
 }
 
+function normalizeReportingConfig(config: CliReportingConfig | undefined): CliReportingConfig | undefined {
+  if (config == null) {
+    return undefined
+  }
+
+  return {
+    openTelemetry: config.openTelemetry == null
+      ? undefined
+      : {
+          enabled: config.openTelemetry.enabled ?? false,
+          onRunEnd: config.openTelemetry.onRunEnd,
+        },
+  }
+}
+
 /**
  * Detects which top-level config mode is active.
  *
@@ -751,6 +775,7 @@ export async function loadVievalCliConfig(options: LoadVievalCliConfigOptions = 
         configFilePath: null,
         env: {},
         projects: normalizeConfig(null, cwd),
+        reporting: undefined,
       }
     }
 
@@ -761,6 +786,7 @@ export async function loadVievalCliConfig(options: LoadVievalCliConfigOptions = 
       configFilePath: loadedConfig.configFilePath,
       env: config.env ?? {},
       projects: normalizeConfig(config, dirname(loadedConfig.configFilePath)),
+      reporting: normalizeReportingConfig(config.reporting),
     }
   }
   catch (error) {

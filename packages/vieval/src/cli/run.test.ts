@@ -1,5 +1,7 @@
+import type { CliRunOutput } from './run'
+
 import { Buffer } from 'node:buffer'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -22,6 +24,51 @@ const taskProjectDirectory = join(packageDirectory, 'tests', 'projects', 'exampl
 const temporaryDirectories: string[] = []
 const blockingRunStateKey = '__VIEVAL_BLOCKING_RUN_STATE__'
 const caseConcurrencyRunStateKey = '__VIEVAL_CASE_CONCURRENCY_RUN_STATE__'
+const telemetryRunEndStateKey = '__VIEVAL_TELEMETRY_RUN_END_STATE__'
+const openTelemetrySpanCalls: Array<{ attributes?: Record<string, unknown>, name: string }> = []
+const openTelemetryEventCalls: Array<{ attributes?: Record<string, unknown>, name: string }> = []
+let activeOpenTelemetrySpan: {
+  addEvent: (name: string, attributes?: Record<string, unknown>) => void
+  end: () => void
+  recordException: (error: unknown) => void
+  setAttributes: (attributes: Record<string, unknown>) => void
+  setStatus: (status: { code: number, message?: string }) => void
+} | undefined
+const openTelemetryApiMock = {
+  SpanStatusCode: {
+    ERROR: 2,
+  },
+  trace: {
+    getActiveSpan: () => activeOpenTelemetrySpan,
+    getTracer: () => ({
+      async startActiveSpan<T>(
+        name: string,
+        options: { attributes?: Record<string, unknown> },
+        callback: (span: NonNullable<typeof activeOpenTelemetrySpan>) => Promise<T>,
+      ): Promise<T> {
+        const span = {
+          addEvent(name: string, attributes?: Record<string, unknown>) {
+            openTelemetryEventCalls.push({ attributes, name })
+          },
+          end: vi.fn(),
+          recordException: vi.fn(),
+          setAttributes: vi.fn(),
+          setStatus: vi.fn(),
+        }
+        openTelemetrySpanCalls.push({ attributes: options.attributes, name })
+        activeOpenTelemetrySpan = span
+        try {
+          return await callback(span)
+        }
+        finally {
+          activeOpenTelemetrySpan = undefined
+        }
+      },
+    }),
+  },
+}
+
+vi.mock('@opentelemetry/api', () => openTelemetryApiMock)
 
 interface BlockingRunState {
   active: number
@@ -89,6 +136,15 @@ function clearCaseConcurrencyRunState(): void {
   })[caseConcurrencyRunStateKey]
 }
 
+function clearTelemetryRunEndState(): void {
+  delete (globalThis as typeof globalThis & {
+    [telemetryRunEndStateKey]?: Array<{
+      sawEvents: boolean
+      sawSummary: boolean
+    }>
+  })[telemetryRunEndStateKey]
+}
+
 function stripAnsi(value: string): string {
   return stripVTControlCharacters(value)
 }
@@ -108,6 +164,16 @@ async function waitForExpectation(assertion: () => void, attempts = 30): Promise
   }
 
   throw lastError
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path)
+    return true
+  }
+  catch {
+    return false
+  }
 }
 
 async function createDslTaskProject(): Promise<string> {
@@ -326,6 +392,10 @@ describe('runVievalCli', () => {
   afterEach(async () => {
     clearBlockingRunState()
     clearCaseConcurrencyRunState()
+    clearTelemetryRunEndState()
+    openTelemetryEventCalls.length = 0
+    openTelemetrySpanCalls.length = 0
+    activeOpenTelemetrySpan = undefined
     await Promise.all(
       temporaryDirectories.map(async (temporaryDirectory) => {
         await rm(temporaryDirectory, { force: true, recursive: true })
@@ -451,11 +521,96 @@ describeTask('cache-runtime-task', () => {
 
     const summaryText = await readFile(join(output.reportDirectory!, 'run-summary.json'), 'utf-8')
     const eventsText = await readFile(join(output.reportDirectory!, 'events.jsonl'), 'utf-8')
+    const summary = JSON.parse(summaryText) as CliRunOutput
 
     expect(summaryText).toContain('"workspaceId": "packages-vieval"')
     expect(summaryText).toContain('"experimentId": "baseline"')
     expect(summaryText).toContain('"attemptId": "attempt-1"')
+    expect(summary.reportDirectory).toBe(output.reportDirectory)
     expect(eventsText.length).toBeGreaterThan(0)
+    expect(await pathExists(join(output.reportDirectory!, 'cases.jsonl'))).toBe(true)
+    expect(await pathExists(join(output.reportDirectory!, 'metrics-summary.json'))).toBe(true)
+    expect(await pathExists(join(output.reportDirectory!, 'otlp', 'traces.json'))).toBe(true)
+    expect(await pathExists(join(output.reportDirectory!, 'otlp', 'logs.json'))).toBe(true)
+    expect(await pathExists(join(output.reportDirectory!, 'otlp', 'metrics.json'))).toBe(true)
+    expect(await pathExists(join(output.reportDirectory!, 'benchmark'))).toBe(true)
+  })
+
+  /**
+   * @example
+   * it('writes semantic case, metrics, and OTLP artifact content') verifies report files are inspectable, not only present.
+   */
+  it('writes semantic case, metrics, and OTLP artifact content', async () => {
+    const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
+    const reportOut = await mkdtemp(join(tmpdir(), 'vieval-report-semantic-'))
+    temporaryDirectories.push(reportOut)
+
+    const projectDirectory = await createDslProject({
+      evalFiles: {
+        'semantic-artifact.eval.ts': `
+import { caseOf, describeTask } from '${vievalImportPath}'
+
+describeTask('semantic-artifact-task', () => {
+  caseOf('semantic-artifact-case', (context) => {
+    context.metric('benchmark.id', 'locomo')
+    context.metric('benchmark.case.id', 'case-semantic')
+    context.metric('benchmark.locomo.category', 2)
+    context.score(0.75)
+    return {
+      answer: '7 May 2023',
+    }
+  }, {
+    input: {
+      question: 'When did Alice visit?',
+      sampleId: 'sample-1',
+    },
+  })
+})
+`,
+      },
+      projectName: 'semantic-artifact-project',
+    })
+
+    const output = await runVievalCli({
+      attempt: 'attempt-semantic',
+      configFilePath: join(projectDirectory, 'vieval.config.ts'),
+      cwd: projectDirectory,
+      experiment: 'semantic-experiment',
+      reportOut,
+      workspace: 'semantic-workspace',
+    })
+
+    const casesText = await readFile(join(output.reportDirectory!, 'cases.jsonl'), 'utf-8')
+    const metricsText = await readFile(join(output.reportDirectory!, 'metrics-summary.json'), 'utf-8')
+    const tracesText = await readFile(join(output.reportDirectory!, 'otlp', 'traces.json'), 'utf-8')
+    const caseRecord = JSON.parse(casesText.trim()) as {
+      input?: { question?: string, sampleId?: string }
+      metrics?: Record<string, unknown>
+      output?: { answer?: string }
+      scores?: Record<string, number>
+    }
+    const metricsSummary = JSON.parse(metricsText) as {
+      overall?: Record<string, { average?: number }>
+    }
+    const traces = JSON.parse(tracesText) as {
+      resourceSpans?: Array<{
+        scopeSpans?: Array<{
+          spans?: Array<{
+            attributes?: Array<{ key: string }>
+            name?: string
+          }>
+        }>
+      }>
+    }
+    const spans = traces.resourceSpans?.[0]?.scopeSpans?.[0]?.spans ?? []
+
+    expect(caseRecord.input?.question).toBe('When did Alice visit?')
+    expect(caseRecord.output?.answer).toBe('7 May 2023')
+    expect(caseRecord.metrics?.['benchmark.id']).toBe('locomo')
+    expect(caseRecord.metrics?.['benchmark.case.id']).toBe('case-semantic')
+    expect(caseRecord.scores?.exact).toBe(0.75)
+    expect(metricsSummary.overall?.exact.average).toBe(0.75)
+    expect(spans.some(span => span.name === 'vieval.case' && span.attributes?.some(attribute => attribute.key === 'benchmark.locomo.category'))).toBe(true)
   })
 
   it('persists task-emitted custom telemetry events into report artifacts', async () => {
@@ -534,6 +689,260 @@ describeTask('custom-telemetry-task', () => {
     expect(telemetryEvent?.caseId).toBe('custom-telemetry-case')
     expect(telemetryEvent?.data?.metering?.dimensions?.tool_call_count).toBe(1)
     expect(telemetryEvent?.data?.toolCalls?.[0]?.name).toBe('weather.lookup')
+  })
+
+  /**
+   * @example
+   * it('uses OpenTelemetry runtime and waits for report artifacts before onRunEnd') verifies SDK shutdown hooks run after local files exist.
+   */
+  it('uses OpenTelemetry runtime and waits for report artifacts before onRunEnd', async () => {
+    const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
+    const reportOut = await mkdtemp(join(tmpdir(), 'vieval-report-otel-'))
+    const projectDirectory = await mkdtemp(join(tmpdir(), 'vieval-otel-run-'))
+    temporaryDirectories.push(reportOut, projectDirectory)
+
+    await mkdir(join(projectDirectory, 'evals'), { recursive: true })
+    await writeFile(
+      join(projectDirectory, 'evals', 'otel-task.eval.ts'),
+      `
+import { caseOf, describeTask } from '${vievalImportPath}'
+
+describeTask('otel-task', () => {
+  caseOf('otel-case', (context) => {
+    if (context.telemetry == null) {
+      throw new Error('Missing telemetry runtime in case context.')
+    }
+
+    context.telemetry?.addEvent('case-context-observed', {
+      'vieval.case.fixture': 'otel-case',
+    })
+  })
+})
+`,
+      'utf-8',
+    )
+    await writeFile(
+      join(projectDirectory, 'vieval.config.ts'),
+      `
+import { existsSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
+
+import { defineConfig } from '${vievalImportPath}'
+
+const reportOut = ${JSON.stringify(reportOut.replaceAll('\\', '/'))}
+const runEndStateKey = ${JSON.stringify(telemetryRunEndStateKey)}
+
+function hasReportFile(directory, fileName) {
+  if (!existsSync(directory)) {
+    return false
+  }
+
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const entryPath = join(directory, entry.name)
+    if (entry.isFile() && entry.name === fileName) {
+      return true
+    }
+    if (entry.isDirectory() && hasReportFile(entryPath, fileName)) {
+      return true
+    }
+  }
+
+  return false
+}
+
+export default defineConfig({
+  reporting: {
+    openTelemetry: {
+      enabled: true,
+      async onRunEnd() {
+        globalThis[runEndStateKey] ??= []
+        const state = {
+          sawEvents: hasReportFile(reportOut, 'events.jsonl'),
+          sawSummary: hasReportFile(reportOut, 'run-summary.json'),
+        }
+        globalThis[runEndStateKey].push(state)
+
+        if (!state.sawEvents || !state.sawSummary) {
+          throw new Error('OpenTelemetry onRunEnd ran before local report artifacts were written.')
+        }
+      },
+    },
+  },
+  models: [
+    {
+      aliases: [],
+      id: 'openai:gpt-4.1-mini',
+      model: 'gpt-4.1-mini',
+      inferenceExecutor: 'openai',
+      inferenceExecutorId: 'openai:gpt-4.1-mini',
+    },
+  ],
+  projects: [
+    {
+      include: ['evals/*.eval.ts'],
+      name: 'otel-project',
+      root: '.',
+    },
+  ],
+})
+`,
+      'utf-8',
+    )
+
+    const output = await runVievalCli({
+      attempt: 'attempt-otel',
+      configFilePath: join(projectDirectory, 'vieval.config.ts'),
+      cwd: projectDirectory,
+      experiment: 'otel-experiment',
+      reportOut,
+      workspace: 'otel-workspace',
+    })
+    const runEndStates = (globalThis as typeof globalThis & {
+      [telemetryRunEndStateKey]?: Array<{
+        sawEvents: boolean
+        sawSummary: boolean
+      }>
+    })[telemetryRunEndStateKey]
+    const metricsText = await readFile(join(output.reportDirectory!, 'otlp', 'metrics.json'), 'utf-8')
+    const metricsArtifact = JSON.parse(metricsText) as {
+      resourceMetrics?: Array<{
+        scopeMetrics?: Array<{
+          metrics?: Array<{
+            gauge?: {
+              dataPoints?: unknown[]
+            }
+            name?: string
+          }>
+        }>
+      }>
+    }
+    const exactMetric = metricsArtifact.resourceMetrics?.[0]?.scopeMetrics?.[0]?.metrics?.find(metric => metric.name === 'vieval.score.exact')
+
+    expect(output.reportDirectory).toBeDefined()
+    expect(output.projects[0]?.caseSummary?.passed).toBe(1)
+    expect(exactMetric?.gauge?.dataPoints?.length).toBeGreaterThan(0)
+    expect(openTelemetrySpanCalls).toEqual(expect.arrayContaining([
+      {
+        attributes: expect.objectContaining({
+          'vieval.run.id': output.runId,
+          'vieval.workspace.id': 'otel-workspace',
+        }),
+        name: 'vieval.run',
+      },
+      {
+        attributes: expect.objectContaining({
+          'vieval.project.name': 'otel-project',
+          'vieval.run.id': output.runId,
+        }),
+        name: 'vieval.project',
+      },
+      {
+        attributes: expect.objectContaining({
+          'vieval.project.name': 'otel-project',
+          'vieval.task.name': 'otel-task',
+        }),
+        name: 'vieval.task',
+      },
+      {
+        attributes: expect.objectContaining({
+          'vieval.case.name': 'otel-case',
+          'vieval.task.name': 'otel-task',
+        }),
+        name: 'vieval.case',
+      },
+    ]))
+    expect(openTelemetryEventCalls).toEqual(expect.arrayContaining([
+      {
+        attributes: {
+          'vieval.case.fixture': 'otel-case',
+        },
+        name: 'case-context-observed',
+      },
+    ]))
+    expect(runEndStates).toEqual([
+      {
+        sawEvents: true,
+        sawSummary: true,
+      },
+    ])
+  })
+
+  /**
+   * @example
+   * it('passes telemetry runtime into project executor context') verifies custom executors share the CLI telemetry path.
+   */
+  it('passes telemetry runtime into project executor context', async () => {
+    const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
+    const projectDirectory = await mkdtemp(join(tmpdir(), 'vieval-executor-telemetry-'))
+    temporaryDirectories.push(projectDirectory)
+
+    await mkdir(join(projectDirectory, 'evals'), { recursive: true })
+    await writeFile(
+      join(projectDirectory, 'evals', 'executor-task.eval.ts'),
+      `
+import { defineEval, defineTask } from '${join(packageDirectory, 'src', 'config', 'index.ts').replaceAll('\\', '/')}'
+
+export default defineEval({
+  name: 'executor-task',
+  task: defineTask({
+    id: 'executor-task',
+    run() {
+      return {
+        scores: [{ kind: 'exact', score: 1 }],
+      }
+    },
+  }),
+})
+`,
+      'utf-8',
+    )
+    await writeFile(
+      join(projectDirectory, 'vieval.config.ts'),
+      `
+import { defineConfig } from '${vievalImportPath}'
+
+export default defineConfig({
+  reporting: {
+    openTelemetry: {
+      enabled: true,
+    },
+  },
+  projects: [
+    {
+      include: ['evals/*.eval.ts'],
+      name: 'executor-telemetry-project',
+      root: '.',
+      executor: async (task, context) => {
+        if (context.telemetry == null) {
+          throw new Error('Missing telemetry runtime in executor context.')
+        }
+
+        context.telemetry?.addEvent('executor-context-observed', {
+          'vieval.task.id': task.id,
+        })
+
+        return {
+          entryId: task.entry.id,
+          id: task.id,
+          inferenceExecutorId: task.inferenceExecutor.id,
+          matrix: task.matrix,
+          scores: [{ kind: 'exact', score: 1 }],
+        }
+      },
+    },
+  ],
+})
+`,
+      'utf-8',
+    )
+
+    const output = await runVievalCli({
+      configFilePath: join(projectDirectory, 'vieval.config.ts'),
+      cwd: projectDirectory,
+    })
+
+    expect(output.projects[0]?.errorMessage).toBeNull()
+    expect(output.projects[0]?.result?.overall.runCount).toBe(1)
   })
 
   it('preserves scoped scheduled matrix artifacts in CLI output', async () => {
@@ -641,6 +1050,48 @@ export default defineConfig({
     expect(summary).toContain('(2 tasks)')
     expect(summary).toContain('Projects  0 passed | 1 skipped (1)')
     expect(summary).toContain('Tasks     0 executed / 2 scheduled')
+  })
+
+  /**
+   * @example
+   * it('formats final project hybrid score for terminal readability') verifies score precision stays concise.
+   */
+  it('formats final project hybrid score for terminal readability', () => {
+    const summary = stripAnsi(formatVievalCliRunOutput({
+      configFilePath: '/tmp/vieval.config.ts',
+      projects: [
+        {
+          caseSummary: {
+            failed: 0,
+            passed: 1986,
+            skipped: 0,
+            timeout: 0,
+            total: 1986,
+          },
+          discoveredEvalFileCount: 1,
+          durationMs: 9_986_250,
+          entryCount: 1,
+          errorMessage: null,
+          executed: true,
+          matrixSummary: null,
+          name: 'locomo-lobehub',
+          result: {
+            overall: {
+              exactAverage: 0.3851948392189298,
+              hybridAverage: 0.3851948392189298,
+              judgeAverage: null,
+              runCount: 1,
+            },
+            inferenceExecutors: [],
+            runs: [],
+          },
+          taskCount: 1,
+        },
+      ],
+    }))
+
+    expect(summary).toContain('hybrid 0.385')
+    expect(summary).not.toContain('0.3851948392189298')
   })
 
   it('reports skipped/passed/failed counts together when mixed', () => {
@@ -1652,10 +2103,83 @@ export default defineConfig({
     }
     finally {
       vi.doUnmock('./reporters')
+      vi.resetModules()
+    }
+  })
+
+  it('cleans up reporter and environment when OpenTelemetry run-end hook fails', async () => {
+    const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
+    const projectDirectory = await mkdtemp(join(tmpdir(), 'vieval-otel-run-end-failure-'))
+    temporaryDirectories.push(projectDirectory)
+
+    await writeFile(
+      join(projectDirectory, 'vieval.config.ts'),
+      `
+import { defineConfig } from '${vievalImportPath}'
+
+export default defineConfig({
+  env: {
+    VIEVAL_OTEL_RUN_END_TEST: 'inside-config',
+  },
+  reporting: {
+    openTelemetry: {
+      enabled: true,
+      async onRunEnd() {
+        throw new Error('otel shutdown boom')
+      },
+    },
+  },
+  projects: [],
+})
+`,
+      'utf-8',
+    )
+
+    const reporterEvents: Array<{ type: string }> = []
+    const previousEnv = process.env.VIEVAL_OTEL_RUN_END_TEST
+    process.env.VIEVAL_OTEL_RUN_END_TEST = 'outside-config'
+
+    vi.resetModules()
+    vi.doMock('./reporters', () => ({
+      createCliReporter: () => ({
+        dispose() {
+          reporterEvents.push({ type: 'dispose' })
+        },
+        onCaseEnd() {},
+        onCaseStart() {},
+        onRunEnd() {},
+        onRunStart() {},
+        onTaskEnd() {},
+        onTaskQueued() {},
+        onTaskStart() {},
+      }),
+    }))
+
+    try {
+      const { runVievalCli: isolatedRunVievalCli } = await import('./run')
+
+      await expect(isolatedRunVievalCli({
+        configFilePath: join(projectDirectory, 'vieval.config.ts'),
+        cwd: projectDirectory,
+      })).rejects.toThrow('otel shutdown boom')
+
+      expect(reporterEvents).toEqual([{ type: 'dispose' }])
+      expect(process.env.VIEVAL_OTEL_RUN_END_TEST).toBe('outside-config')
+    }
+    finally {
+      vi.doUnmock('./reporters')
+      vi.resetModules()
+      if (previousEnv == null) {
+        delete process.env.VIEVAL_OTEL_RUN_END_TEST
+      }
+      else {
+        process.env.VIEVAL_OTEL_RUN_END_TEST = previousEnv
+      }
     }
   })
 
   it('reports skipped no-executor project tasks in run totals', async () => {
+    const configImportPath = join(packageDirectory, 'src', 'config', 'index.ts').replaceAll('\\', '/')
     const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
     const projectDirectory = await mkdtemp(join(tmpdir(), 'vieval-run-total-semantics-'))
     temporaryDirectories.push(projectDirectory)
@@ -1665,14 +2189,18 @@ export default defineConfig({
     await writeFile(
       join(projectDirectory, 'exec', 'exec.eval.ts'),
       `
-import { caseOf, describeTask } from '${vievalImportPath}'
+import { defineEval, defineTask } from '${configImportPath}'
 
-describeTask('exec-task', () => {
-  caseOf('exec-case', () => {}, {
-    input: {
-      source: 'exec-case',
+export default defineEval({
+  name: 'exec-task',
+  task: defineTask({
+    id: 'exec-task',
+    run() {
+      return {
+        scores: [{ kind: 'exact', score: 1 }],
+      }
     },
-  })
+  }),
 })
 `,
       'utf-8',

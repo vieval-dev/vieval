@@ -1,10 +1,12 @@
-import type { TaskConcurrencyConfig, TaskExecutionPolicy, TaskRunContext, TaskRunOutput } from '../config'
+import type { TaskConcurrencyConfig, TaskExecutionPolicy, TaskReporterEventPayload, TaskRunContext, TaskRunOutput } from '../config'
 import type { RunScoreKind } from '../core/runner'
+import type { TelemetryAttributeValue } from '../core/telemetry'
 
 import { errorMessageFrom } from '@moeru/std'
 
 import { defineEval, defineTask } from '../config'
 import { createSchedulerQueue } from '../core/scheduler/queue'
+import { createNoopTelemetryRuntime } from '../core/telemetry'
 import { registerEvalDefinition } from './registry'
 
 /**
@@ -35,7 +37,7 @@ export interface CaseRunContext<TInput> extends TaskRunContext {
    * - `name` to be a stable metric identifier
    * - `value` to be JSON-serializable
    */
-  metric: (name: string, value: boolean | number | string | null) => void
+  metric: (name: string, value: TelemetryAttributeValue) => void
   /**
    * Cooperative abort signal for the current case execution.
    */
@@ -45,7 +47,7 @@ export interface CaseRunContext<TInput> extends TaskRunContext {
 /**
  * Callback for one task case.
  */
-export type CaseRunner<TInput> = (context: CaseRunContext<TInput>) => Promise<void> | void
+export type CaseRunner<TInput> = (context: CaseRunContext<TInput>) => Promise<unknown> | unknown
 
 interface RegisteredCase<TInput> {
   concurrency?: number
@@ -88,6 +90,7 @@ export interface CaseRegistrationOptions<TInput> extends TaskExecutionPolicy {
 
 interface CaseExecutionOutcome {
   errorMessage?: string
+  output?: unknown
   scoresByKind: Map<RunScoreKind, number>
   state: 'failed' | 'passed' | 'timeout'
 }
@@ -108,6 +111,22 @@ function cloneCaseMatrix(matrix: TaskRunContext['task']['matrix']): TaskRunConte
 
 function createTaskCaseReporterId(index: number, name: string): string {
   return `${index}:${encodeURIComponent(name)}`
+}
+
+function isTelemetryAttributeScalar(value: unknown): value is boolean | number | string {
+  return typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string'
+}
+
+function isTelemetryAttributeArray(value: readonly TelemetryAttributeValue[]): value is readonly boolean[] | readonly number[] | readonly string[] {
+  return value.every(isTelemetryAttributeScalar)
+}
+
+function canAttachMetricAsAttribute(value: TelemetryAttributeValue): value is boolean | number | string | readonly boolean[] | readonly number[] | readonly string[] {
+  if (isTelemetryAttributeScalar(value)) {
+    return true
+  }
+
+  return Array.isArray(value) && isTelemetryAttributeArray(value)
 }
 
 function assertValidScore(score: number): void {
@@ -133,6 +152,7 @@ function emitCaseStart(
   payload: {
     autoRetry?: number
     index: number
+    input?: unknown
     name: string
     retryIndex?: number
     total: number
@@ -150,6 +170,7 @@ function emitCaseEnd(
   hooks: TaskRunContext['reporterHooks'] | undefined,
   payload: {
     index: number
+    output?: unknown
     state: 'passed' | 'failed' | 'timeout'
     name: string
     total: number
@@ -158,6 +179,18 @@ function emitCaseEnd(
 ): void {
   try {
     hooks?.onCaseEnd?.(payload)
+  }
+  catch {
+    // Reporter hooks must never affect task scoring.
+  }
+}
+
+function emitReporterEvent(
+  hooks: TaskRunContext['reporterHooks'] | undefined,
+  payload: TaskReporterEventPayload,
+): void {
+  try {
+    hooks?.onEvent?.(payload)
   }
   catch {
     // Reporter hooks must never affect task scoring.
@@ -217,62 +250,89 @@ async function runCaseOnce(
 ): Promise<CaseExecutionOutcome> {
   const customScoresByKind = new Map<RunScoreKind, number>()
   const abortController = new AbortController()
+  const telemetry = context.telemetry ?? createNoopTelemetryRuntime()
+  const caseId = createTaskCaseReporterId(index, taskCase.name)
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined
   let timedOut = false
   let settled = false
 
   try {
-    const runPromise = Promise.resolve(taskCase.run({
-      ...context,
-      matrix: {
-        ...cloneCaseMatrix(context.task.matrix),
-        inputs: taskCase.input,
-      },
-      metric(name, value) {
-        if (abortController.signal.aborted || settled) {
-          return
-        }
+    return await telemetry.withSpan('vieval.case', {
+      'vieval.case.id': caseId,
+      'vieval.case.name': taskCase.name,
+      'vieval.task.id': context.task.id,
+      'vieval.task.name': context.task.entry.name,
+    }, async () => {
+      const runPromise = Promise.resolve(taskCase.run({
+        ...context,
+        matrix: {
+          ...cloneCaseMatrix(context.task.matrix),
+          inputs: taskCase.input,
+        },
+        metric(name, value) {
+          if (abortController.signal.aborted || settled) {
+            return
+          }
 
-        context.reporterHooks?.onEvent?.({
-          caseId: createTaskCaseReporterId(index, taskCase.name),
-          data: {
-            name,
-            value,
-          },
-          event: 'task.case.metric',
+          emitReporterEvent(context.reporterHooks, {
+            caseId,
+            data: {
+              name,
+              value,
+            },
+            event: 'task.case.metric',
+          })
+          telemetry.addEvent('vieval.case.metric', { name, value })
+          if (canAttachMetricAsAttribute(value)) {
+            telemetry.setAttributes({ [name]: value })
+          }
+        },
+        score(score, kind = 'exact') {
+          if (abortController.signal.aborted || settled) {
+            return
+          }
+
+          assertValidScore(score)
+          customScoresByKind.set(kind, score)
+          telemetry.addEvent('vieval.case.score', {
+            'vieval.score.kind': kind,
+            'vieval.score.value': score,
+          })
+          emitReporterEvent(context.reporterHooks, {
+            caseId,
+            data: { kind, score },
+            event: 'task.case.score',
+          })
+        },
+        signal: abortController.signal,
+      }))
+
+      if (timeout != null) {
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(() => {
+            timedOut = true
+            abortController.abort(createCaseTimeoutError(timeout))
+            reject(createCaseTimeoutError(timeout))
+          }, timeout)
         })
-      },
-      score(score, kind = 'exact') {
-        if (abortController.signal.aborted || settled) {
-          return
+
+        const output = await Promise.race([runPromise, timeoutPromise])
+        settled = true
+        return {
+          output,
+          scoresByKind: customScoresByKind,
+          state: 'passed',
         }
+      }
 
-        assertValidScore(score)
-        customScoresByKind.set(kind, score)
-      },
-      signal: abortController.signal,
-    }))
-
-    if (timeout != null) {
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutHandle = setTimeout(() => {
-          timedOut = true
-          abortController.abort(createCaseTimeoutError(timeout))
-          reject(createCaseTimeoutError(timeout))
-        }, timeout)
-      })
-
-      await Promise.race([runPromise, timeoutPromise])
-    }
-    else {
-      await runPromise
-    }
-
-    settled = true
-    return {
-      scoresByKind: customScoresByKind,
-      state: 'passed',
-    }
+      const output = await runPromise
+      settled = true
+      return {
+        output,
+        scoresByKind: customScoresByKind,
+        state: 'passed',
+      }
+    })
   }
   catch (error) {
     settled = true
@@ -308,6 +368,7 @@ async function executeRegisteredCase(
           }
         : {}),
       index,
+      ...(taskCase.input === undefined ? {} : { input: taskCase.input }),
       name: taskCase.name,
       total: totalCases,
     })
@@ -587,6 +648,7 @@ export function describeTask(
                 emitCaseEnd(context.reporterHooks, {
                   ...(outcome.errorMessage == null ? {} : { errorMessage: outcome.errorMessage }),
                   index,
+                  ...(outcome.output === undefined ? {} : { output: outcome.output }),
                   state: outcome.state,
                   name: taskCase.name,
                   total: totalCases,
@@ -656,6 +718,7 @@ export function describeTask(
             emitCaseEnd(context.reporterHooks, {
               ...(outcome.errorMessage == null ? {} : { errorMessage: outcome.errorMessage }),
               index,
+              ...(outcome.output === undefined ? {} : { output: outcome.output }),
               state: outcome.state,
               name: taskCase.name,
               total: totalCases,

@@ -90,6 +90,10 @@ export interface CliReporterCaseStartPayload {
    */
   autoRetry?: number
   /**
+   * Optional case input payload for report artifacts.
+   */
+  input?: unknown
+  /**
    * Stable task identifier.
    */
   taskId: string
@@ -123,6 +127,10 @@ export interface CliReporterCaseEndPayload {
    * Stable case identifier within the task.
    */
   caseId: string
+  /**
+   * Optional case output payload for report artifacts.
+   */
+  output?: unknown
   /**
    * Terminal outcome for the case.
    */

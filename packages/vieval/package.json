@@ -80,6 +80,7 @@
   "dependencies": {
     "@henrygd/queue": "catalog:",
     "@moeru/std": "catalog:",
+    "@opentelemetry/api": "catalog:",
     "@pnpm/find-workspace-dir": "catalog:",
     "@vitest/expect": "catalog:vitest",
     "@vitest/runner": "catalog:",

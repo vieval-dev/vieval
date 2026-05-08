@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import type { TelemetryAttributes, TelemetryRuntime } from '../core/telemetry'
+
+import { errorMessageFrom } from '@moeru/std'
+import { describe, expect, it, vi } from 'vitest'
 
 import { caseOf, casesFromInputs, describeEval, describeTask } from './task'
 
@@ -192,8 +195,8 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
     })
 
     expect(startPayloads).toEqual([
-      { index: 0, name: 'case-1', total: 2 },
-      { index: 1, name: 'case-2', total: 2 },
+      { index: 0, input: 'pass-later', name: 'case-1', total: 2 },
+      { index: 1, input: 'fail-fast', name: 'case-2', total: 2 },
     ])
 
     resolveFirstCase?.()
@@ -433,6 +436,192 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
         event: 'task.case.metric',
       },
     ])
+  })
+
+  it('isolates reporter event hook failures from case score and metric calls', async () => {
+    const onEvent = vi.fn(() => {
+      throw new Error('reporter unavailable')
+    })
+
+    const taskDefinition = describeTask('dsl-reporter-event-isolation', () => {
+      caseOf('case-1', (context) => {
+        context.score(0.42)
+        context.metric('customMetric', 0.9)
+      }, { input: {} })
+    })
+
+    const runResult = await taskDefinition.task?.run({
+      cache: createTestTaskCacheRuntime(),
+      model: () => ({
+        aliases: [],
+        id: 'openai:gpt-4.1-mini',
+        inferenceExecutor: 'openai',
+        inferenceExecutorId: 'openai',
+        model: 'gpt-4.1-mini',
+      }),
+      reporterHooks: {
+        onEvent,
+      },
+      task: {
+        entry: {
+          description: 'd',
+          directory: 'x',
+          filePath: '/tmp/x.eval.ts',
+          id: 'x',
+          name: 'x',
+        },
+        id: 'x',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: createScheduledTaskMatrix(),
+      },
+    })
+
+    expect(onEvent).toHaveBeenCalledTimes(2)
+    expect(runResult?.scores).toEqual([{ kind: 'exact', score: 0.42 }])
+  })
+
+  /**
+   * @example
+   * it('emits score and metric events inside a case span') verifies the case context drives both artifacts and telemetry.
+   */
+  it('emits score and metric events inside a case span', async () => {
+    const reporterEvents: Array<{ caseId?: string, data?: unknown, event: string }> = []
+    const spanCalls: Array<{ attributes: TelemetryAttributes, name: string }> = []
+    const telemetry: TelemetryRuntime = {
+      addEvent: vi.fn(),
+      recordException: vi.fn(),
+      setAttributes: vi.fn(),
+      async withSpan<T>(name: string, attributes: TelemetryAttributes, callback: () => Promise<T>) {
+        spanCalls.push({ attributes, name })
+        return await callback()
+      },
+    }
+
+    const taskDefinition = describeTask('dsl-case-telemetry', () => {
+      caseOf('case-1', (context) => {
+        context.score(0.75, 'exact')
+        context.metric('benchmark.id', 'locomo')
+        context.metric('benchmark.tags', ['retrieval', 'qa'])
+      }, { input: {} })
+    })
+
+    const runResult = await taskDefinition.task?.run({
+      cache: createTestTaskCacheRuntime(),
+      model: () => ({
+        aliases: [],
+        id: 'openai:gpt-4.1-mini',
+        inferenceExecutor: 'openai',
+        inferenceExecutorId: 'openai',
+        model: 'gpt-4.1-mini',
+      }),
+      reporterHooks: {
+        onEvent(payload) {
+          reporterEvents.push(payload)
+        },
+      },
+      task: {
+        entry: {
+          description: 'd',
+          directory: 'x',
+          filePath: '/tmp/x.eval.ts',
+          id: 'entry-1',
+          name: 'entry-1',
+        },
+        id: 'task-telemetry',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: createScheduledTaskMatrix(),
+      },
+      telemetry,
+    })
+
+    expect(runResult?.scores).toEqual([{ kind: 'exact', score: 0.75 }])
+    expect(spanCalls).toEqual([{
+      attributes: {
+        'vieval.case.id': '0:case-1',
+        'vieval.case.name': 'case-1',
+        'vieval.task.id': 'task-telemetry',
+        'vieval.task.name': 'entry-1',
+      },
+      name: 'vieval.case',
+    }])
+    expect(reporterEvents).toContainEqual({
+      caseId: '0:case-1',
+      data: {
+        kind: 'exact',
+        score: 0.75,
+      },
+      event: 'task.case.score',
+    })
+    expect(reporterEvents).toContainEqual({
+      caseId: '0:case-1',
+      data: {
+        name: 'benchmark.id',
+        value: 'locomo',
+      },
+      event: 'task.case.metric',
+    })
+    expect(telemetry.addEvent).toHaveBeenCalledWith('vieval.case.score', {
+      'vieval.score.kind': 'exact',
+      'vieval.score.value': 0.75,
+    })
+    expect(telemetry.addEvent).toHaveBeenCalledWith('vieval.case.metric', {
+      name: 'benchmark.id',
+      value: 'locomo',
+    })
+    expect(telemetry.setAttributes).toHaveBeenCalledWith({ 'benchmark.id': 'locomo' })
+    expect(telemetry.setAttributes).toHaveBeenCalledWith({ 'benchmark.tags': ['retrieval', 'qa'] })
+  })
+
+  it('lets telemetry spans observe case failures before returning failed outcomes', async () => {
+    const rejectedErrors: unknown[] = []
+    const telemetry: TelemetryRuntime = {
+      addEvent: vi.fn(),
+      recordException: vi.fn(),
+      setAttributes: vi.fn(),
+      async withSpan<T>(_name: string, _attributes: TelemetryAttributes, callback: () => Promise<T>) {
+        try {
+          return await callback()
+        }
+        catch (error) {
+          rejectedErrors.push(error)
+          throw error
+        }
+      },
+    }
+
+    const taskDefinition = describeTask('dsl-case-telemetry-failure', () => {
+      caseOf('case-1', () => {
+        throw new Error('case exploded')
+      }, { input: {} })
+    })
+
+    const runResult = await taskDefinition.task?.run({
+      cache: createTestTaskCacheRuntime(),
+      model: () => ({
+        aliases: [],
+        id: 'openai:gpt-4.1-mini',
+        inferenceExecutor: 'openai',
+        inferenceExecutorId: 'openai',
+        model: 'gpt-4.1-mini',
+      }),
+      task: {
+        entry: {
+          description: 'd',
+          directory: 'x',
+          filePath: '/tmp/x.eval.ts',
+          id: 'x',
+          name: 'x',
+        },
+        id: 'task-telemetry-failure',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: createScheduledTaskMatrix(),
+      },
+      telemetry,
+    })
+
+    expect(rejectedErrors).toHaveLength(1)
+    expect(errorMessageFrom(rejectedErrors[0])).toBe('case exploded')
+    expect(runResult?.scores).toEqual([{ kind: 'exact', score: 0 }])
   })
 
   it('supports caseOf without input by exposing undefined inputs in context', async () => {

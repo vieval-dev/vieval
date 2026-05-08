@@ -1,5 +1,6 @@
 import type { TaskCaseReporterEndPayload, TaskCaseReporterPayload, TaskConcurrencyConfig, TaskReporterEventPayload, TaskReporterHooks } from '../config'
 import type { AggregatedRunResults, ScheduledTask, ScheduledTaskExecutor, TaskExecutionContext } from '../core/runner'
+import type { TelemetryRuntime } from '../core/telemetry'
 import type { CliProjectExecutorContext, LoadVievalCliConfigOptions, NormalizedCliProjectConfig } from './config'
 import type { CliReporter, SummaryReporter, SummaryReporterCaseStartPayload, SummaryReporterTaskQueuedPayload } from './reporters'
 import type { WindowRendererTimer } from './reporters/renderers/windowed-renderer'
@@ -8,7 +9,6 @@ import type { VievalVitestCompatReporterBridge } from './reporters/vitest-compat
 import process from 'node:process'
 
 import { randomUUID } from 'node:crypto'
-import { mkdir, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 import c from 'tinyrainbow'
@@ -16,9 +16,11 @@ import c from 'tinyrainbow'
 import { errorMessageFrom } from '@moeru/std'
 
 import { collectEvalEntries, createFilesystemTaskCacheRuntime, createRunnerRuntimeContext, createRunnerSchedule, createSchedulerRuntime, createTaskExecutionContext, RunnerExecutionError, runScheduledTasks } from '../core/runner'
+import { createNoopTelemetryRuntime, createOpenTelemetryRuntime } from '../core/telemetry'
 import { loadVievalCliConfig } from './config'
 import { discoverEvalFiles } from './discovery'
 import { loadEvalModulesWithVitestRuntime } from './module-runtime'
+import { writeRunReportArtifacts } from './report-artifacts'
 import { createCliReporter } from './reporters'
 import { WindowRenderer } from './reporters/renderers/windowed-renderer'
 import { createVievalVitestCompatReporterBridge } from './reporters/vitest-compat-reporter'
@@ -432,6 +434,14 @@ function formatDuration(durationMs: number | undefined, colors: CliColorPalette)
   return color(` ${rounded}${colors.dim('ms')}`)
 }
 
+function formatHybridAverage(hybridAverage: number | null | undefined): string {
+  if (hybridAverage == null) {
+    return 'n/a'
+  }
+
+  return hybridAverage.toFixed(3).replace(/\.?0+$/, '')
+}
+
 function filterProjectsByName(projects: readonly NormalizedCliProjectConfig[], names: readonly string[]): NormalizedCliProjectConfig[] {
   if (names.length === 0) {
     return [...projects]
@@ -461,15 +471,6 @@ function createRunIdentity(options: RunVievalCliOptions): CliRunIdentity {
     runId: `run-${Date.now()}-${randomUUID().slice(0, 8)}`,
     workspaceId,
   }
-}
-
-function deriveReportProjectId(output: CliRunOutput): string {
-  const uniqueProjectNames = [...new Set(output.projects.map(project => project.name))]
-  if (uniqueProjectNames.length === 1) {
-    return sanitizeIdentitySegment(uniqueProjectNames[0] ?? 'default-project')
-  }
-
-  return 'multi-project'
 }
 
 function createEventRecorder(identity: CliRunIdentity): {
@@ -761,6 +762,7 @@ function createTaskReporterHooks(
       reporter.onCaseEnd({
         caseId,
         errorMessage: payload.errorMessage,
+        output: payload.output,
         state: payload.state,
         taskId: task.id,
       })
@@ -777,6 +779,7 @@ function createTaskReporterHooks(
       reporter.onCaseStart({
         autoRetry: payload.autoRetry,
         caseId,
+        input: payload.input,
         caseName: payload.name,
         retryIndex: payload.retryIndex,
         taskId: task.id,
@@ -802,6 +805,7 @@ function createCliTaskExecutionContext(
   cacheRootDirectory: string,
   cacheProjectName: string,
   workspaceId: string,
+  telemetry: TelemetryRuntime,
   reporter: CliRunReporter,
   projectName: string,
   recordEvent: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void,
@@ -822,6 +826,7 @@ function createCliTaskExecutionContext(
     }),
     reporterHooks: createTaskReporterHooks(task, reporter, projectName, recordEvent, projectCaseCounters, projectCaseFailures, vitestCompatReporter),
     runtimeConcurrency,
+    telemetry,
   }
 }
 
@@ -865,6 +870,7 @@ function createAutoTaskExecutor(
       model: context.model,
       reporterHooks: resolveTaskReporterHooks(task, context, reporter, projectName, recordEvent, projectCaseCounters, projectCaseFailures, vitestCompatReporter),
       task,
+      telemetry: (context as CliProjectExecutorContext).telemetry,
     })
 
     return {
@@ -997,6 +1003,7 @@ async function executePreparedProject(
   prepared: PreparedCliProjectExecution,
   identity: CliRunIdentity,
   cacheProjectName: string | undefined,
+  telemetry: TelemetryRuntime,
   reporter: CliRunReporter,
   counters: RunCliReporterCounters,
   recordEvent: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void,
@@ -1025,7 +1032,13 @@ async function executePreparedProject(
   )
   const taskExecutor: ScheduledTaskExecutor = async (task, context) => {
     const runtimeTask = createScheduledTaskWithRuntimeConcurrency(task, prepared.project, options)
-    const result = await rawTaskExecutor(runtimeTask, context)
+    const result = await telemetry.withSpan('vieval.task', {
+      'vieval.project.name': prepared.name,
+      'vieval.run.id': identity.runId,
+      'vieval.task.entry.id': runtimeTask.entry.id,
+      'vieval.task.id': runtimeTask.id,
+      'vieval.task.name': runtimeTask.entry.name,
+    }, async () => await rawTaskExecutor(runtimeTask, context))
 
     return {
       ...result,
@@ -1050,6 +1063,7 @@ async function executePreparedProject(
           resolve(prepared.project.root, '.vieval', 'cache'),
           cacheProjectName ?? prepared.name,
           identity.workspaceId,
+          telemetry,
           reporter,
           prepared.name,
           recordEvent,
@@ -1171,35 +1185,6 @@ async function executePreparedProject(
   }
 }
 
-async function writeRunReportArtifacts(
-  output: CliRunOutput,
-  events: readonly CliRunReportEvent[],
-  identity: CliRunIdentity,
-  reportOut: string,
-): Promise<string> {
-  const projectId = deriveReportProjectId(output)
-  const reportDirectory = resolve(
-    reportOut,
-    identity.workspaceId,
-    projectId,
-    identity.experimentId,
-    identity.attemptId,
-    identity.runId,
-  )
-  await mkdir(reportDirectory, { recursive: true })
-  await writeFile(
-    resolve(reportDirectory, 'run-summary.json'),
-    `${JSON.stringify(output, null, 2)}\n`,
-    'utf-8',
-  )
-  await writeFile(
-    resolve(reportDirectory, 'events.jsonl'),
-    events.map(event => JSON.stringify(event)).join('\n').concat(events.length > 0 ? '\n' : ''),
-    'utf-8',
-  )
-  return reportDirectory
-}
-
 /**
  * Runs vieval orchestration from config and returns project-level summaries.
  *
@@ -1222,6 +1207,12 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
     configFilePath: options.configFilePath,
     cwd: options.cwd,
   })
+  const telemetry = loadedConfig.reporting?.openTelemetry?.enabled === true
+    ? createOpenTelemetryRuntime()
+    : createNoopTelemetryRuntime()
+  const onOpenTelemetryRunEnd = loadedConfig.reporting?.openTelemetry?.enabled === true
+    ? loadedConfig.reporting.openTelemetry.onRunEnd
+    : undefined
   const restoreEnvironment = applyRunEnvironment(loadedConfig.env)
   const eventRecorder = createEventRecorder(identity)
   const reporter = createReporterWithEventCapture(
@@ -1229,109 +1220,150 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
     eventRecorder.record,
   )
 
+  let runError: unknown
+  let runEndError: unknown
+  let output: CliRunOutput | undefined
   try {
-    const selectedProjects = filterProjectsByName(loadedConfig.projects, options.project ?? [])
-    const workspaceScheduler = createSchedulerRuntime({
-      concurrency: {
-        workspace: resolveWorkspaceConcurrency(loadedConfig, options),
-      },
-    })
-    const preparedProjects = await Promise.all(selectedProjects.map(async project => prepareProject(project)))
-    const executableProjects = preparedProjects
-      .filter(project => project.kind === 'prepared')
-      .map(project => project.prepared)
-    const totalTasks = preparedProjects.reduce((sum, project) => {
-      if (project.kind === 'prepared') {
-        return sum + project.prepared.tasks.length
-      }
+    output = await telemetry.withSpan('vieval.run', {
+      'vieval.attempt.id': identity.attemptId,
+      'vieval.experiment.id': identity.experimentId,
+      'vieval.run.id': identity.runId,
+      'vieval.workspace.id': identity.workspaceId,
+    }, async () => {
+      const selectedProjects = filterProjectsByName(loadedConfig.projects, options.project ?? [])
+      const workspaceScheduler = createSchedulerRuntime({
+        concurrency: {
+          workspace: resolveWorkspaceConcurrency(loadedConfig, options),
+        },
+      })
+      const preparedProjects = await Promise.all(selectedProjects.map(async project => prepareProject(project)))
+      const executableProjects = preparedProjects
+        .filter(project => project.kind === 'prepared')
+        .map(project => project.prepared)
+      const totalTasks = preparedProjects.reduce((sum, project) => {
+        if (project.kind === 'prepared') {
+          return sum + project.prepared.tasks.length
+        }
 
-      return sum + project.summary.taskCount
-    }, 0)
-    const skippedSummaryTasks = preparedProjects.reduce((sum, project) => {
-      if (project.kind === 'summary') {
         return sum + project.summary.taskCount
+      }, 0)
+      const skippedSummaryTasks = preparedProjects.reduce((sum, project) => {
+        if (project.kind === 'summary') {
+          return sum + project.summary.taskCount
+        }
+
+        return sum
+      }, 0)
+      const reporterCounters: RunCliReporterCounters = {
+        failedTasks: 0,
+        passedTasks: 0,
+        skippedTasks: 0,
       }
 
-      return sum
-    }, 0)
-    const reporterCounters: RunCliReporterCounters = {
-      failedTasks: 0,
-      passedTasks: 0,
-      skippedTasks: 0,
-    }
+      reporter.onRunStart({
+        totalTasks,
+      })
 
-    reporter.onRunStart({
-      totalTasks,
-    })
-
-    for (const project of executableProjects) {
-      for (const task of project.tasks) {
-        reporter.onTaskQueued(createTaskQueuePayload(task, project.name))
-      }
-    }
-
-    const projectSummaryPairs = await Promise.all(preparedProjects.map(async (preparedProject, index) => {
-      if (preparedProject.kind === 'summary') {
-        return {
-          index,
-          summary: preparedProject.summary,
+      for (const project of executableProjects) {
+        for (const task of project.tasks) {
+          reporter.onTaskQueued(createTaskQueuePayload(task, project.name))
         }
       }
 
-      return {
-        index,
-        summary: await workspaceScheduler.runCase({
-          experimentId: identity.experimentId,
-          projectName: preparedProject.prepared.name,
-          scope: 'workspace',
-          workspaceId: identity.workspaceId,
-        }, async () => executePreparedProject(
-          preparedProject.prepared,
-          identity,
-          options.cacheProjectName,
-          reporter,
-          reporterCounters,
-          eventRecorder.record,
-          options,
-        )),
+      const projectSummaryPairs = await Promise.all(preparedProjects.map(async (preparedProject, index) => {
+        if (preparedProject.kind === 'summary') {
+          return {
+            index,
+            summary: preparedProject.summary,
+          }
+        }
+
+        return {
+          index,
+          summary: await telemetry.withSpan('vieval.project', {
+            'vieval.project.name': preparedProject.prepared.name,
+            'vieval.run.id': identity.runId,
+          }, async () => await workspaceScheduler.runCase({
+            experimentId: identity.experimentId,
+            projectName: preparedProject.prepared.name,
+            scope: 'workspace',
+            workspaceId: identity.workspaceId,
+          }, async () => executePreparedProject(
+            preparedProject.prepared,
+            identity,
+            options.cacheProjectName,
+            telemetry,
+            reporter,
+            reporterCounters,
+            eventRecorder.record,
+            options,
+          ))),
+        }
+      }))
+      const projectSummaries = projectSummaryPairs
+        .sort((left, right) => left.index - right.index)
+        .map(item => item.summary)
+
+      reporter.onRunEnd({
+        failedTasks: reporterCounters.failedTasks,
+        passedTasks: reporterCounters.passedTasks,
+        skippedTasks: reporterCounters.skippedTasks + skippedSummaryTasks,
+        totalTasks,
+      })
+
+      const output: CliRunOutput = {
+        attemptId: identity.attemptId,
+        configFilePath: loadedConfig.configFilePath,
+        experimentId: identity.experimentId,
+        projects: projectSummaries,
+        reportDirectory: null,
+        runId: identity.runId,
+        workspaceId: identity.workspaceId,
       }
-    }))
-    const projectSummaries = projectSummaryPairs
-      .sort((left, right) => left.index - right.index)
-      .map(item => item.summary)
 
-    reporter.onRunEnd({
-      failedTasks: reporterCounters.failedTasks,
-      passedTasks: reporterCounters.passedTasks,
-      skippedTasks: reporterCounters.skippedTasks + skippedSummaryTasks,
-      totalTasks,
+      if (options.reportOut != null) {
+        output.reportDirectory = await writeRunReportArtifacts(
+          output,
+          eventRecorder.events,
+          identity,
+          options.reportOut,
+        )
+      }
+
+      return output
     })
-
-    const output: CliRunOutput = {
-      attemptId: identity.attemptId,
-      configFilePath: loadedConfig.configFilePath,
-      experimentId: identity.experimentId,
-      projects: projectSummaries,
-      reportDirectory: null,
-      runId: identity.runId,
-      workspaceId: identity.workspaceId,
-    }
-
-    if (options.reportOut != null) {
-      output.reportDirectory = await writeRunReportArtifacts(
-        output,
-        eventRecorder.events,
-        identity,
-        options.reportOut,
-      )
-    }
-
-    return output
+  }
+  catch (error) {
+    runError = error
   }
   finally {
+    if (onOpenTelemetryRunEnd != null) {
+      try {
+        await onOpenTelemetryRunEnd()
+      }
+      catch (error) {
+        if (runError == null) {
+          runEndError = error
+        }
+      }
+    }
     reporter.dispose()
     restoreEnvironment()
   }
+
+  if (runError != null) {
+    throw runError
+  }
+
+  if (runEndError != null) {
+    throw runEndError
+  }
+
+  if (output == null) {
+    throw new Error('Vieval run finished without output.')
+  }
+
+  return output
 }
 
 /**
@@ -1429,8 +1461,7 @@ export function formatVievalCliRunOutput(output: CliRunOutput): string {
     else {
       passedProjects += 1
     }
-    const hybridAverage = project.result?.overall.hybridAverage
-    const hybridAverageLabel = hybridAverage == null ? 'n/a' : String(hybridAverage)
+    const hybridAverageLabel = formatHybridAverage(project.result?.overall.hybridAverage)
     const runCount = project.result?.overall.runCount ?? 0
     const countLabel = colors.dim(`(${project.taskCount} tasks)`)
     const caseSummaryLabel = project.caseSummary == null
