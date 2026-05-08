@@ -17,7 +17,7 @@ export default defineConfig({
           }),
           baseURL: config => config.env.OPENROUTER_BASE_URL ?? 'https://openrouter.ai/api/v1',
           inferenceExecutor: 'openrouter',
-          model: 'openrouter/gpt-5.4-mini',
+          model: 'openai/gpt-5.4-mini',
         }),
       ],
     }),
@@ -30,7 +30,7 @@ export default defineConfig({
       root: '.',
       runMatrix: {
         override: {
-          model: ['openrouter/gpt-5.4-mini'],
+          model: ['openai/gpt-5.4-mini'],
         },
       },
     },
