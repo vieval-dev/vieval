@@ -2,6 +2,7 @@ import process from 'node:process'
 
 import { createCachedLoCoMoAnswerGenerator, createLoCoMoDatasetHash, createXsaiLoCoMoAnswerGenerator, DEFAULT_LOCOMO_DATA_FILE, deriveLoCoMoCases, evaluateLoCoMoCases, loadLoCoMoSamplesFromSnapDatasetSync, LOCOMO_CASES_SCHEMA_VERSION, normalizeLoCoMoAnswerPredictionCacheMode } from '@vieval/eval-agent-memory'
 import { describeTask } from 'vieval'
+import { openrouterFromRunContext } from 'vieval/plugins/chat-models'
 
 import { createLobeHubRetrieverAdapter } from '../../../src/adapters/retriever.ts'
 
@@ -65,9 +66,14 @@ describeTask('locomo-lobehub', (task) => {
     const caseItem = context.matrix.inputs
 
     const retriever = createLobeHubRetrieverAdapter()
+    const model = openrouterFromRunContext(context.model())
     const generator = createCachedLoCoMoAnswerGenerator({
       cache: context.cache,
-      generator: createXsaiLoCoMoAnswerGenerator(),
+      generator: createXsaiLoCoMoAnswerGenerator({
+        apiKey: model.apiKey,
+        baseUrl: model.baseURL,
+        model: model.model,
+      }),
       mode: predictionCacheMode,
       namespaceParts: {
         datasetHash,
