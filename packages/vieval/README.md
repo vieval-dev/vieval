@@ -9,168 +9,192 @@
 
 Vitest-style evaluation framework for agents, models, and task pipelines.
 
-`vieval` keeps eval authoring close to product code while giving you repeatable project/eval/task matrix runs and a CLI summary experience.
+`vieval` keeps eval authoring close to product code while giving you repeatable task discovery, matrix scheduling, live CLI output, JSON artifacts, and report commands.
 
 ## Why Vieval
 
-- Familiar authoring model (`describeEval`, `caseOf`, `expect`) instead of a separate eval DSL language.
-- Matrix control at three levels (project, eval, task) with deterministic merge rules.
-- Works for chat and non-chat workloads through custom `projects[].executor`.
-- Human-readable TTY output and machine-readable JSON output from the same command.
+- Familiar eval files with `describeTask`, `caseOf`, `casesFromInputs`, and `expect`.
+- Project, eval, and task matrix layers for model, scenario, rubric, and dataset variants.
+- Built-in chat-model registration through `ChatModels`, plus custom project executors for non-chat workloads.
+- Human-readable terminal output and machine-readable JSON/report artifacts from the same CLI.
+- Importable runner, scheduler, assertion, config, plugin, and testing entrypoints for advanced integration.
 
 ## Quick Start
 
-### 1) Create a config
+### Step 1. Create a config
 
 ```ts
 // vieval.config.ts
 import { defineConfig } from 'vieval'
+import { chatModelFrom, ChatModels } from 'vieval/plugins/chat-models'
 
 export default defineConfig({
+  plugins: [
+    ChatModels({
+      models: [
+        chatModelFrom({
+          aliases: ['agent-mini', 'judge-mini'],
+          inferenceExecutor: 'openai',
+          model: 'gpt-4.1-mini',
+        }),
+      ],
+    }),
+  ],
   projects: [
     {
       name: 'default',
       root: '.',
       include: ['evals/*.eval.ts'],
+      runMatrix: {
+        extend: {
+          model: ['agent-mini'],
+          scenario: ['baseline'],
+        },
+      },
+      evalMatrix: {
+        extend: {
+          rubric: ['default'],
+        },
+      },
     },
   ],
 })
 ```
 
-### 2) Create an eval
+### Step 2. Create an eval task
 
 ```ts
 // evals/smoke.eval.ts
-import { caseOf, describeEval, expect } from 'vieval'
+import { caseOf, describeTask, expect } from 'vieval'
 
-export default describeEval('smoke', () => {
-  caseOf('2 + 2 = 4', () => {
+describeTask('smoke', () => {
+  caseOf('arithmetic-default', (context) => {
+    expect(context.task.matrix.run.scenario).toBe('baseline')
     expect(2 + 2).toBe(4)
+  }, {
+    input: {
+      prompt: 'Check simple arithmetic.',
+    },
   })
 })
 ```
 
-### 3) Run
+### Step 3. Run
 
 ```bash
 pnpm -F vieval eval:run -- --config ./vieval.config.ts
 ```
 
-## Core Concepts
+The published binary form is:
 
-### Matrix layering
+```bash
+vieval run --config ./vieval.config.ts
+```
 
-`vieval` expands matrices in scope order:
+## Authoring API
 
-1. `project` from `vieval.config.*`
-2. `eval` from `*.eval.ts`
-3. `task` from `defineTask(...)`
+Use `describeTask` for the common Vitest-like authoring path:
 
-Within each scope, matrix layers apply in this order:
+```ts
+import { caseOf, describeTask, expect } from 'vieval'
+
+describeTask('prompt-language-ablation', () => {
+  caseOf('resolves matrix axes', async (context) => {
+    const selectedModel = context.model()
+    const language = context.task.matrix.run.promptLanguage
+    const scenario = context.task.matrix.run.scenario
+
+    expect(selectedModel.id.length).toBeGreaterThan(0)
+    expect(language).toBeDefined()
+    expect(scenario).toBeDefined()
+  }, {
+    input: {
+      prompt: 'Summarize the position in one sentence.',
+    },
+  })
+})
+```
+
+Use builder style when loading a batch of inputs:
+
+```ts
+import { describeTask, expect } from 'vieval'
+
+const arithmeticCases = [
+  { name: 'addition-small', input: { a: 1, b: 2, expected: 3 } },
+  { name: 'addition-large', input: { a: 20, b: 22, expected: 42 } },
+]
+
+describeTask('arithmetic-quality', ({ casesFromInputs }) => {
+  casesFromInputs('arithmetic-case', arithmeticCases, ({ matrix }) => {
+    const result = matrix.inputs.input.a + matrix.inputs.input.b
+    expect(result).toBe(matrix.inputs.input.expected)
+  })
+})
+```
+
+`describeEval` remains exported as an alias of `describeTask`, but new examples should prefer `describeTask` because task/case semantics are the primary runtime model.
+
+## Matrix Model
+
+`vieval` expands matrix scopes in this order:
+
+1. Project config from `vieval.config.*`.
+2. Eval definition from `defineEval(...)`.
+3. Task definition from `defineTask(...)`.
+
+Within each scope, matrix layers resolve in this order:
 
 1. `disable`
 2. `extend`
 3. `override`
 
-Both `runMatrix` and `evalMatrix` are supported at each scope.
+Both `runMatrix` and `evalMatrix` are supported at project, eval, and task scope. A flat object such as `runMatrix: { scenario: ['baseline'] }` is normalized to `runMatrix.extend`; layered form is preferred for new docs and examples.
 
-### Matrix compatibility alias
+Each scheduled task receives stable matrix metadata:
 
-`matrix` remains supported as a compatibility alias for `runMatrix.extend`.
+- `task.matrix.run`
+- `task.matrix.eval`
+- `task.matrix.meta.runRowId`
+- `task.matrix.meta.evalRowId`
+- `task.matrix.inputs` for `caseOf(..., { input })` and `casesFromInputs(...)`
 
-### Stable matrix artifact
-
-Each scheduled run includes:
-
-- `matrix.run`
-- `matrix.eval`
-- `matrix.meta.runRowId`
-- `matrix.meta.evalRowId`
-
-Use these fields to group and compare runs across models, rubrics, and scenarios.
-
-## Architecture
-
-```mermaid
-flowchart LR
-  BIN["src/bin/vieval.ts\n(executable shim)"] --> CLI["src/cli/index.ts\n(runTopLevelCli)"]
-  CLI --> RUN["src/cli/run.ts\n(runVievalCli + formatter)"]
-  RUN --> CFG["src/cli/config.ts\n(loadVievalCliConfig)"]
-  RUN --> DISC["src/cli/discovery.ts\n(discoverEvalFiles)"]
-  RUN --> REG["src/dsl/registry.ts\n(module registrations)"]
-  RUN --> DSL["src/dsl/task.ts\n(describeTask/caseOf hooks)"]
-  RUN --> REP["src/cli/reporters/*\n(summary + windowed + noop)"]
-
-  RUN --> COLLECT["src/core/runner/collect.ts\n(collectEvalEntries)"]
-  RUN --> SCHEDULE["src/core/runner/schedule.ts\n(createRunnerSchedule)"]
-  RUN --> EXEC["src/core/runner/run.ts\n(runScheduledTasks)"]
-  EXEC --> CTX["src/core/runner/task-context.ts\n(createTaskExecutionContext)"]
-  EXEC --> AGG["src/core/runner/aggregate.ts\n(aggregateRunResults)"]
-
-  AGG --> POLICY["src/core/processors/results/*\n(hybrid-threshold, max-failed-runs)"]
-  RUN --> POLICY
-
-  PROVIDERS["src/core/inference-executors/*\n(env, adapters, retry, openai)"] --> CTX
-  PLUGINS["src/plugins/chat-models/*\n(model aliases/plugins)"] --> CFG
-
-  TESTS["src/**/*.test.ts + tests/projects/*"] --> CLI
-  TESTS --> RUN
-  TESTS --> EXEC
-  TESTS --> DSL
-  TESTS --> REP
-```
-
-### Connection Notes
-
-- `src/cli/run.ts` is the integration hub: it loads config, discovers eval files, prepares schedules, runs tasks, emits live reporter events, and formats static summaries.
-- `src/dsl/task.ts` emits case lifecycle hooks (`onCaseStart` / `onCaseEnd`) that feed the live reporter when `reporterHooks` is present in task context.
-- `src/core/runner/run.ts` owns task lifecycle (`onTaskStart` / `onTaskEnd`) and result aggregation boundaries.
-- `src/cli/reporters/summary-reporter.ts` and `src/cli/reporters/renderers/windowed-renderer.ts` provide the Vitest-style live TTY experience; non-TTY falls back to noop reporter + final static formatter.
-
-### Runtime Sequence (`eval:run`)
-
-```mermaid
-sequenceDiagram
-  participant U as User
-  participant B as src/bin/vieval.ts
-  participant C as src/cli/index.ts
-  participant R as src/cli/run.ts
-  participant L as src/cli/config.ts
-  participant D as src/cli/discovery.ts
-  participant S as src/core/runner/*
-  participant T as src/dsl/task.ts
-  participant P as src/cli/reporters/*
-
-  U->>B: pnpm run eval:run -- --config ...
-  B->>C: runTopLevelCli(argv)
-  C->>R: runVievalCli(options)
-  R->>L: loadVievalCliConfig()
-  R->>D: discoverEvalFiles()
-  R->>S: collectEvalEntries() + createRunnerSchedule()
-  R->>P: createCliReporter(isTTY)
-  R->>P: onRunStart + onTaskQueued
-  R->>S: runScheduledTasks(...)
-  S->>P: onTaskStart / onTaskEnd
-  S->>T: task.run(context)
-  T->>P: reporterHooks.onCaseStart / onCaseEnd
-  S-->>R: aggregated run results
-  R->>P: onRunEnd + dispose
-  R-->>C: CliRunOutput
-  C->>U: static summary (or JSON)
-```
-
-## Config Example (Control Group Style)
+## Config Example
 
 ```ts
 import { defineConfig } from 'vieval'
+import { chatModelFrom, ChatModels } from 'vieval/plugins/chat-models'
 
 export default defineConfig({
+  plugins: [
+    ChatModels({
+      models: [
+        chatModelFrom({
+          aliases: ['agent-mini', 'judge-mini'],
+          inferenceExecutor: 'openai',
+          model: 'gpt-4.1-mini',
+        }),
+        chatModelFrom({
+          aliases: ['agent-large', 'judge-large'],
+          inferenceExecutor: 'openai',
+          model: 'gpt-4.1',
+        }),
+        chatModelFrom({
+          aliases: ['agent-openrouter-mini'],
+          inferenceExecutor: 'openrouter',
+          model: 'openai/gpt-4.1-mini',
+        }),
+      ],
+    }),
+  ],
   projects: [
     {
       name: 'chat-evals',
+      root: '.',
+      include: ['evals/*.eval.ts'],
       runMatrix: {
         extend: {
-          model: ['gpt-4.1-mini', 'gpt-4.1'],
+          model: ['agent-mini', 'agent-large'],
           promptLanguage: ['en', 'zh'],
           scenario: ['baseline', 'stress'],
         },
@@ -186,9 +210,9 @@ export default defineConfig({
 })
 ```
 
-## Custom Executor Example
+## Custom Executor
 
-Use `projects[].executor` for non-chat workloads such as ASR, TTS, image, motion, or other domain-specific evaluators.
+If a project provides no `executor`, `vieval run` still discovers eval files, schedules tasks, and executes module-defined task callbacks. Provide `projects[].executor` when a project needs custom execution for ASR, TTS, image, motion, hosted agents, or another domain runtime.
 
 ```ts
 import { defineConfig } from 'vieval'
@@ -197,18 +221,20 @@ export default defineConfig({
   projects: [
     {
       name: 'motion-evals',
+      root: '.',
+      include: ['evals/*.eval.ts'],
       inferenceExecutors: [{ id: 'motion-engine' }],
       models: [
         {
           id: 'motion-engine:v2',
+          aliases: ['motion-default'],
           inferenceExecutor: 'motion-engine',
           inferenceExecutorId: 'motion-engine',
           model: 'v2',
-          aliases: ['motion-default'],
         },
       ],
       async executor(task, context) {
-        const model = context.model()
+        const model = context.model({ name: 'motion-default' })
         const success = model.model === 'v2' && task.matrix.run.scenario === 'baseline'
 
         return {
@@ -227,19 +253,101 @@ export default defineConfig({
 ## CLI
 
 ```bash
-vieval run [--config <path>] [--project <name>] [--json]
+vieval run [--config <path>] [--project <name>] [--json] [--report-out <path>]
 vieval compare [--config <path>] [--comparison <id>] [--output <path>] [--format table|json]
+vieval report analyze <report-directory>
+vieval report index <report-directory> [--output <path>] [--format table|json|jsonl]
+vieval report cases <report-directory> [--where <key=value>] [--group-by <key>] [--format table|json|jsonl]
+vieval report compare <left-report-directory> <right-report-directory> [--case-key <key>] [--score-kind <kind>] [--format table|json]
 ```
 
-Common usage:
+Common workspace commands:
 
 ```bash
+pnpm install
 pnpm -F vieval eval:run
 pnpm -F vieval eval:run -- --config ./vieval.config.ts
 pnpm -F vieval eval:run -- --config ./vieval.config.ts --project chess --project moderation
 pnpm -F vieval eval:run -- --json
-pnpm -F vieval exec tsx src/bin/vieval.ts compare --config ../../vieval.config.ts --comparison <comparison-id>
+pnpm -F vieval eval:run -- --report-out .vieval/reports --workspace local --experiment prompt-v2 --attempt attempt-a
+pnpm -F vieval exec tsx src/bin/vieval.ts compare --config ./vieval.config.ts --comparison agent-memory
+pnpm -F vieval exec tsx src/bin/vieval.ts report analyze .vieval/reports/my-run
 pnpm -F vieval eval:run -- --help
+```
+
+Concurrency flags are available on `vieval run`:
+
+- `--workspace-concurrency`
+- `--project-concurrency`
+- `--task-concurrency`
+- `--attempt-concurrency`
+- `--case-concurrency`
+
+## Public Entrypoints
+
+- `vieval`: `defineConfig`, `loadEnv`, `requiredEnvFrom`, `describeTask`, `describeEval`, `caseOf`, `casesFromInputs`, and `expect`.
+- `vieval/config`: lower-level `defineEval`, `defineTask`, matrix types, task context types, model definitions, and plugin contracts.
+- `vieval/plugins/chat-models`: `ChatModels`, `ChatProviders`, `chatModelFrom`, `chatProviderFrom`, `chatModelMatrix`, runtime config helpers, and chat telemetry helpers.
+- `vieval/core/runner`: collection, scheduling, task context, cache runtime, scheduler runtime, execution, and aggregation utilities.
+- `vieval/core/assertions`: assertion primitives and pipeline helpers.
+- `vieval/core/inference-executors`: env helpers and remote provider executors.
+- `vieval/testing/expect-extensions`: Vitest expect extensions for testing eval behavior.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  CLI["src/cli/index.ts\n(runTopLevelCli)"] --> RUN["src/cli/eval-run.ts\n(runEvalRunCli)"]
+  CLI --> COMPARE["src/cli/compare.ts\n(runCompareCli)"]
+  CLI --> REPORT["src/cli/report-*.ts\n(report commands)"]
+  RUN --> ORCH["src/cli/run.ts\n(runVievalCli)"]
+  ORCH --> CFG["src/cli/config.ts\n(loadVievalCliConfig)"]
+  ORCH --> DISC["src/cli/discovery.ts\n(discoverEvalFiles)"]
+  ORCH --> MODULES["src/cli/module-runtime.ts\n(load eval modules)"]
+  MODULES --> DSL["src/dsl/task.ts\n(describeTask/caseOf/casesFromInputs)"]
+  ORCH --> SCHEDULE["src/core/runner/schedule.ts\n(createRunnerSchedule)"]
+  ORCH --> EXEC["src/core/runner/run.ts\n(runScheduledTasks)"]
+  EXEC --> CTX["src/core/runner/task-context.ts\n(createTaskExecutionContext)"]
+  EXEC --> AGG["src/core/runner/aggregate.ts\n(aggregateRunResults)"]
+  ORCH --> REPORTERS["src/cli/reporters/*\nlive reporter + Vitest bridge"]
+  ORCH --> ARTIFACTS["src/cli/report-artifacts.ts\nJSONL report artifacts"]
+  CHAT["src/plugins/chat-models/*\nmodel/provider plugins"] --> CFG
+  PROVIDERS["src/core/inference-executors/*\nprovider adapters + env"] --> CTX
+```
+
+### Runtime Sequence
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant C as src/cli/index.ts
+  participant E as src/cli/eval-run.ts
+  participant R as src/cli/run.ts
+  participant L as src/cli/config.ts
+  participant D as src/cli/discovery.ts
+  participant M as src/cli/module-runtime.ts
+  participant S as src/core/runner/*
+  participant T as src/dsl/task.ts
+  participant P as src/cli/reporters/*
+
+  U->>C: vieval run --config ...
+  C->>E: runEvalRunCli(argv)
+  E->>R: runVievalCli(options)
+  R->>L: loadVievalCliConfig()
+  R->>D: discoverEvalFiles()
+  R->>M: loadEvalModulesWithVitestRuntime()
+  M->>T: register describeTask definitions
+  R->>S: collectEvalEntries() + createRunnerSchedule()
+  R->>P: createCliReporter(isTTY)
+  R->>P: onRunStart + onTaskQueued
+  R->>S: runScheduledTasks(...)
+  S->>P: onTaskStart / onTaskEnd
+  S->>T: task.run(context)
+  T->>P: reporterHooks.onCaseStart / onCaseEnd
+  S-->>R: aggregated run results
+  R->>P: onRunEnd + dispose
+  R-->>E: CliRunOutput
+  E->>U: static summary or JSON
 ```
 
 ## Examples In This Repository
@@ -247,6 +355,7 @@ pnpm -F vieval eval:run -- --help
 - [Define a custom eval task API](tests/projects/example-api-defining-new-task)
 - [Configure run/eval matrix combinations](tests/projects/example-api-config-matrix)
 - [Load datasource records as task cases](tests/projects/example-api-load-datasource-as-cases)
+- [Use assertion helpers and Vitest expect extensions](tests/projects/example-api-expect)
 - [Compare reporters and experiment/attempt layering](tests/projects/example-api-reporters-and-experiments)
 - [Bring your own agent execution pattern](tests/projects/example-pattern-byoa-bring-your-own-agent)
 
@@ -256,7 +365,7 @@ pnpm -F vieval eval:run -- --help
 pnpm install
 pnpm -F vieval test:run
 pnpm -F vieval typecheck
-pnpm lint:fix
+pnpm lint
 ```
 
 ## When To Use / Not Use
@@ -264,13 +373,14 @@ pnpm lint:fix
 Use `vieval` when:
 
 - you want evals close to app code with Vitest-like ergonomics;
-- you need matrix experiments and repeatable run metadata;
-- you want one CLI for local diagnostics and CI export (`--json`).
+- you need repeatable matrix experiments and stable run metadata;
+- you want local diagnostics, CI JSON, and report artifacts from one runner;
+- you need to evaluate product code or custom agent flows without moving them into a hosted eval system.
 
 Do not use `vieval` when:
 
 - you need hosted dataset management, annotation UI, or SaaS observability out of the box;
-- you only need one-off scripts without reusable eval definitions or matrix scheduling.
+- you only need a one-off script without reusable eval definitions or matrix scheduling.
 
 ## Acknowledgements
 
