@@ -1,0 +1,17 @@
+{
+  "name": "@vieval/docs",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vitepress --host 0.0.0.0 --port 5173",
+    "build": "vitepress build",
+    "preview": "vitepress preview --host 0.0.0.0 --port 4173"
+  },
+  "dependencies": {
+    "vue": "catalog:"
+  },
+  "devDependencies": {
+    "@voidzero-dev/vitepress-theme": "catalog:",
+    "vitepress": "catalog:"
+  }
+}

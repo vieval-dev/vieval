@@ -3,6 +3,7 @@ shellEmulator: true
 trustPolicy: no-downgrade
 
 packages:
+  - docs
   - packages/**
   - evals/**
   - examples/**
@@ -27,6 +28,7 @@ catalog:
   '@pnpm/find-workspace-dir': ^1000.1.5
   '@types/node': ^25.6.0
   '@vitest/runner': ^4.1.4
+  '@voidzero-dev/vitepress-theme': ^4.8.4
   '@xsai-ext/providers': 0.5.0-beta.2
   '@xsai/generate-text': 0.5.0-beta.2
   '@xsai/providers': ^0.1.0-beta.5
@@ -56,6 +58,8 @@ catalog:
   unplugin-unused: ^0.5.7
   vite: ^8.0.8
   vite-plugin-inspect: ^11.3.3
+  vitepress: 2.0.0-alpha.16
+  vue: ^3.5.34
   xsai: ^0.5.0-beta.2
 catalogs:
   vitest:

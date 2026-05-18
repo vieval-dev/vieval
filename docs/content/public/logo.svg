@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Vieval">
+  <rect width="64" height="64" rx="14" fill="#111827"/>
+  <path d="M16 18l16 34 16-34h-8L32 37 24 18h-8z" fill="#4ade80"/>
+  <path d="M22 18h8l6 14-4 9L22 18z" fill="#2dd4bf"/>
+</svg>

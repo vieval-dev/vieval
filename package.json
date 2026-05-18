@@ -13,6 +13,9 @@
   "scripts": {
     "postinstall": "pnpm exec simple-git-hooks && pnpm run build:packages",
     "dev": "pnpm -r -F vieval build",
+    "docs:dev": "pnpm -F @vieval/docs dev",
+    "docs:build": "pnpm -F @vieval/docs build",
+    "docs:preview": "pnpm -F @vieval/docs preview",
     "build": "pnpm run build:packages",
     "build:packages": "turbo run build -F=\"./packages/*\"",
     "test": "vitest --coverage",
@@ -52,6 +55,7 @@
     "vitest": "catalog:vitest"
   },
   "workspaces": [
+    "docs",
     "packages/**",
     "evals/**",
     "examples/**"
