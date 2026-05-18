@@ -24,7 +24,7 @@ function getCategoryInstruction(category: LoCoMoCategory): string {
   // Python parity:
   // Default QA path uses short-phrase answers in
   // `snap-research/locomo/task_eval/gpt_utils.py:25-29`.
-  return 'Answer in a short phrase under 10 words.'
+  return 'Answer in a short phrase under 10 words. Answer with exact words from the context whenever possible.'
 }
 
 function hashRuntimeIdentity(value: string): string {

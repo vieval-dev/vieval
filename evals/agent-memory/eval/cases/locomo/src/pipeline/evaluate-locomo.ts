@@ -1,4 +1,4 @@
-import type { LoCoMoAnswerGeneratorAdapter, LoCoMoRetrieverAdapter } from '../contracts.ts'
+import type { LoCoMoAnswerAgentAdapter, LoCoMoAnswerAgentDiagnostics, LoCoMoAnswerGeneratorAdapter, LoCoMoRetrievalDiagnostics, LoCoMoRetrieverAdapter } from '../contracts.ts'
 import type { LoCoMoCase, LoCoMoCategory } from '../types.ts'
 
 import { scoreLoCoMoAnswer } from '../scoring/score-locomo-answer.ts'
@@ -10,6 +10,8 @@ export interface LoCoMoEvaluationRecord {
   goldAnswer: string
   prediction: string
   question: string
+  agentDiagnostics?: LoCoMoAnswerAgentDiagnostics
+  retrievalDiagnostics?: LoCoMoRetrievalDiagnostics
   sampleId: string
   score: number
 }
@@ -19,6 +21,26 @@ export interface LoCoMoEvaluationSummary {
   overallAverageScore: number
   totalCases: number
 }
+
+interface LoCoMoAgentAnswerEvaluationArgs {
+  answerer: LoCoMoAnswerAgentAdapter
+  cases: readonly LoCoMoCase[]
+  concurrency?: number
+  mode: 'agentAnswer'
+}
+
+interface LoCoMoRetrievalGenerationEvaluationArgs {
+  cases: readonly LoCoMoCase[]
+  concurrency?: number
+  generator: LoCoMoAnswerGeneratorAdapter
+  mode?: 'retrievalGeneration'
+  retriever: LoCoMoRetrieverAdapter
+  topK?: number
+}
+
+type LoCoMoEvaluationArgs
+  = | LoCoMoAgentAnswerEvaluationArgs
+    | LoCoMoRetrievalGenerationEvaluationArgs
 
 interface Category5AnswerKey {
   a: string
@@ -146,15 +168,11 @@ function summarizeLoCoMoRecords(records: readonly LoCoMoEvaluationRecord[]): LoC
  *   -> {@link LoCoMoAnswerGeneratorAdapter.generateAnswer}
  *   -> {@link scoreLoCoMoAnswer}
  */
-export async function evaluateLoCoMoCases(args: {
-  cases: readonly LoCoMoCase[]
-  concurrency?: number
-  generator: LoCoMoAnswerGeneratorAdapter
-  retriever: LoCoMoRetrieverAdapter
-  topK?: number
-}): Promise<{ records: LoCoMoEvaluationRecord[], summary: LoCoMoEvaluationSummary }> {
+export async function evaluateLoCoMoCases(
+  args: LoCoMoEvaluationArgs,
+): Promise<{ records: LoCoMoEvaluationRecord[], summary: LoCoMoEvaluationSummary }> {
   const concurrency = Math.max(1, args.concurrency ?? 4)
-  const topK = Math.max(1, args.topK ?? 10)
+  const topK = 'retriever' in args ? Math.max(1, args.topK ?? 10) : undefined
   const records: LoCoMoEvaluationRecord[] = []
   let cursor = 0
 
@@ -171,12 +189,6 @@ export async function evaluateLoCoMoCases(args: {
         return
       }
 
-      const retrieval = await args.retriever.retrieveContext({
-        question: caseItem.question,
-        sampleId: caseItem.sampleId,
-        topK,
-      })
-
       const generationQuestion = buildGenerationQuestion({
         caseId: caseItem.caseId,
         category: caseItem.category,
@@ -184,11 +196,46 @@ export async function evaluateLoCoMoCases(args: {
         question: caseItem.question,
       })
 
+      if ('answerer' in args) {
+        const answer = await args.answerer.answerCase({
+          caseId: caseItem.caseId,
+          category: caseItem.category,
+          question: generationQuestion.question,
+          rawQuestion: caseItem.question,
+          sampleId: caseItem.sampleId,
+        })
+        const prediction = generationQuestion.answerKey == null ? answer.prediction : resolveCategory5Prediction(answer.prediction, generationQuestion.answerKey)
+
+        const score = scoreLoCoMoAnswer({
+          category: caseItem.category,
+          goldAnswer: caseItem.goldAnswer,
+          prediction,
+        })
+
+        records.push({
+          agentDiagnostics: answer.diagnostics,
+          caseId: caseItem.caseId,
+          category: caseItem.category,
+          contextIds: answer.contextIds ?? [],
+          goldAnswer: caseItem.goldAnswer,
+          prediction,
+          question: caseItem.question,
+          sampleId: caseItem.sampleId,
+          score,
+        })
+        continue
+      }
+
+      const retrieval = await args.retriever.retrieveContext({
+        question: caseItem.question,
+        sampleId: caseItem.sampleId,
+        topK: topK ?? 10,
+      })
+
       const rawPrediction = await args.generator.generateAnswer({
         caseId: caseItem.caseId,
         category: caseItem.category,
         contextText: retrieval.contextText,
-        goldAnswer: caseItem.goldAnswer,
         question: generationQuestion.question,
         sampleId: caseItem.sampleId,
       })
@@ -207,6 +254,7 @@ export async function evaluateLoCoMoCases(args: {
         goldAnswer: caseItem.goldAnswer,
         prediction,
         question: caseItem.question,
+        retrievalDiagnostics: retrieval.diagnostics,
         sampleId: caseItem.sampleId,
         score,
       })

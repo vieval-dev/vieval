@@ -37,7 +37,6 @@ const input = {
   caseId: 'conv-26::1',
   category: 2 as const,
   contextText: 'Caroline went to the LGBTQ support group on 7 May 2023.',
-  goldAnswer: '7 May 2023',
   question: 'When did Caroline go to the LGBTQ support group?',
   sampleId: 'conv-26',
 }

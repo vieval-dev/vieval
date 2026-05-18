@@ -50,10 +50,22 @@ interface LobeHubMemoryRecord {
     title?: string | null
   }
   score?: number
+  sourceIds?: string[]
+}
+
+interface LobeHubRetrievedContextResponse {
+  [layer: string]: unknown[] | undefined
 }
 
 interface LobeHubRetrieveResponse {
+  contextText?: string
+  debug?: {
+    itemCount?: number
+    joinedMemoryCount?: number
+    searched?: Record<string, number>
+  }
   items?: LobeHubMemoryRecord[]
+  retrievedContext?: LobeHubRetrievedContextResponse
 }
 
 /**
@@ -94,6 +106,37 @@ function formatMemoryRecord(item: LobeHubMemoryRecord): string {
   ]
 
   return parts.filter((part): part is string => Boolean(part)).join('\n')
+}
+
+function countRetrievedLayers(retrievedContext: LobeHubRetrievedContextResponse | undefined): Record<string, number> | undefined {
+  if (retrievedContext == null) {
+    return undefined
+  }
+
+  return Object.fromEntries(
+    Object.entries(retrievedContext).map(([layer, items]) => [
+      layer,
+      Array.isArray(items) ? items.length : 0,
+    ]),
+  )
+}
+
+function sumLayerCounts(counts: Record<string, number> | undefined): number | undefined {
+  if (counts == null) {
+    return undefined
+  }
+
+  return Object.values(counts).reduce((sum, count) => sum + count, 0)
+}
+
+function getContextIds(items: LobeHubMemoryRecord[]): string[] {
+  return items.flatMap((item) => {
+    if (item.sourceIds != null && item.sourceIds.length > 0) {
+      return item.sourceIds
+    }
+
+    return item.id == null ? [] : [item.id]
+  })
 }
 
 /**
@@ -146,15 +189,24 @@ export function createLobeHubRetrieverAdapter(options: LobeHubRetrieverAdapterOp
 
       const payload = await response.json() as LobeHubRetrieveResponse
       const items = payload.items ?? []
+      const retrievedLayerCounts = countRetrievedLayers(payload.retrievedContext)
+      const fallbackContextText = items
+        .map((item, index) => {
+          const scoreLabel = typeof item.score === 'number' ? ` score=${item.score.toFixed(4)}` : ''
+          return `#${index + 1}${scoreLabel}\n${formatMemoryRecord(item)}`
+        })
+        .join('\n\n')
 
       return {
-        contextIds: items.map(item => item.id).filter((id): id is string => id != null),
-        contextText: items
-          .map((item, index) => {
-            const scoreLabel = typeof item.score === 'number' ? ` score=${item.score.toFixed(4)}` : ''
-            return `#${index + 1}${scoreLabel}\n${formatMemoryRecord(item)}`
-          })
-          .join('\n\n'),
+        contextIds: getContextIds(items),
+        contextText: payload.contextText ?? fallbackContextText,
+        diagnostics: {
+          itemCount: payload.debug?.itemCount ?? items.length,
+          joinedMemoryCount: payload.debug?.joinedMemoryCount,
+          retrievedContextCount: sumLayerCounts(retrievedLayerCounts),
+          retrievedLayerCounts,
+          searchedLayerCounts: payload.debug?.searched,
+        },
       }
     },
   }

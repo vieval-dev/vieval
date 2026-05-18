@@ -20,7 +20,8 @@ import { fileURLToPath } from 'node:url'
 export const DEFAULT_LOCOMO_DATA_FILE = fileURLToPath(new URL('./fixtures/locomo10-first-sample.json', import.meta.url))
 
 interface LoCoMoRawQuestionAnswer {
-  answer: number | string
+  adversarial_answer?: string
+  answer?: number | string
   category: LoCoMoCase['category']
   evidence?: string[]
   question: string
@@ -119,11 +120,12 @@ function parseLoCoMoSamplesFromSnapJson(rawContent: string, maxSamples?: number)
   const normalizedSamples: LoCoMoSample[] = limitedRawSamples.map(sample => ({
     qa: sample.qa.map(qa => ({
       // Python parity:
-      // `locomo10.json` QA entries do not provide an explicit `adversarial_answer` field;
-      // category 5 handling is prompt/scorer-driven (`task_eval/gpt_utils.py:243-257`,
-      // `task_eval/evaluation.py:217-221`).
-      adversarialAnswer: null,
-      answer: qa.answer,
+      // Category 5 entries use `answer`, then `adversarial_answer`, then
+      // `Unknown` as the distractor option in `task_eval/gpt_utils.py:281-289`;
+      // scoring still only checks whether the final prediction says the answer
+      // is not mentioned.
+      adversarialAnswer: qa.adversarial_answer ?? null,
+      answer: qa.answer ?? qa.adversarial_answer ?? (qa.category === 5 ? 'Unknown' : ''),
       category: qa.category,
       evidence: qa.evidence ?? [],
       question: qa.question,

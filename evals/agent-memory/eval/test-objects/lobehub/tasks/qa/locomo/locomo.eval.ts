@@ -1,18 +1,13 @@
 import process from 'node:process'
 
-import { createCachedLoCoMoAnswerGenerator, createLoCoMoDatasetHash, createXsaiLoCoMoAnswerGenerator, DEFAULT_LOCOMO_DATA_FILE, deriveLoCoMoCases, evaluateLoCoMoCases, loadLoCoMoSamplesFromSnapDatasetSync, LOCOMO_CASES_SCHEMA_VERSION, normalizeLoCoMoAnswerPredictionCacheMode } from '@vieval/eval-agent-memory'
+import { createLoCoMoDatasetHash, DEFAULT_LOCOMO_DATA_FILE, deriveLoCoMoCases, evaluateLoCoMoCases, loadLoCoMoSamplesFromSnapDatasetSync, LOCOMO_CASES_SCHEMA_VERSION } from '@vieval/eval-agent-memory'
 import { describeTask } from 'vieval'
-import { openrouterFromRunContext } from 'vieval/plugins/chat-models'
 
-import { createLobeHubRetrieverAdapter } from '../../../src/adapters/retriever.ts'
-
-const LOCOMO_PROMPT_VERSION = 'locomo-prompt-v1'
+import { createLobeHubAnswerAgentAdapter } from '../../../src/adapters/answer-agent.ts'
 
 const dataFile = process.env.LOCOMO_DATA_FILE ?? DEFAULT_LOCOMO_DATA_FILE
 const maxSamples = Number(process.env.LOCOMO_MAX_SAMPLES ?? '1')
 const maxCases = Number(process.env.LOCOMO_MAX_CASES ?? '5')
-const topK = Number(process.env.LOCOMO_TOP_K ?? '10')
-const predictionCacheMode = normalizeLoCoMoAnswerPredictionCacheMode(process.env.LOCOMO_PREDICTION_CACHE)
 const samples = loadLoCoMoSamplesFromSnapDatasetSync({ dataFile, maxSamples })
 const datasetHash = createLoCoMoDatasetHash(samples)
 const datasetVersion = `${LOCOMO_CASES_SCHEMA_VERSION}-${datasetHash}`
@@ -62,32 +57,14 @@ function classifyLocomoFailure(args: {
 }
 
 describeTask('locomo-lobehub', (task) => {
-  task.casesFromInputs('snap-locomo-retrieval-generation-scoring', cases, async (context) => {
+  task.casesFromInputs('snap-locomo-agent-answer-scoring', cases, async (context) => {
     const caseItem = context.matrix.inputs
 
-    const retriever = createLobeHubRetrieverAdapter()
-    const model = openrouterFromRunContext(context.model())
-    const generator = createCachedLoCoMoAnswerGenerator({
-      cache: context.cache,
-      generator: createXsaiLoCoMoAnswerGenerator({
-        apiKey: model.apiKey,
-        baseUrl: model.baseURL,
-        model: model.model,
-      }),
-      mode: predictionCacheMode,
-      namespaceParts: {
-        datasetHash,
-        promptVersion: `${LOCOMO_CASES_SCHEMA_VERSION}-${LOCOMO_PROMPT_VERSION}`,
-        retrieverId: retriever.id,
-        topK,
-      },
-    })
     const evaluation = await evaluateLoCoMoCases({
+      answerer: createLobeHubAnswerAgentAdapter(),
       cases: [caseItem],
       concurrency: 1,
-      generator,
-      retriever,
-      topK,
+      mode: 'agentAnswer',
     })
     const record = evaluation.records[0]
     if (record == null) {
@@ -112,10 +89,25 @@ describeTask('locomo-lobehub', (task) => {
     context.metric('benchmark.locomo.question', record.question)
     context.metric('benchmark.locomo.gold_answer', record.goldAnswer)
     context.metric('benchmark.locomo.prediction', record.prediction)
-    context.metric('benchmark.locomo.top_k', topK)
     context.metric('benchmark.locomo.answer_score', record.score)
     context.metric('benchmark.locomo.context_ids', record.contextIds)
     context.metric('benchmark.locomo.retrieved_context_count', record.contextIds.length)
+    if (record.retrievalDiagnostics != null) {
+      context.metric('benchmark.locomo.retrieval.item_count', record.retrievalDiagnostics.itemCount ?? null)
+      context.metric('benchmark.locomo.retrieval.joined_memory_count', record.retrievalDiagnostics.joinedMemoryCount ?? null)
+      context.metric('benchmark.locomo.retrieval.raw_context_count', record.retrievalDiagnostics.retrievedContextCount ?? null)
+      context.metric('benchmark.locomo.retrieval.raw_layer_counts', JSON.stringify(record.retrievalDiagnostics.retrievedLayerCounts ?? {}))
+      context.metric('benchmark.locomo.retrieval.searched_layer_counts', JSON.stringify(record.retrievalDiagnostics.searchedLayerCounts ?? {}))
+    }
+    if (record.agentDiagnostics != null) {
+      context.metric('benchmark.locomo.agent.operation_id', record.agentDiagnostics.operationId ?? null)
+      context.metric('benchmark.locomo.agent.status', record.agentDiagnostics.status ?? null)
+      context.metric('benchmark.locomo.agent.steps', record.agentDiagnostics.steps ?? null)
+      context.metric('benchmark.locomo.agent.tool_call_count', record.agentDiagnostics.toolCallCount ?? null)
+      context.metric('benchmark.locomo.agent.memory_tool_call_count', record.agentDiagnostics.memoryToolCallCount ?? null)
+      context.metric('benchmark.locomo.agent.memory_searches', JSON.stringify(record.agentDiagnostics.memorySearches ?? []))
+      context.metric('benchmark.locomo.agent.final_message_id', record.agentDiagnostics.finalMessageId ?? null)
+    }
     context.metric('benchmark.locomo.evidence_ids', caseItem.evidence)
     context.metric('benchmark.locomo.evidence_recall', evidenceRecall)
     context.metric('benchmark.locomo.failure_kind', classifyLocomoFailure({
