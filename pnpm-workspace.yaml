@@ -1,7 +1,6 @@
 catalogMode: prefer
 shellEmulator: true
 trustPolicy: no-downgrade
-
 packages:
   - docs
   - packages/**
@@ -70,3 +69,4 @@ ignoredBuiltDependencies:
   - simple-git-hooks # [workaround] postinstall script bundled in simple-git-hooks fails to execute with `enableGlobalVirtualStore: true`. Using local postinstall script to run `npx simple-git-hooks` instead.
 onlyBuiltDependencies:
   - esbuild
+  - vue-demi

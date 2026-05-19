@@ -3,9 +3,9 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "vitepress --host 0.0.0.0 --port 5173",
+    "dev": "vitepress",
     "build": "vitepress build",
-    "preview": "vitepress preview --host 0.0.0.0 --port 4173"
+    "preview": "vitepress preview"
   },
   "dependencies": {
     "vue": "catalog:"
