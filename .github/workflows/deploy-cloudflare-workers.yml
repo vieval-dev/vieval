@@ -1,0 +1,54 @@
+name: Cloudflare Workers
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy - docs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+
+    environment:
+      name: Production
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      # NOTICE:
+      #
+      # Pre-installing wrangler keeps cloudflare/wrangler-action from mutating the
+      # workspace dependency graph when it needs the CLI.
+      #
+      # This follows the deployment pattern used by moeru-ai/airi because pnpm
+      # workspaces reject ad-hoc root installs without an explicit workspace-root
+      # opt-in.
+      - run: pnpm i -g wrangler@4
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm -F @vieval/docs build
+
+      - uses: cloudflare/wrangler-action@v3.14.1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy -c ./docs/wrangler.toml
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
