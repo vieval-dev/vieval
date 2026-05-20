@@ -1,7 +1,7 @@
 {
   "name": "vieval",
   "type": "module",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "Vitest-based evaluation framework for agents, models, and more.",
   "author": {
     "name": "Vieval Team",
