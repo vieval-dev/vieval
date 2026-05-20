@@ -1,4 +1,5 @@
 import { caseOf, describeTask, expect } from '../../../../src'
+import { modelFromEval } from '../../../../src/plugins/chat-models'
 
 describeTask('assertion-pipeline', () => {
   caseOf('assertion-and-rubric-pipeline-default', async (context) => {
@@ -14,7 +15,7 @@ describeTask('assertion-pipeline', () => {
     expect(normalizedText.includes('bestmove')).toBe(false)
     expect(normalizedText.includes('baseline')).toBe(true)
 
-    const judgeModel = context.model({ name: 'judge-mini' })
+    const judgeModel = modelFromEval(context, { axis: 'rubricModel' })
     expect(judgeModel.id.length).toBeGreaterThan(0)
     expect(judgeModel.id).toBe(context.task.inferenceExecutor.id)
 

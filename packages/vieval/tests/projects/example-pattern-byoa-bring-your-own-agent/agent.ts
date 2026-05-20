@@ -6,7 +6,7 @@ import { merge } from '@moeru/std'
 import { generateText } from '@xsai/generate-text'
 
 import { createOpenAIFromEnv, normalizeOpenAITextOutput } from '../../../src/core/inference-executors/remote-providers/openai/index'
-import { emitChatModelErrorTelemetry, emitChatModelRequestTelemetry, emitChatModelResponseTelemetry } from '../../../src/plugins/chat-models'
+import { emitChatModelErrorTelemetry, emitChatModelRequestTelemetry, emitChatModelResponseTelemetry, modelFromRun } from '../../../src/plugins/chat-models'
 
 /**
  * Runs the minimal fixture agent with model settings resolved from task context.
@@ -16,7 +16,7 @@ import { emitChatModelErrorTelemetry, emitChatModelRequestTelemetry, emitChatMod
  * - task execution should import agent logic instead of embedding it in config
  */
 export async function runMinimalAgent(context: TaskRunContext): Promise<number> {
-  const taskModel = context.model()
+  const taskModel = modelFromRun(context, { axis: 'model' })
 
   const taskInferenceExecutor = taskModel.inferenceExecutor
   if (taskInferenceExecutor !== 'openai') {

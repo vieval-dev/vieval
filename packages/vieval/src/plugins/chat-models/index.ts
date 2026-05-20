@@ -1,10 +1,12 @@
 import type { MatrixDefinition, TaskExecutionPolicy } from '../../config'
 import type { ModelDefinition } from '../../config/models'
 import type { ConfigHookPlugin } from '../../config/plugin'
+import type { TaskRunContext } from '../../config/types'
 import type { EnvFromOptions, RequiredEnvFromOptions } from '../../core/inference-executors/env'
 
 import process from 'node:process'
 
+import { resolveModelByName } from '../../config/models'
 import { envFrom, requiredEnvFrom } from '../../core/inference-executors/env'
 
 /**
@@ -595,6 +597,96 @@ export interface ChatModelsPluginOptions {
    * Chat model definitions to append to config.
    */
   models: readonly ChatModelDefinition[]
+}
+
+/**
+ * Matrix scope that can carry a chat model selector.
+ */
+export type MatrixModelScope = 'eval' | 'run'
+
+/**
+ * Options for resolving a chat model from a matrix axis.
+ */
+export interface ModelFromMatrixOptions {
+  /**
+   * Matrix axis whose selected value is a model id, model name, or alias.
+   */
+  axis: string
+}
+
+type MatrixModelContext = Pick<TaskRunContext, 'models' | 'task'>
+
+/**
+ * Resolves a configured chat model from one scoped matrix axis.
+ *
+ * Use when:
+ * - a matrix axis selects the agent, judge, or another chat model role
+ * - eval code should keep model lookup semantics inside the chat-models plugin
+ *
+ * Expects:
+ * - `scope` to identify `context.task.matrix.run` or `context.task.matrix.eval`
+ * - `options.axis` to exist and contain a model id, model name, or alias
+ *
+ * Returns:
+ * - the configured model matching the selected matrix value
+ */
+export function modelFromMatrix(
+  context: MatrixModelContext,
+  scope: MatrixModelScope,
+  options: ModelFromMatrixOptions,
+): ModelDefinition {
+  const selectedModelName = context.task.matrix[scope][options.axis]
+
+  if (selectedModelName == null) {
+    throw new Error(`Missing ${scope} matrix axis "${options.axis}".`)
+  }
+
+  const model = resolveModelByName(context.models, selectedModelName)
+  if (model == null) {
+    throw new Error(`Unknown configured chat model "${selectedModelName}" from ${scope} matrix axis "${options.axis}".`)
+  }
+
+  return model
+}
+
+/**
+ * Resolves a configured chat model from one run-matrix axis.
+ *
+ * Use when:
+ * - run matrix selects the model used by the system under evaluation
+ * - callers want the scoped helper instead of passing `scope: 'run'`
+ *
+ * Expects:
+ * - `options.axis` to exist in `context.task.matrix.run`
+ *
+ * Returns:
+ * - the configured model matching the selected run-matrix value
+ */
+export function modelFromRun(
+  context: MatrixModelContext,
+  options: ModelFromMatrixOptions,
+): ModelDefinition {
+  return modelFromMatrix(context, 'run', options)
+}
+
+/**
+ * Resolves a configured chat model from one eval-matrix axis.
+ *
+ * Use when:
+ * - eval matrix selects a judge, rubric, or evaluator model
+ * - callers want the scoped helper instead of passing `scope: 'eval'`
+ *
+ * Expects:
+ * - `options.axis` to exist in `context.task.matrix.eval`
+ *
+ * Returns:
+ * - the configured model matching the selected eval-matrix value
+ */
+export function modelFromEval(
+  context: MatrixModelContext,
+  options: ModelFromMatrixOptions,
+): ModelDefinition {
+  return modelFromMatrix(context, 'eval', options)
 }
 
 /**

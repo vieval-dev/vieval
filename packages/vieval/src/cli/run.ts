@@ -867,7 +867,7 @@ function createAutoTaskExecutor(
 
     const output = await taskDefinition.run({
       cache: context.cache,
-      model: context.model,
+      models: context.models,
       reporterHooks: resolveTaskReporterHooks(task, context, reporter, projectName, recordEvent, projectCaseCounters, projectCaseFailures, vitestCompatReporter),
       task,
       telemetry: (context as CliProjectExecutorContext).telemetry,

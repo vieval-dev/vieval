@@ -1,8 +1,9 @@
 import { caseOf, describeTask, expect } from '../../../../src'
+import { modelFromRun } from '../../../../src/plugins/chat-models'
 
 describeTask('prompt-language-ablation', () => {
   caseOf('resolves model with prompt-language and scenario matrix axes', async (context) => {
-    const selectedModel = context.model()
+    const selectedModel = modelFromRun(context, { axis: 'model' })
     const language = context.task.matrix.run.promptLanguage
     const scenario = context.task.matrix.run.scenario
 

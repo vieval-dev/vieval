@@ -52,7 +52,7 @@ export interface RunScheduledTasksOptions {
    * Creates per-task execution context.
    *
    * Use when:
-   * - executor code needs per-task model resolution or other task-scoped data
+   * - executor code needs per-task models, cache, or other task-scoped data
    */
   createExecutionContext?: (task: ScheduledTask) => TaskExecutionContext
   /**
@@ -84,7 +84,7 @@ export interface RunScheduledTasksOptions {
   maxConcurrency?: number
 }
 
-function createDefaultExecutionContext(task: ScheduledTask): TaskExecutionContext {
+function createDefaultExecutionContext(): TaskExecutionContext {
   const cache: TaskCacheRuntime = {
     namespace(name) {
       return {
@@ -98,14 +98,7 @@ function createDefaultExecutionContext(task: ScheduledTask): TaskExecutionContex
 
   return {
     cache,
-    model(options) {
-      const requestedModelName = typeof options === 'string' ? options : options?.name
-      if (requestedModelName != null) {
-        throw new Error(`No model registry configured. Requested model: ${requestedModelName}`)
-      }
-
-      throw new Error(`No model registry configured for task inferenceExecutor id "${task.inferenceExecutor.id}".`)
-    },
+    models: [],
   }
 }
 
@@ -170,7 +163,7 @@ export async function runScheduledTasks(
     let executionContext: TaskExecutionContext
 
     try {
-      executionContext = options.createExecutionContext?.(task) ?? createDefaultExecutionContext(task)
+      executionContext = options.createExecutionContext?.(task) ?? createDefaultExecutionContext()
     }
     catch (error) {
       throw createRunnerExecutionError(task.id, error)

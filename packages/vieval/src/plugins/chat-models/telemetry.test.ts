@@ -66,9 +66,7 @@ describe('emitChatModelResponseTelemetry', () => {
     const events: Array<{ caseId?: string, data?: unknown, event: string }> = []
     const context = {
       cache: createTestTaskCacheRuntime(),
-      model() {
-        throw new Error('not used in telemetry test')
-      },
+      models: [],
       reporterHooks: {
         onEvent(payload) {
           events.push(payload)
@@ -148,9 +146,7 @@ describe('emitChatModelRequestTelemetry', () => {
     const events: Array<{ caseId?: string, data?: unknown, event: string }> = []
     const context = {
       cache: createTestTaskCacheRuntime(),
-      model() {
-        throw new Error('not used in telemetry test')
-      },
+      models: [],
       reporterHooks: {
         onEvent(payload) {
           events.push(payload)
@@ -194,9 +190,7 @@ describe('emitChatModelErrorTelemetry', () => {
     const events: Array<{ caseId?: string, data?: unknown, event: string }> = []
     const context = {
       cache: createTestTaskCacheRuntime(),
-      model() {
-        throw new Error('not used in telemetry test')
-      },
+      models: [],
       reporterHooks: {
         onEvent(payload) {
           events.push(payload)

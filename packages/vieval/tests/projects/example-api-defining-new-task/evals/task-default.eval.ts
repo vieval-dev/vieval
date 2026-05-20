@@ -1,7 +1,8 @@
 import { defineEval, defineTask } from '../../../../src/config'
+import { modelFromEval, modelFromRun } from '../../../../src/plugins/chat-models'
 
 export default defineEval({
-  description: 'Task-based eval fixture using task.model() and task.model({ name }).',
+  description: 'Task-based eval fixture using chat-model matrix helpers.',
   matrix: {
     evalMatrix: {
       override: {
@@ -24,6 +25,7 @@ export default defineEval({
       evalMatrix: {
         extend: {
           evaluator: ['default-judge'],
+          rubricModel: ['judge-mini'],
         },
       },
       runMatrix: {
@@ -33,8 +35,8 @@ export default defineEval({
       },
     },
     async run(context) {
-      const defaultModel = context.model()
-      const rubricModel = context.model({ name: 'judge-mini' })
+      const defaultModel = modelFromRun(context, { axis: 'model' })
+      const rubricModel = modelFromEval(context, { axis: 'rubricModel' })
 
       const score = defaultModel.id.length > 0 && rubricModel.id.length > 0 ? 1 : 0
 

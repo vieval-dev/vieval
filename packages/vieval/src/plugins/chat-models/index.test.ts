@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { chatModelFrom, chatModelMatrix, ChatModels, chatProviderFrom, ChatProviders } from './index'
+import { chatModelFrom, chatModelMatrix, ChatModels, chatProviderFrom, ChatProviders, modelFromEval, modelFromMatrix, modelFromRun } from './index'
 
 describe('chatProviders', () => {
   it('resolves requiredEnv and optionalEnv provider parameters from config env', async () => {
@@ -67,6 +67,85 @@ describe('chatProviders', () => {
 })
 
 describe('chatModels', () => {
+  const createMatrixContext = () => {
+    const agentModel = chatModelFrom({
+      aliases: ['agent-mini'],
+      inferenceExecutor: 'openai',
+      model: 'gpt-4.1-mini',
+    })
+    const judgeModel = chatModelFrom({
+      aliases: ['judge-mini'],
+      inferenceExecutor: 'openai',
+      model: 'gpt-4.1',
+    })
+
+    return {
+      context: {
+        cache: {} as never,
+        models: [agentModel, judgeModel],
+        task: {
+          entry: {
+            description: 'desc',
+            directory: 'd',
+            filePath: '/tmp/a.eval.ts',
+            id: 'entry',
+            name: 'entry',
+          },
+          id: 'task-1',
+          inferenceExecutor: { id: agentModel.id },
+          matrix: {
+            eval: {
+              rubricModel: 'judge-mini',
+            },
+            meta: {
+              evalRowId: 'rubricModel=judge-mini',
+              runRowId: 'model=agent-mini',
+            },
+            run: {
+              model: 'agent-mini',
+            },
+          },
+        },
+      },
+      models: {
+        agentModel,
+        judgeModel,
+      },
+    }
+  }
+
+  it('resolves a chat model from a scoped matrix axis', () => {
+    const { context, models } = createMatrixContext()
+
+    expect(modelFromMatrix(context, 'run', { axis: 'model' })).toEqual(models.agentModel)
+    expect(modelFromMatrix(context, 'eval', { axis: 'rubricModel' })).toEqual(models.judgeModel)
+  })
+
+  it('resolves chat models from run and eval matrix convenience helpers', () => {
+    const { context, models } = createMatrixContext()
+
+    expect(modelFromRun(context, { axis: 'model' })).toEqual(models.agentModel)
+    expect(modelFromEval(context, { axis: 'rubricModel' })).toEqual(models.judgeModel)
+  })
+
+  it('throws when a scoped matrix model axis is missing or unknown', () => {
+    const { context } = createMatrixContext()
+
+    expect(() => modelFromMatrix(context, 'run', { axis: 'missingModel' })).toThrow('Missing run matrix axis "missingModel".')
+    expect(() => modelFromMatrix({
+      ...context,
+      task: {
+        ...context.task,
+        matrix: {
+          ...context.task.matrix,
+          eval: {
+            rubricModel: 'missing-model',
+          },
+        },
+      },
+    }, 'eval', { axis: 'rubricModel' })).toThrow('Unknown configured chat model "missing-model" from eval matrix axis "rubricModel".')
+  })
+
   it('creates a model axis helper for runMatrix definitions', () => {
     expect(chatModelMatrix('openai/gpt-5-mini', 'openai/gpt-5-nano', 'openai/gpt-5-mini')).toEqual({
       model: ['openai/gpt-5-mini', 'openai/gpt-5-nano'],

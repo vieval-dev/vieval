@@ -465,7 +465,7 @@ describeTask('cache-runtime-task', () => {
 
         const output = await task.entry.task.run({
           cache: context.cache,
-          model: context.model,
+          models: context.models,
           reporterHooks: context.reporterHooks,
           task,
         })
@@ -985,7 +985,8 @@ export default defineConfig({
         }
 
         const output = await task.entry.task.run({
-          model: context.model,
+          cache: context.cache,
+          models: context.models,
           reporterHooks: context.reporterHooks,
           task,
         })
@@ -1788,7 +1789,8 @@ describeTask('custom-live-task', () => {
         }
 
         const output = await task.entry.task.run({
-          model: context.model,
+          cache: context.cache,
+          models: context.models,
           reporterHooks: context.reporterHooks,
           task,
         })

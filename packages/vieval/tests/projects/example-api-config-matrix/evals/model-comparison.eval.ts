@@ -1,4 +1,5 @@
 import { defineEval, defineTask } from '../../../../src/config'
+import { modelFromRun } from '../../../../src/plugins/chat-models'
 
 export default defineEval({
   description: 'Compares model behavior across baseline and stress scenarios.',
@@ -13,7 +14,7 @@ export default defineEval({
   task: defineTask({
     id: 'model-comparison',
     async run(context) {
-      const agentModel = context.model()
+      const agentModel = modelFromRun(context, { axis: 'model' })
       const runModel = context.task.matrix.run.model
       const scenario = context.task.matrix.run.scenario
       const matchesSelectedModel = runModel != null && agentModel.model === runModel

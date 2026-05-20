@@ -23,6 +23,7 @@ export default defineConfig({
       },
       evalMatrix: {
         rubric: ['default'],
+        rubricModel: ['judge-mini'],
       },
     },
   ],

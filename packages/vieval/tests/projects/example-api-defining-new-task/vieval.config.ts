@@ -19,10 +19,12 @@ export default defineConfig({
       name: 'example-api-defining-new-task',
       root: '.',
       runMatrix: {
+        model: ['judge-mini'],
         scenario: ['baseline'],
       },
       evalMatrix: {
         rubric: ['default'],
+        rubricModel: ['judge-mini'],
       },
     },
   ],

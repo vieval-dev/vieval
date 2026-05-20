@@ -152,7 +152,7 @@ function parseHeadersParameter(
  * Normalizes one configured chat model into runtime executor config.
  *
  * Use when:
- * - eval code needs typed provider constructor options from `context.model()`
+ * - eval code needs typed provider constructor options from a resolved model
  * - model parameters should be validated once with clear error messages
  *
  * Expects:
@@ -201,7 +201,7 @@ export function toChatModelRuntimeConfig(model: ModelDefinition): ChatModelRunti
  * Resolves OpenAI runtime config from one resolved run-context model.
  *
  * Use when:
- * - task execution already has `context.model()` output
+ * - task execution already has a model resolved through chat-model helpers
  * - eval code wants typed OpenAI provider options with a concise helper name
  *
  * Expects:
@@ -223,7 +223,7 @@ export function openaiFromRunContext(model: ModelDefinition): OpenAIChatModelRun
  * Resolves Ollama runtime config from one resolved run-context model.
  *
  * Use when:
- * - task execution already has `context.model()` output
+ * - task execution already has a model resolved through chat-model helpers
  * - eval code wants typed Ollama provider options with a concise helper name
  *
  * Expects:
@@ -245,7 +245,7 @@ export function ollamaFromRunContext(model: ModelDefinition): OllamaChatModelRun
  * Resolves OpenRouter runtime config from one resolved run-context model.
  *
  * Use when:
- * - task execution already has `context.model()` output
+ * - task execution already has a model resolved through chat-model helpers
  * - eval code wants typed OpenRouter provider options with a concise helper name
  *
  * Expects:

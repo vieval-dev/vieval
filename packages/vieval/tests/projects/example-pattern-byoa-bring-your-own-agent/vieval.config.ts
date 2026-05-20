@@ -24,6 +24,7 @@ export default defineConfig({
       include: ['evals/*.eval.ts'],
       exclude: [],
       runMatrix: {
+        model: ['judge-mini'],
         scenario: ['default'],
       },
       evalMatrix: {

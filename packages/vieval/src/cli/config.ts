@@ -96,7 +96,7 @@ export interface CliProjectConfig {
    * Model definitions available to project runtime execution.
    *
    * Inference executors control schedule fan-out, while models provide
-   * runtime lookup metadata for `context.model(...)` during task execution.
+   * runtime lookup metadata for model plugin helpers during task execution.
    *
    * @default inherited from top-level config models
    */
@@ -217,11 +217,11 @@ export interface CliComparisonConfig {
  * Execution context exposed to project-level `executor` implementations.
  *
  * Use when:
- * - a project executor needs the task-scoped model resolver plus case reporter hooks
+ * - a project executor needs task-scoped models plus case reporter hooks
  * - custom scheduling logic wants the same hook shape as `TaskRunContext`
  *
  * Expects:
- * - `model` resolves configured models for the current task
+ * - `models` exposes configured model registrations for plugin helpers
  * - `reporterHooks` follows `TaskRunContext['reporterHooks']`
  * - `telemetry` follows `TaskRunContext['telemetry']`
  * - `runtimeConcurrency` follows `TaskRunContext['runtimeConcurrency']`

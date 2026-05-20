@@ -21,6 +21,16 @@ function createTestTaskCacheRuntime() {
   } as any
 }
 
+function createTestModels() {
+  return [{
+    aliases: [],
+    id: 'openai:gpt-4.1-mini',
+    inferenceExecutor: 'openai',
+    inferenceExecutorId: 'openai',
+    model: 'gpt-4.1-mini',
+  }]
+}
+
 function createScheduledTaskMatrix() {
   return {
     eval: {
@@ -76,13 +86,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const runResult = await taskDefinition.task?.run({
       cache: createTestTaskCacheRuntime(),
-      model: () => ({
-        aliases: [],
-        id: 'openai:gpt-4.1-mini',
-        model: 'gpt-4.1-mini',
-        inferenceExecutor: 'openai',
-        inferenceExecutorId: 'openai',
-      }),
+      models: createTestModels(),
       task: {
         entry: {
           description: 'd',
@@ -114,13 +118,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const runResult = await taskDefinition.task?.run({
       cache: createTestTaskCacheRuntime(),
-      model: () => ({
-        aliases: [],
-        id: 'openai:gpt-4.1-mini',
-        model: 'gpt-4.1-mini',
-        inferenceExecutor: 'openai',
-        inferenceExecutorId: 'openai',
-      }),
+      models: createTestModels(),
       task: {
         entry: {
           description: 'd',
@@ -159,13 +157,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const runPromise = taskDefinition.task?.run({
       cache: createTestTaskCacheRuntime(),
-      model: () => ({
-        aliases: [],
-        id: 'openai:gpt-4.1-mini',
-        model: 'gpt-4.1-mini',
-        inferenceExecutor: 'openai',
-        inferenceExecutorId: 'openai',
-      }),
+      models: createTestModels(),
       reporterHooks: {
         onCaseStart(payload) {
           startPayloads.push(payload)
@@ -223,13 +215,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const runResult = await taskDefinition.task?.run({
       cache: createTestTaskCacheRuntime(),
-      model: () => ({
-        aliases: [],
-        id: 'openai:gpt-4.1-mini',
-        model: 'gpt-4.1-mini',
-        inferenceExecutor: 'openai',
-        inferenceExecutorId: 'openai',
-      }),
+      models: createTestModels(),
       task: {
         entry: {
           description: 'd',
@@ -268,13 +254,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const runResult = await taskDefinition.task?.run({
       cache: createTestTaskCacheRuntime(),
-      model: () => ({
-        aliases: [],
-        id: 'openai:gpt-4.1-mini',
-        model: 'gpt-4.1-mini',
-        inferenceExecutor: 'openai',
-        inferenceExecutorId: 'openai',
-      }),
+      models: createTestModels(),
       task: {
         entry: {
           description: 'd',
@@ -311,13 +291,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const runResult = await taskDefinition.task?.run({
       cache: createTestTaskCacheRuntime(),
-      model: () => ({
-        aliases: [],
-        id: 'openai:gpt-4.1-mini',
-        inferenceExecutor: 'openai',
-        inferenceExecutorId: 'openai',
-        model: 'gpt-4.1-mini',
-      }),
+      models: createTestModels(),
       task: {
         entry: {
           description: 'd',
@@ -354,13 +328,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const runResult = await taskDefinition.task?.run({
       cache: createTestTaskCacheRuntime(),
-      model: () => ({
-        aliases: [],
-        id: 'openai:gpt-4.1-mini',
-        inferenceExecutor: 'openai',
-        inferenceExecutorId: 'openai',
-        model: 'gpt-4.1-mini',
-      }),
+      models: createTestModels(),
       task: {
         entry: {
           description: 'd',
@@ -396,13 +364,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     await taskDefinition.task?.run({
       cache: createTestTaskCacheRuntime(),
-      model: () => ({
-        aliases: [],
-        id: 'openai:gpt-4.1-mini',
-        inferenceExecutor: 'openai',
-        inferenceExecutorId: 'openai',
-        model: 'gpt-4.1-mini',
-      }),
+      models: createTestModels(),
       reporterHooks: {
         onEvent(payload) {
           events.push(payload)
@@ -452,13 +414,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const runResult = await taskDefinition.task?.run({
       cache: createTestTaskCacheRuntime(),
-      model: () => ({
-        aliases: [],
-        id: 'openai:gpt-4.1-mini',
-        inferenceExecutor: 'openai',
-        inferenceExecutorId: 'openai',
-        model: 'gpt-4.1-mini',
-      }),
+      models: createTestModels(),
       reporterHooks: {
         onEvent,
       },
@@ -507,13 +463,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const runResult = await taskDefinition.task?.run({
       cache: createTestTaskCacheRuntime(),
-      model: () => ({
-        aliases: [],
-        id: 'openai:gpt-4.1-mini',
-        inferenceExecutor: 'openai',
-        inferenceExecutorId: 'openai',
-        model: 'gpt-4.1-mini',
-      }),
+      models: createTestModels(),
       reporterHooks: {
         onEvent(payload) {
           reporterEvents.push(payload)
@@ -597,13 +547,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const runResult = await taskDefinition.task?.run({
       cache: createTestTaskCacheRuntime(),
-      model: () => ({
-        aliases: [],
-        id: 'openai:gpt-4.1-mini',
-        inferenceExecutor: 'openai',
-        inferenceExecutorId: 'openai',
-        model: 'gpt-4.1-mini',
-      }),
+      models: createTestModels(),
       task: {
         entry: {
           description: 'd',
@@ -633,13 +577,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const runResult = await taskDefinition.task?.run({
       cache: createTestTaskCacheRuntime(),
-      model: () => ({
-        aliases: [],
-        id: 'openai:gpt-4.1-mini',
-        inferenceExecutor: 'openai',
-        inferenceExecutorId: 'openai',
-        model: 'gpt-4.1-mini',
-      }),
+      models: createTestModels(),
       task: {
         entry: {
           description: 'd',
@@ -705,7 +643,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const runPromise = taskDefinition.task!.run({
       cache: createTestTaskCacheRuntime(),
-      model: {} as never,
+      models: [],
       reporterHooks: {
         onCaseStart(payload) {
           startPayloads.push(payload)
@@ -774,7 +712,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const runPromise = taskDefinition.task!.run({
       cache: createTestTaskCacheRuntime(),
-      model: {} as never,
+      models: [],
       task: {
         entry: {
           description: 'd',
@@ -840,7 +778,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const runPromise = taskDefinition.task!.run({
       cache: createTestTaskCacheRuntime(),
-      model: {} as never,
+      models: [],
       task: {
         entry: {
           description: 'd',
@@ -893,13 +831,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const runResult = await taskDefinition.task?.run({
       cache: createTestTaskCacheRuntime(),
-      model: () => ({
-        aliases: [],
-        id: 'openai:gpt-4.1-mini',
-        model: 'gpt-4.1-mini',
-        inferenceExecutor: 'openai',
-        inferenceExecutorId: 'openai',
-      }),
+      models: createTestModels(),
       reporterHooks: {
         onCaseEnd(payload) {
           endPayloads.push(payload)
@@ -951,13 +883,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const runResult = await taskDefinition.task?.run({
       cache: createTestTaskCacheRuntime(),
-      model: () => ({
-        aliases: [],
-        id: 'openai:gpt-4.1-mini',
-        model: 'gpt-4.1-mini',
-        inferenceExecutor: 'openai',
-        inferenceExecutorId: 'openai',
-      }),
+      models: createTestModels(),
       reporterHooks: {
         onCaseStart(payload) {
           startPayloads.push(payload)
@@ -1021,13 +947,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
       const runPromise = taskDefinition.task!.run({
         cache: createTestTaskCacheRuntime(),
-        model: () => ({
-          aliases: [],
-          id: 'openai:gpt-4.1-mini',
-          model: 'gpt-4.1-mini',
-          inferenceExecutor: 'openai',
-          inferenceExecutorId: 'openai',
-        }),
+        models: createTestModels(),
         task: {
           entry: {
             description: 'd',
@@ -1111,13 +1031,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
       const runPromise = taskDefinition.task!.run({
         cache: createTestTaskCacheRuntime(),
-        model: () => ({
-          aliases: [],
-          id: 'openai:gpt-4.1-mini',
-          model: 'gpt-4.1-mini',
-          inferenceExecutor: 'openai',
-          inferenceExecutorId: 'openai',
-        }),
+        models: createTestModels(),
         task: {
           entry: {
             description: 'd',
@@ -1192,13 +1106,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const runPromise = taskDefinition.task!.run({
       cache: createTestTaskCacheRuntime(),
-      model: () => ({
-        aliases: [],
-        id: 'openai:gpt-4.1-mini',
-        model: 'gpt-4.1-mini',
-        inferenceExecutor: 'openai',
-        inferenceExecutorId: 'openai',
-      }),
+      models: createTestModels(),
       task: {
         entry: {
           description: 'd',
@@ -1259,13 +1167,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     await taskDefinition.task?.run({
       cache: createTestTaskCacheRuntime(),
-      model: () => ({
-        aliases: [],
-        id: 'openai:gpt-4.1-mini',
-        model: 'gpt-4.1-mini',
-        inferenceExecutor: 'openai',
-        inferenceExecutorId: 'openai',
-      }),
+      models: createTestModels(),
       task: {
         entry: {
           description: 'd',
@@ -1296,13 +1198,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const runResult = await taskDefinition.task?.run({
       cache: createTestTaskCacheRuntime(),
-      model: () => ({
-        aliases: [],
-        id: 'openai:gpt-4.1-mini',
-        model: 'gpt-4.1-mini',
-        inferenceExecutor: 'openai',
-        inferenceExecutorId: 'openai',
-      }),
+      models: createTestModels(),
       task: {
         entry: {
           description: 'd',

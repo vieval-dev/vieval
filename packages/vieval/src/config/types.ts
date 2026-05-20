@@ -379,24 +379,13 @@ export interface TaskRunContext {
    */
   task: ScheduledTask
   /**
-   * Matrix-scoped model resolver.
+   * Configured model registrations available to model plugins.
    *
-   * Runtime impact:
-   * - `context.model()` uses `context.task.matrix.run.model` first when present
-   * - then falls back to inferenceExecutor-id match
-   * - then falls back to first configured model
-   *
-   * @example
-   * ```ts
-   * // matrix.run.model = 'gpt-4.1-mini'
-   * const defaultModel = context.model()
-   * // resolves the configured model whose id/model/alias matches 'gpt-4.1-mini'
-   *
-   * const judgeModel = context.model({ name: 'judge-large' })
-   * // explicit lookup bypasses matrix default
-   * ```
+   * Use when:
+   * - a plugin owns model selection semantics and needs access to registered models
+   * - eval code resolves matrix-selected model axes through plugin helpers
    */
-  model: TaskExecutionContext['model']
+  models: TaskExecutionContext['models']
   /**
    * Optional reporter lifecycle hooks for task-local case events.
    *
