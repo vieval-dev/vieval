@@ -25,7 +25,9 @@ Vitest-style evaluation framework for agents, models, and task pipelines.
 
 ```ts
 // vieval.config.ts
-import { defineConfig } from 'vieval'
+import { cwd } from 'node:process'
+
+import { defineConfig, loadEnv, requiredEnvFrom } from 'vieval'
 import { chatModelFrom, ChatModels } from 'vieval/plugins/chat-models'
 
 export default defineConfig({
@@ -34,12 +36,17 @@ export default defineConfig({
       models: [
         chatModelFrom({
           aliases: ['agent-mini', 'judge-mini'],
+          apiKey: config => requiredEnvFrom(config.env, {
+            name: 'OPENAI_API_KEY',
+            type: 'string',
+          }),
           inferenceExecutor: 'openai',
           model: 'gpt-4.1-mini',
         }),
       ],
     }),
   ],
+  env: loadEnv('test', cwd(), ''),
   projects: [
     {
       name: 'default',
@@ -162,7 +169,9 @@ Each scheduled task receives stable matrix metadata:
 ## Config Example
 
 ```ts
-import { defineConfig } from 'vieval'
+import { cwd } from 'node:process'
+
+import { defineConfig, loadEnv, requiredEnvFrom } from 'vieval'
 import { chatModelFrom, ChatModels } from 'vieval/plugins/chat-models'
 
 export default defineConfig({
@@ -171,22 +180,35 @@ export default defineConfig({
       models: [
         chatModelFrom({
           aliases: ['agent-mini', 'judge-mini'],
+          apiKey: config => requiredEnvFrom(config.env, {
+            name: 'OPENAI_API_KEY',
+            type: 'string',
+          }),
           inferenceExecutor: 'openai',
           model: 'gpt-4.1-mini',
         }),
         chatModelFrom({
           aliases: ['agent-large', 'judge-large'],
+          apiKey: config => requiredEnvFrom(config.env, {
+            name: 'OPENAI_API_KEY',
+            type: 'string',
+          }),
           inferenceExecutor: 'openai',
           model: 'gpt-4.1',
         }),
         chatModelFrom({
           aliases: ['agent-openrouter-mini'],
+          apiKey: config => requiredEnvFrom(config.env, {
+            name: 'OPENROUTER_API_KEY',
+            type: 'string',
+          }),
           inferenceExecutor: 'openrouter',
           model: 'openai/gpt-4.1-mini',
         }),
       ],
     }),
   ],
+  env: loadEnv('test', cwd(), ''),
   projects: [
     {
       name: 'chat-evals',

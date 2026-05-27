@@ -352,14 +352,14 @@ async function resolveChatModelResolverValue<TValue>(
 }
 
 function resolveRequiredStringValue(value: string | undefined, name: string): string {
-  return requiredEnvFrom(value, {
+  return requiredEnvFrom({ [name]: value }, {
     name,
     type: 'string',
   })
 }
 
 function resolveOptionalStringValue(value: string | undefined, name: string): string | undefined {
-  return envFrom(value, {
+  return envFrom({ [name]: value }, {
     name,
     type: 'string',
   })
@@ -374,7 +374,7 @@ function resolveOptionalEnvValue(
     type: 'string',
   }
 
-  return envFrom(env[envKey], options)
+  return envFrom(env, options)
 }
 
 function resolveRequiredEnvValue(
@@ -386,7 +386,7 @@ function resolveRequiredEnvValue(
     type: 'string',
   }
 
-  return requiredEnvFrom(env[envKey], options)
+  return requiredEnvFrom(env, options)
 }
 
 function resolveProviderParameters(

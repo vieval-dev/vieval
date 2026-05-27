@@ -120,15 +120,22 @@ export function createOpenAIFromEnv(
   const baseURLEnvKey = source.baseURL ?? 'OPENAI_BASE_URL'
   const modelEnvKey = source.model ?? 'OPENAI_MODEL'
 
-  const apiKey = requiredEnvFrom(env[apiKeyEnvKey] ?? defaults.apiKey, {
+  const envWithDefaults = {
+    ...(defaults.apiKey == null ? {} : { [apiKeyEnvKey]: defaults.apiKey }),
+    ...(defaults.baseURL == null ? {} : { [baseURLEnvKey]: defaults.baseURL }),
+    ...(defaults.model == null ? {} : { [modelEnvKey]: defaults.model }),
+    ...env,
+  }
+
+  const apiKey = requiredEnvFrom(envWithDefaults, {
     name: apiKeyEnvKey,
     type: 'string',
   })
-  const model = requiredEnvFrom(env[modelEnvKey] ?? defaults.model, {
+  const model = requiredEnvFrom(envWithDefaults, {
     name: modelEnvKey,
     type: 'string',
   })
-  const baseURL = envFrom(env[baseURLEnvKey] ?? defaults.baseURL, {
+  const baseURL = envFrom(envWithDefaults, {
     name: baseURLEnvKey,
     type: 'string',
   })

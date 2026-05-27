@@ -96,9 +96,10 @@ function parseOptionalStringParameter(
 ): string | undefined {
   const value = parameters[key]
   const normalized = value == null ? undefined : String(value)
+  const name = `${modelId}.parameters.${key}`
 
-  return envFrom(normalized, {
-    name: `${modelId}.parameters.${key}`,
+  return envFrom({ [name]: normalized }, {
+    name,
     type: 'string',
   })
 }
@@ -110,9 +111,10 @@ function parseRequiredStringParameter(
 ): string {
   const value = parameters[key]
   const normalized = value == null ? undefined : String(value)
+  const name = `${modelId}.parameters.${key}`
 
-  return requiredEnvFrom(normalized, {
-    name: `${modelId}.parameters.${key}`,
+  return requiredEnvFrom({ [name]: normalized }, {
+    name,
     type: 'string',
   })
 }

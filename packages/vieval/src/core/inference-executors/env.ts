@@ -8,6 +8,10 @@ export type EnvValueType = 'string'
  */
 export interface EnvFromOptions {
   /**
+   * Env key to read and use in error messages.
+   */
+  name: string
+  /**
    * Expected env value type.
    */
   type: EnvValueType
@@ -17,10 +21,6 @@ export interface EnvFromOptions {
    * @default false
    */
   required?: boolean
-  /**
-   * Optional key name used for clearer error messages.
-   */
-  name?: string
 }
 
 /**
@@ -30,11 +30,12 @@ export interface EnvFromOptions {
  */
 export type RequiredEnvFromOptions = Omit<EnvFromOptions, 'required'>
 
+type EnvSource = Record<string, string | undefined>
+
 function assertNonEmptyString(value: string | undefined, options: EnvFromOptions): string | undefined {
   if (value == null || value.trim().length === 0) {
     if (options.required === true) {
-      const label = options.name ?? 'environment variable'
-      throw new Error(`Missing required ${label}.`)
+      throw new Error(`Missing required ${options.name}.`)
     }
 
     return undefined
@@ -47,14 +48,14 @@ function assertNonEmptyString(value: string | undefined, options: EnvFromOptions
  * Parses one env value with optional required behavior.
  *
  * Example:
- * `const apiKey = envFrom(process.env.OPENAI_API_KEY, { type: 'string', required: true, name: 'OPENAI_API_KEY' })`
+ * `const apiKey = envFrom(process.env, { type: 'string', required: true, name: 'OPENAI_API_KEY' })`
  */
-export function envFrom(
-  value: string | undefined,
-  options: EnvFromOptions,
+export function envFrom<TEnv extends EnvSource>(
+  env: TEnv,
+  options: EnvFromOptions & { name: keyof TEnv & string },
 ): string | undefined {
   if (options.type === 'string') {
-    return assertNonEmptyString(value, options)
+    return assertNonEmptyString(env[options.name], options)
   }
 
   return undefined
@@ -64,20 +65,19 @@ export function envFrom(
  * Parses one required env value.
  *
  * Example:
- * `const apiKey = requiredEnvFrom(process.env.OPENAI_API_KEY, { type: 'string', name: 'OPENAI_API_KEY' })`
+ * `const apiKey = requiredEnvFrom(process.env, { type: 'string', name: 'OPENAI_API_KEY' })`
  */
-export function requiredEnvFrom(
-  value: string | undefined,
-  options: RequiredEnvFromOptions,
+export function requiredEnvFrom<TEnv extends EnvSource>(
+  env: TEnv,
+  options: RequiredEnvFromOptions & { name: keyof TEnv & string },
 ): string {
-  const parsed = envFrom(value, {
+  const parsed = envFrom(env, {
     ...options,
     required: true,
   })
 
   if (parsed == null) {
-    const label = options.name ?? 'environment variable'
-    throw new Error(`Missing required ${label}.`)
+    throw new Error(`Missing required ${options.name}.`)
   }
 
   return parsed

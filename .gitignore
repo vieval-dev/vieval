@@ -16,6 +16,8 @@ lerna-debug.log*
 
 .idea
 .temp
+.tmp/
+**/.tmp/
 **/temp/
 .claude/worktrees/
 

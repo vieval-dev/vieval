@@ -4,7 +4,10 @@ import { envFrom, requiredEnvFrom } from './env'
 
 describe('envFrom', () => {
   it('returns string value when present', () => {
-    const value = envFrom('gpt-4o-mini', {
+    const value = envFrom({
+      OPENAI_MODEL: 'gpt-4o-mini',
+    }, {
+      name: 'OPENAI_MODEL',
       type: 'string',
     })
 
@@ -12,7 +15,9 @@ describe('envFrom', () => {
   })
 
   it('returns undefined when value is missing and required=false', () => {
-    const value = envFrom(undefined, {
+    const env: Record<string, string | undefined> = {}
+    const value = envFrom(env, {
+      name: 'OPENAI_MODEL',
       type: 'string',
     })
 
@@ -20,7 +25,8 @@ describe('envFrom', () => {
   })
 
   it('throws when required=true and value is missing', () => {
-    expect(() => envFrom(undefined, {
+    const env: Record<string, string | undefined> = {}
+    expect(() => envFrom(env, {
       name: 'OPENAI_API_KEY',
       required: true,
       type: 'string',
@@ -28,7 +34,9 @@ describe('envFrom', () => {
   })
 
   it('throws when required=true and value is empty after trimming', () => {
-    expect(() => envFrom('   ', {
+    expect(() => envFrom({
+      OPENAI_API_KEY: '   ',
+    }, {
       name: 'OPENAI_API_KEY',
       required: true,
       type: 'string',
@@ -38,7 +46,9 @@ describe('envFrom', () => {
 
 describe('requiredEnvFrom', () => {
   it('returns value when present', () => {
-    const value = requiredEnvFrom('gpt-4.1-mini', {
+    const value = requiredEnvFrom({
+      OPENAI_MODEL: 'gpt-4.1-mini',
+    }, {
       name: 'OPENAI_MODEL',
       type: 'string',
     })
@@ -47,7 +57,8 @@ describe('requiredEnvFrom', () => {
   })
 
   it('throws when value is missing', () => {
-    expect(() => requiredEnvFrom(undefined, {
+    const env: Record<string, string | undefined> = {}
+    expect(() => requiredEnvFrom(env, {
       name: 'OPENAI_MODEL',
       type: 'string',
     })).toThrow('Missing required OPENAI_MODEL.')
