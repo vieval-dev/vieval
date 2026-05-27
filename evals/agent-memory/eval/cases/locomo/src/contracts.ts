@@ -98,11 +98,20 @@ export interface LoCoMoAnswerAgentAdapter {
   }) => Promise<LoCoMoAnswerAgentResult>
 }
 
-export interface LoCoMoJudgeAdapter {
+export interface LoCoMoScorerResult {
+  reasoning?: string
+  score: number
+}
+
+export interface LoCoMoScorerAdapter {
   id: string
-  judgeAnswer: (input: {
+  scoreAnswer: (input: {
+    category: LoCoMoCategory
+    contextIds?: string[]
+    contextText?: string
     goldAnswer: string
     prediction: string
     question: string
-  }) => Promise<0 | 1>
+    sampleId: string
+  }) => Promise<LoCoMoScorerResult>
 }

@@ -17,6 +17,7 @@
     "locomo:run:snap-live-qa": "tsx ./eval/cases/locomo/src/cases/run-snap-live-qa.ts"
   },
   "dependencies": {
+    "@moeru/std": "catalog:",
     "@xsai-ext/providers": "catalog:",
     "@xsai/generate-text": "catalog:",
     "vieval": "workspace:*"

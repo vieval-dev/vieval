@@ -1,6 +1,8 @@
+import type { LoCoMoCategory, LoCoMoScorerAdapter } from '@vieval/eval-agent-memory'
+
 import process from 'node:process'
 
-import { createLoCoMoDatasetHash, DEFAULT_LOCOMO_DATA_FILE, deriveLoCoMoCases, evaluateLoCoMoCases, loadLoCoMoSamplesFromSnapDatasetSync, LOCOMO_CASES_SCHEMA_VERSION } from '@vieval/eval-agent-memory'
+import { createLoCoMoDatasetHash, createXsaiLoCoMoScorer, DEFAULT_LOCOMO_DATA_FILE, deriveLoCoMoCases, evaluateLoCoMoCases, loadLoCoMoSamplesFromSnapDatasetSync, LOCOMO_CASES_SCHEMA_VERSION } from '@vieval/eval-agent-memory'
 import { describeTask } from 'vieval'
 
 import { createLobeHubAnswerAgentAdapter } from '../../../src/adapters/answer-agent.ts'
@@ -12,6 +14,37 @@ const samples = loadLoCoMoSamplesFromSnapDatasetSync({ dataFile, maxSamples })
 const datasetHash = createLoCoMoDatasetHash(samples)
 const datasetVersion = `${LOCOMO_CASES_SCHEMA_VERSION}-${datasetHash}`
 const cases = deriveLoCoMoCases(samples).slice(0, maxCases)
+
+function parseAgentScorerCategories(value: string | undefined): Set<LoCoMoCategory> {
+  const rawCategories = value?.split(',').map(part => Number(part.trim())).filter(Number.isInteger)
+  const categories = rawCategories == null || rawCategories.length === 0 ? [3] : rawCategories
+
+  return new Set(categories.filter((category): category is LoCoMoCategory =>
+    category === 1 || category === 2 || category === 3 || category === 4 || category === 5,
+  ))
+}
+
+function createCategoryScopedScorer(scorer: LoCoMoScorerAdapter, categories: ReadonlySet<LoCoMoCategory>): LoCoMoScorerAdapter {
+  return {
+    id: `${scorer.id}:categories-${[...categories].sort().join('-')}`,
+    async scoreAnswer(input) {
+      if (!categories.has(input.category)) {
+        return {
+          reasoning: 'Agent scorer disabled for this category.',
+          score: Number.NaN,
+        }
+      }
+
+      return await scorer.scoreAnswer(input)
+    },
+  }
+}
+
+const agentScorerModel = process.env.LOCOMO_AGENT_SCORER_MODEL
+const agentScorerCategories = parseAgentScorerCategories(process.env.LOCOMO_AGENT_SCORER_CATEGORIES)
+const agentScorer = agentScorerModel == null || agentScorerModel.trim() === ''
+  ? undefined
+  : createCategoryScopedScorer(createXsaiLoCoMoScorer({ model: agentScorerModel }), agentScorerCategories)
 
 if (cases.length === 0) {
   throw new Error('Missing LoCoMo cases for evaluation.')
@@ -65,6 +98,7 @@ describeTask('locomo-lobehub', (task) => {
       cases: [caseItem],
       concurrency: 1,
       mode: 'agentAnswer',
+      scorer: agentScorer,
     })
     const record = evaluation.records[0]
     if (record == null) {
@@ -90,6 +124,11 @@ describeTask('locomo-lobehub', (task) => {
     context.metric('benchmark.locomo.gold_answer', record.goldAnswer)
     context.metric('benchmark.locomo.prediction', record.prediction)
     context.metric('benchmark.locomo.answer_score', record.score)
+    if (record.agentScore != null) {
+      context.metric('benchmark.locomo.agent_score', record.agentScore)
+      context.metric('benchmark.locomo.agent_score_reasoning', record.agentScoreReasoning ?? null)
+      context.metric('benchmark.locomo.score_gap', record.agentScore - record.score)
+    }
     context.metric('benchmark.locomo.context_ids', record.contextIds)
     context.metric('benchmark.locomo.retrieved_context_count', record.contextIds.length)
     if (record.retrievalDiagnostics != null) {

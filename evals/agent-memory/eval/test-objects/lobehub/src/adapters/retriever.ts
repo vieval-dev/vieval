@@ -2,6 +2,8 @@ import type { LoCoMoRetrieverAdapter } from '@vieval/eval-agent-memory'
 
 import { env } from 'node:process'
 
+import { errorMessageFrom, withRetry } from '@moeru/std'
+
 /**
  * Configures the LobeHub LoCoMo retriever adapter.
  *
@@ -66,6 +68,41 @@ interface LobeHubRetrieveResponse {
   }
   items?: LobeHubMemoryRecord[]
   retrievedContext?: LobeHubRetrievedContextResponse
+}
+
+async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+  let lastErrorMessage = 'Unknown fetch error'
+  // NOTICE:
+  // Local LobeHub dev benchmark calls can occasionally hit undici header
+  // timeouts while the backend is still healthy. Retrying the whole retrieval
+  // request keeps long LoCoMo runs from failing after a single slow case.
+  // Removal condition: the benchmark endpoint supports server-side job
+  // polling or the caller gets first-class retry controls.
+  const fetchOnce = withRetry(async () => {
+    const response = await fetch(url, init)
+
+    if (response.ok || response.status < 500) {
+      return response
+    }
+
+    lastErrorMessage = `${response.status} ${response.statusText}`
+    throw new Error(`lobehub retrieve returned retryable status: ${lastErrorMessage}`)
+  }, {
+    onError(error) {
+      lastErrorMessage = errorMessageFrom(error) ?? lastErrorMessage
+    },
+    retry: 2,
+    retryDelay: 1000,
+    retryDelayFactor: 2,
+    retryDelayMax: 3000,
+  })
+
+  try {
+    return await fetchOnce()
+  }
+  catch (error) {
+    throw new Error(`lobehub retrieve failed after retry: ${errorMessageFrom(error) ?? lastErrorMessage}`)
+  }
 }
 
 /**
@@ -163,7 +200,7 @@ export function createLobeHubRetrieverAdapter(options: LobeHubRetrieverAdapterOp
     id: 'lobehub-retriever',
     async retrieveContext(input) {
       const topK = options.topK ?? input.topK ?? 10
-      const response = await fetch(`${baseUrl}${path}`, {
+      const response = await fetchWithRetry(`${baseUrl}${path}`, {
         body: JSON.stringify(userId
           ? {
               query: input.question,

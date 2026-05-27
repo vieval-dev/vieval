@@ -9,6 +9,7 @@ import { createOpenAIFromEnv, normalizeOpenAITextOutput } from 'vieval/core/infe
 
 export interface XsaiLoCoMoAnswerGeneratorOptions {
   apiKey?: string
+  answerTimeoutMs?: number
   baseUrl?: string
   model?: string
 }
@@ -31,6 +32,20 @@ function hashRuntimeIdentity(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 8)
 }
 
+function getTokenLimitOptions(model: string): { max_completion_tokens: number } | { max_tokens: number } {
+  if (model.startsWith('gpt-5.5')) {
+    // NOTICE:
+    // The OpenAI-compatible endpoint rejects `max_tokens` for GPT-5.5 models.
+    // Root cause: the provider follows the newer Chat Completions parameter
+    // contract for these model IDs and requires `max_completion_tokens`.
+    // Removal condition: xsAI or the provider adapter normalizes this option
+    // across model families.
+    return { max_completion_tokens: 64 }
+  }
+
+  return { max_tokens: 64 }
+}
+
 /**
  * Creates a LoCoMo answer generator backed by `@xsai/generate-text`.
  *
@@ -48,6 +63,7 @@ export function createXsaiLoCoMoAnswerGenerator(
   options: XsaiLoCoMoAnswerGeneratorOptions = {},
 ): LoCoMoAnswerGeneratorAdapter {
   const apiKey = options.apiKey ?? env.OPENAI_API_KEY ?? ''
+  const answerTimeoutMs = options.answerTimeoutMs ?? Number(env.LOCOMO_ANSWER_TIMEOUT_MS ?? '180000')
   const baseUrl = (options.baseUrl ?? env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, '')
   const model = options.model ?? env.OPENAI_MODEL ?? 'openai/gpt-4o-mini'
 
@@ -63,27 +79,36 @@ export function createXsaiLoCoMoAnswerGenerator(
   return {
     id: `xsai-openai-compatible-answer-generator:${model}:${hashRuntimeIdentity(baseUrl)}`,
     async generateAnswer(input) {
-      const response = await runtime.adapter.runWithRetry(async () => await generateText({
-        ...runtime.adapter.provider.chat(runtime.model),
-        max_tokens: 64,
-        messages: [
-          {
-            content: 'You answer LoCoMo QA with concise, factual responses.',
-            role: 'system',
-          },
-          {
-            content: [
-              `Context:\n${input.contextText}`,
-              `Question: ${input.question}`,
-              getCategoryInstruction(input.category),
-            ].join('\n\n'),
-            role: 'user',
-          },
-        ],
-        temperature: 0,
-      }))
+      const abortController = new AbortController()
+      const timeout = setTimeout(() => abortController.abort(), answerTimeoutMs)
 
-      return normalizeOpenAITextOutput(response).trim()
+      try {
+        const response = await runtime.adapter.runWithRetry(async () => await generateText({
+          ...runtime.adapter.provider.chat(runtime.model),
+          ...getTokenLimitOptions(model),
+          abortSignal: abortController.signal,
+          messages: [
+            {
+              content: 'You answer LoCoMo QA with concise, factual responses.',
+              role: 'system',
+            },
+            {
+              content: [
+                `Context:\n${input.contextText}`,
+                `Question: ${input.question}`,
+                getCategoryInstruction(input.category),
+              ].join('\n\n'),
+              role: 'user',
+            },
+          ],
+          temperature: 0,
+        }))
+
+        return normalizeOpenAITextOutput(response).trim()
+      }
+      finally {
+        clearTimeout(timeout)
+      }
     },
   }
 }

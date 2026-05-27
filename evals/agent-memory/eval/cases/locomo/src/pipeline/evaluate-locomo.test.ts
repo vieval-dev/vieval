@@ -1,4 +1,4 @@
-import type { LoCoMoAnswerGeneratorAdapter, LoCoMoRetrieverAdapter } from '../contracts'
+import type { LoCoMoAnswerGeneratorAdapter, LoCoMoRetrieverAdapter, LoCoMoScorerAdapter } from '../contracts'
 import type { LoCoMoCase } from '../types'
 
 import { describe, expect, it, vi } from 'vitest'
@@ -121,6 +121,106 @@ describe('evaluateLoCoMoCases', () => {
     expect(summary.totalCases).toBe(3)
     expect(summary.byCategory[2].averageScore).toBe(1)
     expect(summary.byCategory[5].averageScore).toBe(categoryFiveRecord?.score ?? 0)
+  })
+
+  it('keeps the canonical score and records optional agent scorer diagnostics', async () => {
+    const cases: LoCoMoCase[] = [
+      {
+        caseId: 'sample-1::cat3',
+        category: 3,
+        evidence: ['D1:1'],
+        goldAnswer: 'Liberal',
+        question: 'What would Caroline political leaning likely be?',
+        sampleId: 'sample-1',
+      },
+    ]
+    const retriever: LoCoMoRetrieverAdapter = {
+      id: 'retriever-test',
+      async retrieveContext() {
+        return {
+          contextIds: ['D1:1'],
+          contextText: 'Caroline frequently stands up for equality and LGBTQ+ rights.',
+        }
+      },
+    }
+    const generator: LoCoMoAnswerGeneratorAdapter = {
+      async generateAnswer() {
+        return 'standing up for equality'
+      },
+      id: 'generator-test',
+    }
+    const scoreAnswer = vi.fn<LoCoMoScorerAdapter['scoreAnswer']>().mockResolvedValue({
+      reasoning: 'The prediction states the same political leaning in descriptive words.',
+      score: 1,
+    })
+    const scorer: LoCoMoScorerAdapter = {
+      id: 'agent-scorer-test',
+      scoreAnswer,
+    }
+
+    const { records } = await evaluateLoCoMoCases({
+      cases,
+      generator,
+      retriever,
+      scorer,
+    })
+
+    expect(records[0]?.score).toBe(0)
+    expect(records[0]?.agentScore).toBe(1)
+    expect(records[0]?.agentScoreReasoning).toBe('The prediction states the same political leaning in descriptive words.')
+    expect(scoreAnswer).toHaveBeenCalledWith({
+      category: 3,
+      contextIds: ['D1:1'],
+      contextText: 'Caroline frequently stands up for equality and LGBTQ+ rights.',
+      goldAnswer: 'Liberal',
+      prediction: 'standing up for equality',
+      question: 'What would Caroline political leaning likely be?',
+      sampleId: 'sample-1',
+    })
+  })
+
+  it('omits agent scorer diagnostics when the scoped scorer skips a category', async () => {
+    const cases: LoCoMoCase[] = [
+      {
+        caseId: 'sample-1::cat4',
+        category: 4,
+        evidence: ['D1:1'],
+        goldAnswer: 'Oliver',
+        question: 'What pet does Caroline have?',
+        sampleId: 'sample-1',
+      },
+    ]
+    const retriever: LoCoMoRetrieverAdapter = {
+      id: 'retriever-test',
+      async retrieveContext() {
+        return {
+          contextIds: ['D1:1'],
+          contextText: 'Caroline has a pet named Oliver.',
+        }
+      },
+    }
+    const scorer: LoCoMoScorerAdapter = {
+      id: 'scoped-agent-scorer-test',
+      async scoreAnswer() {
+        return { score: Number.NaN }
+      },
+    }
+
+    const { records } = await evaluateLoCoMoCases({
+      cases,
+      generator: {
+        async generateAnswer() {
+          return 'Oliver'
+        },
+        id: 'generator-test',
+      },
+      retriever,
+      scorer,
+    })
+
+    expect(records[0]?.score).toBe(1)
+    expect(records[0]?.agentScore).toBeUndefined()
+    expect(records[0]?.agentScoreReasoning).toBeUndefined()
   })
 })
 

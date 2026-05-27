@@ -1,4 +1,4 @@
-import type { LoCoMoAnswerAgentAdapter, LoCoMoAnswerAgentDiagnostics, LoCoMoAnswerGeneratorAdapter, LoCoMoRetrievalDiagnostics, LoCoMoRetrieverAdapter } from '../contracts.ts'
+import type { LoCoMoAnswerAgentAdapter, LoCoMoAnswerAgentDiagnostics, LoCoMoAnswerGeneratorAdapter, LoCoMoRetrievalDiagnostics, LoCoMoRetrieverAdapter, LoCoMoScorerAdapter } from '../contracts.ts'
 import type { LoCoMoCase, LoCoMoCategory } from '../types.ts'
 
 import { scoreLoCoMoAnswer } from '../scoring/score-locomo-answer.ts'
@@ -8,6 +8,8 @@ export interface LoCoMoEvaluationRecord {
   category: LoCoMoCategory
   contextIds: string[]
   goldAnswer: string
+  agentScore?: number
+  agentScoreReasoning?: string
   prediction: string
   question: string
   agentDiagnostics?: LoCoMoAnswerAgentDiagnostics
@@ -27,6 +29,7 @@ interface LoCoMoAgentAnswerEvaluationArgs {
   cases: readonly LoCoMoCase[]
   concurrency?: number
   mode: 'agentAnswer'
+  scorer?: LoCoMoScorerAdapter
 }
 
 interface LoCoMoRetrievalGenerationEvaluationArgs {
@@ -35,6 +38,7 @@ interface LoCoMoRetrievalGenerationEvaluationArgs {
   generator: LoCoMoAnswerGeneratorAdapter
   mode?: 'retrievalGeneration'
   retriever: LoCoMoRetrieverAdapter
+  scorer?: LoCoMoScorerAdapter
   topK?: number
 }
 
@@ -158,6 +162,44 @@ function summarizeLoCoMoRecords(records: readonly LoCoMoEvaluationRecord[]): LoC
   }
 }
 
+function normalizeAgentScore(score: number): number {
+  if (!Number.isFinite(score)) {
+    return 0
+  }
+
+  return Math.min(1, Math.max(0, score))
+}
+
+async function scoreLoCoMoRecordWithAgent(args: {
+  caseItem: LoCoMoCase
+  contextIds?: string[]
+  contextText?: string
+  prediction: string
+  scorer?: LoCoMoScorerAdapter
+}): Promise<{ agentScore?: number, agentScoreReasoning?: string }> {
+  if (args.scorer == null) {
+    return {}
+  }
+
+  const result = await args.scorer.scoreAnswer({
+    category: args.caseItem.category,
+    contextIds: args.contextIds,
+    contextText: args.contextText,
+    goldAnswer: args.caseItem.goldAnswer,
+    prediction: args.prediction,
+    question: args.caseItem.question,
+    sampleId: args.caseItem.sampleId,
+  })
+  if (!Number.isFinite(result.score)) {
+    return {}
+  }
+
+  return {
+    agentScore: normalizeAgentScore(result.score),
+    agentScoreReasoning: result.reasoning,
+  }
+}
+
 /**
  * Runs LoCoMo retrieval + generation + scoring with bounded concurrency.
  *
@@ -211,6 +253,12 @@ export async function evaluateLoCoMoCases(
           goldAnswer: caseItem.goldAnswer,
           prediction,
         })
+        const agentScore = await scoreLoCoMoRecordWithAgent({
+          caseItem,
+          contextIds: answer.contextIds ?? [],
+          prediction,
+          scorer: args.scorer,
+        })
 
         records.push({
           agentDiagnostics: answer.diagnostics,
@@ -218,6 +266,7 @@ export async function evaluateLoCoMoCases(
           category: caseItem.category,
           contextIds: answer.contextIds ?? [],
           goldAnswer: caseItem.goldAnswer,
+          ...agentScore,
           prediction,
           question: caseItem.question,
           sampleId: caseItem.sampleId,
@@ -246,12 +295,20 @@ export async function evaluateLoCoMoCases(
         goldAnswer: caseItem.goldAnswer,
         prediction,
       })
+      const agentScore = await scoreLoCoMoRecordWithAgent({
+        caseItem,
+        contextIds: retrieval.contextIds ?? [],
+        contextText: retrieval.contextText,
+        prediction,
+        scorer: args.scorer,
+      })
 
       records.push({
         caseId: caseItem.caseId,
         category: caseItem.category,
         contextIds: retrieval.contextIds ?? [],
         goldAnswer: caseItem.goldAnswer,
+        ...agentScore,
         prediction,
         question: caseItem.question,
         retrievalDiagnostics: retrieval.diagnostics,
