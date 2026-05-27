@@ -1,4 +1,4 @@
-import type { LoCoMoRetrieverAdapter } from '../contracts.ts'
+import type { LoCoMoRetrieverAdapter } from '../contracts'
 
 import process from 'node:process'
 
@@ -6,9 +6,9 @@ import { readFile } from 'node:fs/promises'
 
 import { loadEnv } from 'vite'
 
-import { createXsaiLoCoMoAnswerGenerator } from '../adapters/xsai-answer-generator.ts'
-import { evaluateLoCoMoCases } from '../pipeline/evaluate-locomo.ts'
-import { DEFAULT_LOCOMO_DATA_FILE, deriveLoCoMoCases, loadLoCoMoSamplesFromSnapDataset } from './derive-cases.ts'
+import { createXsaiLoCoMoAnswerGenerator } from '../adapters/xsai-answer-generator'
+import { evaluateLoCoMoCases } from '../pipeline/evaluate-locomo'
+import { DEFAULT_LOCOMO_DATA_FILE, deriveLoCoMoCases, loadLoCoMoSamplesFromSnapDataset } from './derive-cases'
 
 const DEFAULT_STANDALONE_CONCURRENCY = 4
 

@@ -4,7 +4,7 @@ import { createCachedLoCoMoAnswerGenerator, createLoCoMoDatasetHash, createXsaiL
 import { describeTask } from 'vieval'
 import { openrouterFromRunContext } from 'vieval/plugins/chat-models'
 
-import { createMem9RetrieverAdapter } from '../../../src/adapters/retriever.ts'
+import { createMem9RetrieverAdapter } from '../../../src/adapters/retriever'
 
 const LOCOMO_PROMPT_VERSION = 'locomo-prompt-v1'
 

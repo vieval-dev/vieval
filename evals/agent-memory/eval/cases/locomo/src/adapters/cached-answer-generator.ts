@@ -1,4 +1,4 @@
-import type { LoCoMoAnswerGeneratorAdapter } from '../contracts.ts'
+import type { LoCoMoAnswerGeneratorAdapter } from '../contracts'
 
 import { createHash } from 'node:crypto'
 

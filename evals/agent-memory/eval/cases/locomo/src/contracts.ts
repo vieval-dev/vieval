@@ -1,4 +1,4 @@
-import type { LoCoMoCategory } from './types.ts'
+import type { LoCoMoCategory } from './types'
 
 export interface LoCoMoRetrieverAdapter {
   id: string

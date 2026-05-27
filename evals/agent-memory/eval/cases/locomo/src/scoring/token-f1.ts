@@ -1,4 +1,4 @@
-import { stemEnglishPorter } from './porter-stemmer.ts'
+import { stemEnglishPorter } from './porter-stemmer'
 
 const ARTICLES = new Set(['a', 'an', 'and', 'the'])
 

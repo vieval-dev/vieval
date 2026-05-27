@@ -1,4 +1,4 @@
-import type { LoCoMoCase, LoCoMoSample } from '../types.ts'
+import type { LoCoMoCase, LoCoMoSample } from '../types'
 
 import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'

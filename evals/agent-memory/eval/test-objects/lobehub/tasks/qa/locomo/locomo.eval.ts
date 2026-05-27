@@ -5,7 +5,7 @@ import process from 'node:process'
 import { createLoCoMoDatasetHash, createXsaiLoCoMoScorer, DEFAULT_LOCOMO_DATA_FILE, deriveLoCoMoCases, evaluateLoCoMoCases, loadLoCoMoSamplesFromSnapDatasetSync, LOCOMO_CASES_SCHEMA_VERSION } from '@vieval/eval-agent-memory'
 import { describeTask } from 'vieval'
 
-import { createLobeHubAnswerAgentAdapter } from '../../../src/adapters/answer-agent.ts'
+import { createLobeHubAnswerAgentAdapter } from '../../../src/adapters/answer-agent'
 
 const dataFile = process.env.LOCOMO_DATA_FILE ?? DEFAULT_LOCOMO_DATA_FILE
 const maxSamples = Number(process.env.LOCOMO_MAX_SAMPLES ?? '1')

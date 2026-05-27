@@ -11,13 +11,49 @@ export default defineConfig({
     ChatModels({
       models: [
         chatModelFrom({
-          apiKey: config => requiredEnvFrom(config.env.OPENROUTER_API_KEY, {
-            name: 'OPENROUTER_API_KEY',
+          apiKey: config => requiredEnvFrom(config.env, {
+            name: 'OPENAI_API_KEY',
             type: 'string',
           }),
-          baseURL: config => config.env.OPENROUTER_BASE_URL ?? 'https://openrouter.ai/api/v1',
-          inferenceExecutor: 'openrouter',
-          model: 'openai/gpt-5.4-mini',
+          baseURL: config => config.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
+          inferenceExecutor: 'openai',
+          model: 'deepseek-v4-flash',
+        }),
+        chatModelFrom({
+          apiKey: config => requiredEnvFrom(config.env, {
+            name: 'OPENAI_API_KEY',
+            type: 'string',
+          }),
+          baseURL: config => config.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
+          inferenceExecutor: 'openai',
+          model: 'deepseek-v4-pro',
+        }),
+        chatModelFrom({
+          apiKey: config => requiredEnvFrom(config.env, {
+            name: 'OPENAI_API_KEY',
+            type: 'string',
+          }),
+          baseURL: config => config.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
+          inferenceExecutor: 'openai',
+          model: 'gpt-5.4-mini',
+        }),
+        chatModelFrom({
+          apiKey: config => requiredEnvFrom(config.env, {
+            name: 'OPENAI_API_KEY',
+            type: 'string',
+          }),
+          baseURL: config => config.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
+          inferenceExecutor: 'openai',
+          model: 'gpt-5.5',
+        }),
+        chatModelFrom({
+          apiKey: config => requiredEnvFrom(config.env, {
+            name: 'OPENAI_API_KEY',
+            type: 'string',
+          }),
+          baseURL: config => config.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
+          inferenceExecutor: 'openai',
+          model: 'gpt-5.5-pro',
         }),
       ],
     }),
@@ -30,7 +66,7 @@ export default defineConfig({
       root: '.',
       runMatrix: {
         override: {
-          model: ['openai/gpt-5.4-mini'],
+          model: ['deepseek-v4-pro'], // <- change the model name here to run the tests with a different model
         },
       },
     },

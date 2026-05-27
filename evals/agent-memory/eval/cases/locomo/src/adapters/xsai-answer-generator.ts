@@ -1,5 +1,5 @@
-import type { LoCoMoAnswerGeneratorAdapter } from '../contracts.ts'
-import type { LoCoMoCategory } from '../types.ts'
+import type { LoCoMoAnswerGeneratorAdapter } from '../contracts'
+import type { LoCoMoCategory } from '../types'
 
 import { createHash } from 'node:crypto'
 import { env } from 'node:process'

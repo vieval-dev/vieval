@@ -11,7 +11,7 @@ export default defineConfig({
     ChatModels({
       models: [
         chatModelFrom({
-          apiKey: config => requiredEnvFrom(config.env.OPENROUTER_API_KEY, {
+          apiKey: config => requiredEnvFrom(config.env, {
             name: 'OPENROUTER_API_KEY',
             type: 'string',
           }),

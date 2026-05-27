@@ -1,7 +1,7 @@
-import type { LoCoMoAnswerAgentAdapter, LoCoMoAnswerAgentDiagnostics, LoCoMoAnswerGeneratorAdapter, LoCoMoRetrievalDiagnostics, LoCoMoRetrieverAdapter, LoCoMoScorerAdapter } from '../contracts.ts'
-import type { LoCoMoCase, LoCoMoCategory } from '../types.ts'
+import type { LoCoMoAnswerAgentAdapter, LoCoMoAnswerAgentDiagnostics, LoCoMoAnswerGeneratorAdapter, LoCoMoRetrievalDiagnostics, LoCoMoRetrieverAdapter, LoCoMoScorerAdapter } from '../contracts'
+import type { LoCoMoCase, LoCoMoCategory } from '../types'
 
-import { scoreLoCoMoAnswer } from '../scoring/score-locomo-answer.ts'
+import { scoreLoCoMoAnswer } from '../scoring/score-locomo-answer'
 
 export interface LoCoMoEvaluationRecord {
   caseId: string

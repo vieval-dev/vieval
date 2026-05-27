@@ -1,6 +1,6 @@
-import type { LoCoMoCategory } from '../types.ts'
+import type { LoCoMoCategory } from '../types'
 
-import { tokenF1 } from './token-f1.ts'
+import { tokenF1 } from './token-f1'
 
 function scoreCategory1(prediction: string, goldAnswer: string): number {
   // Python parity:

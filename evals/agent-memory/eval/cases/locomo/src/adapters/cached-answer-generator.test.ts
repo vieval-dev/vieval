@@ -1,8 +1,8 @@
-import type { LoCoMoAnswerGeneratorAdapter } from '../contracts.ts'
+import type { LoCoMoAnswerGeneratorAdapter } from '../contracts'
 
 import { describe, expect, it, vi } from 'vitest'
 
-import { createCachedLoCoMoAnswerGenerator } from './cached-answer-generator.ts'
+import { createCachedLoCoMoAnswerGenerator } from './cached-answer-generator'
 
 function createMemoryCache() {
   const files = new Map<string, unknown>()
