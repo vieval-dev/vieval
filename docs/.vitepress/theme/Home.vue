@@ -1,52 +1,139 @@
 <script setup lang="ts">
-const features = [
-  {
-    title: 'Test-style eval files',
-    details: 'Use describeTask, caseOf, casesFromInputs, and expect to keep eval cases close to the product code they validate.',
-  },
-  {
-    title: 'Native dataset cases',
-    details: 'Feed casesFromInputs from HuggingFace datasets, S3 objects, local fixtures, or dynamically generated inputs.',
-  },
-  {
-    title: 'Matrix, all the way down',
-    details: 'Compare one implementation or many through workspace, project, eval, and task matrix parameters.',
-  },
-  {
-    title: 'Rubric is built-in',
-    details: 'When agent behavior cannot be asserted directly, ask another model or agent to score it against a rubric.',
-  },
-  {
-    title: 'Chat models, Voice models, you name it!',
-    details: 'ChatModels is just a plugin: define chat providers on day one, then extend the same plugin surface for new runtimes.',
-  },
-  {
-    title: 'LLM & Human friendly reports',
-    details: 'Built-in CLI tools help agents analyze and inspect runs, so coding agents can optimize your agent or model runs while human DX stays readable too.',
-  },
-]
+import { computed } from 'vue'
+import { useData } from 'vitepress'
+
+interface HomeAction {
+  text?: string
+  link?: string
+}
+
+interface HomeFeature {
+  title?: string
+  details?: string
+}
+
+interface HomeTerminal {
+  title?: string
+  code?: string
+}
+
+interface HomeWhy {
+  eyebrow?: string
+  title?: string
+  body?: string[]
+  action?: HomeAction
+}
+
+interface HomeContent {
+  logoAlt?: string
+  eyebrow?: string
+  heroTitle?: string
+  heroDescription?: string
+  primaryAction?: HomeAction
+  secondaryAction?: HomeAction
+  terminal?: HomeTerminal
+  why?: HomeWhy
+  features?: HomeFeature[]
+}
+
+interface TerminalSegment {
+  text: string
+  tone?: 'accent' | 'badge' | 'error' | 'muted' | 'number' | 'success'
+}
+
+const { frontmatter } = useData()
+
+const home = computed(() => frontmatter.value.home as HomeContent | undefined)
+
+const terminalLines = computed(() => (home.value?.terminal?.code ?? '').split('\n').map(tokenizeTerminalLine))
+
+function isExternalLink(link?: string) {
+  if (!link) {
+    return false
+  }
+
+  return link.startsWith('http://') || link.startsWith('https://')
+}
+
+function tokenizeTerminalLine(line: string): TerminalSegment[] {
+  if (line.startsWith('$')) {
+    return [
+      { text: '$', tone: 'muted' },
+      { text: line.slice(1) },
+    ]
+  }
+
+  const patterns: [RegExp, TerminalSegment['tone']][] = [
+    [/^RUN\b/, 'accent'],
+    [/^✓/, 'success'],
+    [/^\|[^|]+\|/, 'badge'],
+    [/^\([^)]*\)/, 'muted'],
+    [/^report .*$/, 'muted'],
+    [/^matrix run\b/, 'muted'],
+    [/^\s\|\s/, 'muted'],
+    [/^\bpassed\b/, 'success'],
+    [/^\bfailed\b/, 'error'],
+    [/^\btimeout\b/, 'muted'],
+    [/^\b\d+\b/, 'number'],
+  ]
+
+  const segments: TerminalSegment[] = []
+  let rest = line
+
+  while (rest.length > 0) {
+    const match = patterns
+      .map(([pattern, tone]) => ({ match: pattern.exec(rest), tone }))
+      .find(({ match }) => match)
+
+    if (match?.match) {
+      const [text] = match.match
+      segments.push({ text, tone: match.tone })
+      rest = rest.slice(text.length)
+      continue
+    }
+
+    let nextIndex = rest.length
+
+    for (let index = 1; index < rest.length; index++) {
+      if (patterns.some(([pattern]) => pattern.test(rest.slice(index)))) {
+        nextIndex = index
+        break
+      }
+    }
+
+    segments.push({ text: rest.slice(0, nextIndex) })
+    rest = rest.slice(nextIndex)
+  }
+
+  return segments
+}
 </script>
 
 <template>
-  <div class="wrapper wrapper--ticks grid md:grid-cols-2 w-full border-nickel divide-x">
-    <section class="flex flex-col p-10 justify-center items-center md:items-start">
-      <div class="flex flex-col gap-5 max-w-[32rem] text-center md:text-left items-center md:items-start">
-        <div class="flex items-center gap-3">
-          <img src="/logo.svg" alt="Vieval icon" class="size-8">
-          <span class="text-grey text-xs font-mono uppercase tracking-wide">Evaluation framework</span>
+  <div :class="['wrapper wrapper--ticks', 'grid md:grid-cols-2', 'w-full border-nickel divide-x']">
+    <section :class="['flex flex-col', 'p-10', 'justify-center items-center md:items-start']">
+      <div :class="['flex flex-col gap-5', 'max-w-[32rem]', 'text-center md:text-left', 'items-center md:items-start']">
+        <div :class="['flex items-center gap-3']">
+          <img src="/logo.svg" :alt="home?.logoAlt ?? ''" class="size-8">
+          <span class="text-grey text-xs font-mono uppercase tracking-wide">{{ home?.eyebrow ?? '' }}</span>
         </div>
         <h1 class="text-white text-pretty">
-          Evaluate with test API you already know
+          {{ home?.heroTitle ?? '' }}
         </h1>
         <p class="text-white/70 text-lg max-w-[28rem] text-pretty">
-          For agents, models, prompts, 🤗 HuggingFace datasets, even for non-chat endpoints too.
+          {{ home?.heroDescription ?? '' }}
         </p>
-        <div class="flex flex-wrap items-center justify-center md:justify-start gap-5 mt-8">
-          <a href="/en/guide/" class="button button--primary inline-block w-fit">
-            <span>Get Started</span>
+        <div :class="['flex flex-wrap items-center', 'justify-center md:justify-start', 'gap-5 mt-8']">
+          <a :href="home?.primaryAction?.link" class="button button--primary inline-block w-fit">
+            <span>{{ home?.primaryAction?.text ?? '' }}</span>
           </a>
-          <a href="https://github.com/vieval-dev/vieval" target="_blank" rel="noopener noreferrer" class="button inline-block w-fit">
-            View on GitHub
+          <a
+            :href="home?.secondaryAction?.link"
+            :target="isExternalLink(home?.secondaryAction?.link) ? '_blank' : undefined"
+            :rel="isExternalLink(home?.secondaryAction?.link) ? 'noopener noreferrer' : undefined"
+            class="button inline-block w-fit"
+          >
+            {{ home?.secondaryAction?.text ?? '' }}
           </a>
         </div>
       </div>
@@ -59,17 +146,9 @@ const features = [
             <span />
             <span />
             <span />
-            <strong>vieval run</strong>
+            <strong>{{ home?.terminal?.title ?? '' }}</strong>
           </div>
-          <pre><code><span class="terminal-muted">$</span> pnpm add -D vieval
-<span class="terminal-muted">$</span> pnpm vieval run
-
-<span class="terminal-accent">RUN</span>  vieval
-<span class="terminal-success">✓</span> <span class="terminal-badge">|agent-routing|</span> <span class="terminal-muted">(24 tasks)</span>
-  <span class="terminal-number">4</span> files, <span class="terminal-number">6</span> entries, <span class="terminal-number">24</span> runs
-  cases <span class="terminal-success">198 passed</span> <span class="terminal-muted">|</span> <span class="terminal-error">3 failed</span> <span class="terminal-muted">|</span> <span class="terminal-muted">0 timeout</span>
-  <span class="terminal-muted">matrix run</span> <span class="terminal-number">4</span> <span class="terminal-muted">[model|scenario] / eval</span> <span class="terminal-number">2</span> <span class="terminal-muted">[rubric]</span>
-  <span class="terminal-muted">report .vieval/reports/local/baseline/attempt-a/...</span></code></pre>
+          <pre><code><template v-for="(line, lineIndex) in terminalLines" :key="lineIndex"><template v-for="(segment, segmentIndex) in line" :key="segmentIndex"><span :class="segment.tone ? `terminal-${segment.tone}` : undefined">{{ segment.text }}</span></template>{{ lineIndex === terminalLines.length - 1 ? '' : '\n' }}</template></code></pre>
         </div>
       </div>
     </section>
@@ -79,38 +158,35 @@ const features = [
     <div class="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-5 lg:gap-8 text-left">
       <div class="flex flex-col gap-3 max-w-md">
         <div class="flex gap-3 items-center">
-          <img src="/logo.svg" alt="Vieval icon" class="size-5">
-          <span class="text-grey text-xs font-medium font-mono uppercase tracking-wide">Why Vieval</span>
+          <img src="/logo.svg" :alt="home?.logoAlt ?? ''" class="size-5">
+          <span class="text-grey text-xs font-medium font-mono uppercase tracking-wide">{{ home?.why?.eyebrow ?? '' }}</span>
         </div>
         <h3 class="text-white max-w-xl text-balance">
-          Measure over probability, but with confidence this time.
+          {{ home?.why?.title ?? '' }}
         </h3>
-        <a href="/en/guide/" class="button w-fit mt-8 hidden lg:block">Read the guide</a>
+        <a :href="home?.why?.action?.link" class="button w-fit mt-8 hidden lg:block">{{ home?.why?.action?.text ?? '' }}</a>
       </div>
       <div class="lg:max-w-lg">
-        <p class="text-pretty mb-5">
-          Vieval keeps evaluation cases readable while giving matrix scheduling, model execution, custom assertions, and reporting their own stable package boundaries.
+        <p v-for="paragraph in home?.why?.body ?? []" :key="paragraph" class="text-pretty mb-5 last:mb-0">
+          {{ paragraph }}
         </p>
-        <p class="text-pretty">
-          Start with chat-model evals, then use the same workflow for agents, prompts, datasets, hosted services, and non-chat product endpoints.
-        </p>
-        <a href="/en/guide/" class="button w-fit mt-8 block lg:hidden">Read the guide</a>
+        <a :href="home?.why?.action?.link" class="button w-fit mt-8 block lg:hidden">{{ home?.why?.action?.text ?? '' }}</a>
       </div>
     </div>
   </section>
 
   <section class="feature-grid wrapper wrapper--ticks border-t border-b grid lg:grid-cols-2">
-    <article v-for="feature in features" :key="feature.title" class="feature-card flex flex-col gap-3 min-h-[16rem] p-5 sm:p-10 justify-between">
+    <article v-for="feature in home?.features ?? []" :key="feature.title" class="feature-card flex flex-col gap-3 min-h-[16rem] p-5 sm:p-10 justify-between">
       <div class="flex flex-col gap-3">
         <h5 class="text-white">
-          {{ feature.title }}
+          {{ feature.title ?? '' }}
         </h5>
         <p class="max-w-[30rem] text-pretty">
-          {{ feature.details }}
+          {{ feature.details ?? '' }}
         </p>
       </div>
       <div class="feature-preview" aria-hidden="true">
-        <span>{{ feature.title.slice(0, 2).toUpperCase() }}</span>
+        <span>{{ (feature.title ?? '').slice(0, 2).toUpperCase() }}</span>
       </div>
     </article>
   </section>
