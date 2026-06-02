@@ -126,3 +126,6 @@ docs/superpowers/*
 
 # Local eval workspace cache
 .vieval/
+
+# Local eval workspace reports
+docs/reports/*
