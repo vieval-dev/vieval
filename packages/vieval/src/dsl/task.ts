@@ -442,6 +442,23 @@ function collectCaseOutcomeScores(
   }
 }
 
+function emitCaseOutcome(
+  context: TaskRunContext,
+  taskCase: RegisteredCase<unknown>,
+  outcome: CaseExecutionOutcome,
+  index: number,
+  totalCases: number,
+): void {
+  emitCaseEnd(context.reporterHooks, {
+    ...(outcome.errorMessage == null ? {} : { errorMessage: outcome.errorMessage }),
+    index,
+    ...(outcome.output === undefined ? {} : { output: outcome.output }),
+    state: outcome.state,
+    name: taskCase.name,
+    total: totalCases,
+  })
+}
+
 /**
  * Builder callbacks passed into `describeTask`.
  */
@@ -681,14 +698,7 @@ export function describeTask(
             registeredCases.map(async (taskCase, index) => {
               const executeCase = async () => {
                 const outcome = await executeRegisteredCase(context, taskCase, index, totalCases, taskExecutionPolicy)
-                emitCaseEnd(context.reporterHooks, {
-                  ...(outcome.errorMessage == null ? {} : { errorMessage: outcome.errorMessage }),
-                  index,
-                  ...(outcome.output === undefined ? {} : { output: outcome.output }),
-                  state: outcome.state,
-                  name: taskCase.name,
-                  total: totalCases,
-                })
+                emitCaseOutcome(context, taskCase, outcome, index, totalCases)
                 collectCaseOutcomeScores(outcome, scoreBucketsByKind)
               }
 
@@ -706,11 +716,10 @@ export function describeTask(
           )
         }
         else {
-          let finalOutcomes: CaseExecutionOutcome[] = []
           let attemptIndex = 0
 
           for (;;) {
-            finalOutcomes = await Promise.all(
+            const attemptOutcomes = await Promise.all(
               registeredCases.map(async (taskCase, index) => {
                 const executeCase = async () => await executeRegisteredCase(context, taskCase, index, totalCases, taskExecutionPolicy)
                 const concurrency = resolveCaseConcurrency(taskCase, runtimeTaskConcurrency, context.runtimeConcurrency)
@@ -725,7 +734,17 @@ export function describeTask(
               }),
             )
 
-            const shouldContinue = finalOutcomes.some((outcome, index) => {
+            attemptOutcomes.forEach((outcome, index) => {
+              const taskCase = registeredCases[index]
+              if (taskCase == null) {
+                return
+              }
+
+              emitCaseOutcome(context, taskCase, outcome, index, totalCases)
+              collectCaseOutcomeScores(outcome, scoreBucketsByKind)
+            })
+
+            const shouldContinue = attemptOutcomes.some((outcome, index) => {
               if (outcome.state === 'passed') {
                 return false
               }
@@ -744,23 +763,6 @@ export function describeTask(
 
             attemptIndex += 1
           }
-
-          finalOutcomes.forEach((outcome, index) => {
-            const taskCase = registeredCases[index]
-            if (taskCase == null) {
-              return
-            }
-
-            emitCaseEnd(context.reporterHooks, {
-              ...(outcome.errorMessage == null ? {} : { errorMessage: outcome.errorMessage }),
-              index,
-              ...(outcome.output === undefined ? {} : { output: outcome.output }),
-              state: outcome.state,
-              name: taskCase.name,
-              total: totalCases,
-            })
-            collectCaseOutcomeScores(outcome, scoreBucketsByKind)
-          })
         }
 
         const scores = (Object.keys(scoreBucketsByKind) as RunScoreKind[])

@@ -280,6 +280,105 @@ export default defineConfig({
   return temporaryDirectory
 }
 
+async function createRunMatrixDslProject(options: {
+  projectName: string
+  runMatrix: Record<string, string[]>
+}): Promise<string> {
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-matrix-experiment-'))
+  temporaryDirectories.push(temporaryDirectory)
+
+  const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
+
+  await mkdir(join(temporaryDirectory, 'evals'), { recursive: true })
+  await writeFile(
+    join(temporaryDirectory, 'evals', 'matrix-task.eval.ts'),
+    `
+import { caseOf, describeTask } from '${vievalImportPath}'
+
+describeTask('matrix-task', () => {
+  caseOf('matrix-case', () => {
+    return {
+      ok: true,
+    }
+  })
+})
+`,
+    'utf-8',
+  )
+  await writeFile(
+    join(temporaryDirectory, 'vieval.config.ts'),
+    `
+import { defineConfig } from '${vievalImportPath}'
+
+export default defineConfig({
+  models: [
+    {
+      aliases: [],
+      id: 'openai:gpt-4.1-mini',
+      model: 'gpt-4.1-mini',
+      inferenceExecutor: 'openai',
+      inferenceExecutorId: 'openai:gpt-4.1-mini',
+    },
+  ],
+  projects: [
+    {
+      include: ['evals/*.eval.ts'],
+      name: '${options.projectName}',
+      root: '.',
+      runMatrix: ${JSON.stringify({ extend: options.runMatrix })},
+    },
+  ],
+})
+`,
+    'utf-8',
+  )
+
+  return temporaryDirectory
+}
+
+async function createWorkspaceModeDslProject(): Promise<string> {
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-workspace-project-'))
+  temporaryDirectories.push(temporaryDirectory)
+
+  const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
+  const workspaceDirectory = join(temporaryDirectory, 'workspaces', 'semantic-memory')
+  await mkdir(join(workspaceDirectory, 'evals'), { recursive: true })
+  await writeFile(
+    join(workspaceDirectory, 'evals', 'workspace-task.eval.ts'),
+    `
+import { caseOf, describeTask } from '${vievalImportPath}'
+
+describeTask('workspace-task', () => {
+  caseOf('workspace-case', () => {}, {
+    input: {
+      source: 'workspace-case',
+    },
+  })
+})
+`,
+    'utf-8',
+  )
+
+  await writeFile(
+    join(temporaryDirectory, 'vieval.config.ts'),
+    `
+import { defineConfig } from '${vievalImportPath}'
+
+export default defineConfig({
+  workspaces: [
+    {
+      id: 'semantic-memory',
+      root: './workspaces/semantic-memory',
+    },
+  ],
+})
+`,
+    'utf-8',
+  )
+
+  return temporaryDirectory
+}
+
 async function createBlockingExecutorProject(options: {
   concurrencySource?: string
   projects: BlockingProjectFixtureOptions[]
@@ -420,6 +519,25 @@ describe('runVievalCli', () => {
       taskCount: 2,
     })
     expect(output.projects[0]?.matrixSummary).not.toBeNull()
+  })
+
+  it('runs workspace-mode config by discovering evals under each workspace root', async () => {
+    const projectDirectory = await createWorkspaceModeDslProject()
+
+    const output = await runVievalCli({
+      configFilePath: join(projectDirectory, 'vieval.config.ts'),
+      cwd: projectDirectory,
+    })
+
+    expect(output.projects).toHaveLength(1)
+    expect(output.projects[0]).toMatchObject({
+      discoveredEvalFileCount: 1,
+      entryCount: 1,
+      errorMessage: null,
+      executed: false,
+      name: 'semantic-memory',
+      taskCount: 1,
+    })
   })
 
   it('executes scheduled tasks when project defines executor', async () => {
@@ -1410,6 +1528,70 @@ describeTask('cli-case-concurrency', (task) => {
     expect(output.projects[0]?.executed).toBe(true)
   })
 
+  /**
+   * @example
+   * it('keeps explicit experiment identity when matrix metadata is present') verifies CLI options remain authoritative.
+   */
+  it('keeps explicit experiment identity when matrix metadata is present', async () => {
+    const projectDirectory = await createRunMatrixDslProject({
+      projectName: 'explicit-matrix-experiment',
+      runMatrix: {
+        scenario: ['candidate'],
+      },
+    })
+
+    const output = await runVievalCli({
+      configFilePath: join(projectDirectory, 'vieval.config.ts'),
+      cwd: projectDirectory,
+      experiment: 'manual-exp',
+    })
+
+    expect(output.experimentId).toBe('manual-exp')
+    expect(output.projects[0]?.executed).toBe(true)
+  })
+
+  /**
+   * @example
+   * it('derives default experiment identity from runMatrix row metadata') verifies omitted CLI experiments still preserve matrix lineage.
+   */
+  it('derives default experiment identity from runMatrix row metadata', async () => {
+    const reportOut = await mkdtemp(join(tmpdir(), 'vieval-matrix-report-'))
+    temporaryDirectories.push(reportOut)
+    const projectDirectory = await createRunMatrixDslProject({
+      projectName: 'default-matrix-experiment',
+      runMatrix: {
+        scenario: ['candidate'],
+      },
+    })
+
+    const firstOutput = await runVievalCli({
+      attempt: 'matrix-attempt-1',
+      configFilePath: join(projectDirectory, 'vieval.config.ts'),
+      cwd: projectDirectory,
+      reportOut,
+    })
+    const secondOutput = await runVievalCli({
+      attempt: 'matrix-attempt-2',
+      configFilePath: join(projectDirectory, 'vieval.config.ts'),
+      cwd: projectDirectory,
+    })
+
+    expect(firstOutput.experimentId).not.toBe('default-experiment')
+    expect(firstOutput.experimentId).toBe(secondOutput.experimentId)
+    expect(firstOutput.experimentId).toContain('scenario-candidate')
+
+    const summaryText = await readFile(join(firstOutput.reportDirectory!, 'run-summary.json'), 'utf-8')
+    const eventsText = await readFile(join(firstOutput.reportDirectory!, 'events.jsonl'), 'utf-8')
+    const eventRecord = eventsText
+      .split('\n')
+      .filter(line => line.trim().length > 0)
+      .map(line => JSON.parse(line) as { experimentId?: string })[0]
+
+    expect(summaryText).toContain(`"experimentId": "${firstOutput.experimentId}"`)
+    expect(eventRecord?.experimentId).toBe(firstOutput.experimentId)
+    expect(firstOutput.projects[0]?.executed).toBe(true)
+  })
+
   it('runs the concurrency-experiment-metadata fixture and keeps experiment as metadata', async () => {
     const output = await runVievalCli({
       configFilePath: join(concurrencyExperimentMetadataProjectDirectory, 'vieval.config.ts'),
@@ -1470,8 +1652,8 @@ describeTask('cli-case-concurrency', (task) => {
 
       expect(output.projects[0]?.executed).toBe(true)
       expect(output.projects[0]?.caseSummary).toEqual({
-        failed: 0,
-        passed: 2,
+        failed: 1,
+        passed: 1,
         skipped: 0,
         timeout: 0,
         total: 2,

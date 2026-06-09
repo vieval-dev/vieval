@@ -1,18 +1,43 @@
+import type { CaseRecord } from './report-records'
 import type { CliRunOutput } from './run'
 
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 
 export interface CompareMethodSummary {
+  caseRecords?: readonly CaseRecord[]
   methodId: string
   output: CliRunOutput
 }
 
+/**
+ * Coverage and score summary for one project inside a compare method output.
+ */
+export interface CompareProjectSummary {
+  caseCount: number
+  distinctCaseCount: number
+  exactAverage: number | null
+  executed: boolean
+  hybridAverage: number | null
+  name: string
+  runCount: number
+  taskCount: number
+}
+
+/**
+ * Method-level compare row with coverage counts and weighted score averages.
+ */
 export interface CompareSummaryRow {
+  caseCount: number
+  distinctCaseCount: number
   exactAverage: number | null
   hybridAverage: number | null
+  executedProjectCount: number
   methodId: string
+  projectCount: number
+  projects: CompareProjectSummary[]
   runCount: number
+  taskCount: number
 }
 
 export interface CompareReportArtifact {
@@ -30,14 +55,29 @@ export function buildCompareReportArtifact(args: {
   reportPath: string
 }): CompareReportArtifact {
   const rows = args.methods.map((method): CompareSummaryRow => {
-    const firstProject = method.output.projects[0]
-    const overall = firstProject?.result?.overall
+    const caseRecords = method.caseRecords ?? []
+    const projects = method.output.projects.map((project): CompareProjectSummary => ({
+      caseCount: countCasesForProject(caseRecords, project.name),
+      distinctCaseCount: countDistinctCasesForProject(caseRecords, project.name),
+      exactAverage: project.result?.overall.exactAverage ?? null,
+      executed: project.executed,
+      hybridAverage: project.result?.overall.hybridAverage ?? null,
+      name: project.name,
+      runCount: project.result?.overall.runCount ?? 0,
+      taskCount: project.taskCount,
+    }))
 
     return {
-      exactAverage: overall?.exactAverage ?? null,
-      hybridAverage: overall?.hybridAverage ?? null,
+      caseCount: caseRecords.length,
+      distinctCaseCount: countDistinctCases(caseRecords),
+      exactAverage: createWeightedAverage(projects, project => project.exactAverage),
+      executedProjectCount: projects.filter(project => project.executed).length,
+      hybridAverage: createWeightedAverage(projects, project => project.hybridAverage),
       methodId: method.methodId,
-      runCount: overall?.runCount ?? 0,
+      projectCount: projects.length,
+      projects,
+      runCount: projects.reduce((sum, project) => sum + project.runCount, 0),
+      taskCount: projects.reduce((sum, project) => sum + project.taskCount, 0),
     }
   })
 
@@ -58,6 +98,48 @@ export function buildCompareReportArtifact(args: {
     methods: rows,
     reportPath: args.reportPath,
   }
+}
+
+function countCasesForProject(caseRecords: readonly CaseRecord[], projectName: string): number {
+  return caseRecords.filter(record => record.projectName === projectName).length
+}
+
+function countDistinctCasesForProject(caseRecords: readonly CaseRecord[], projectName: string): number {
+  return countDistinctCases(caseRecords.filter(record => record.projectName === projectName))
+}
+
+function countDistinctCases(caseRecords: readonly CaseRecord[]): number {
+  const caseKeys = new Set<string>()
+
+  for (const record of caseRecords) {
+    caseKeys.add(`${record.projectName}:${record.taskId}:${record.caseId}`)
+  }
+
+  return caseKeys.size
+}
+
+function createWeightedAverage(
+  projects: readonly CompareProjectSummary[],
+  selectAverage: (project: CompareProjectSummary) => number | null,
+): number | null {
+  let weightedScoreTotal = 0
+  let weightTotal = 0
+
+  for (const project of projects) {
+    const average = selectAverage(project)
+    if (average == null || project.runCount <= 0) {
+      continue
+    }
+
+    weightedScoreTotal += average * project.runCount
+    weightTotal += project.runCount
+  }
+
+  if (weightTotal === 0) {
+    return null
+  }
+
+  return weightedScoreTotal / weightTotal
 }
 
 /**

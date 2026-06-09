@@ -66,7 +66,7 @@ export function createSchedulerRuntime(
  * Resolves the scheduler scopes that apply to a context.
  *
  * Before:
- * - `{ scope: 'case', workspaceId: 'ws', experimentId: 'exp', caseId: 'case-1' }`
+ * - `{ scope: 'case', workspaceId: 'ws', projectName: 'project', caseId: 'case-1' }`
  *
  * After:
  * - `['workspace', 'project', 'task', 'attempt', 'case']` up to the requested scope
@@ -180,7 +180,7 @@ function getSchedulerScopeInstanceKey(
   scope: SchedulerScope,
   context: SchedulerScopeContext,
 ): string {
-  const workspaceKey = `workspace:${context.workspaceId}:experiment:${context.experimentId}`
+  const workspaceKey = `workspace:${context.workspaceId}`
   const projectKey = `${workspaceKey}:project:${context.projectName ?? '(missing-project)'}`
   const taskKey = `${projectKey}:task:${context.taskId ?? '(missing-task)'}`
   const attemptKey = `${taskKey}:attempt:${context.attemptIndex ?? '(missing-attempt)'}`

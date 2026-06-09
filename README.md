@@ -104,10 +104,11 @@ Use `describeTask` for the common Vitest-like authoring path:
 
 ```ts
 import { caseOf, describeTask, expect } from 'vieval'
+import { modelFromRun } from 'vieval/plugins/chat-models'
 
 describeTask('prompt-language-ablation', () => {
   caseOf('resolves matrix axes', async (context) => {
-    const selectedModel = context.model()
+    const selectedModel = modelFromRun(context, { axis: 'model' })
     const language = context.task.matrix.run.promptLanguage
     const scenario = context.task.matrix.run.scenario
 
@@ -165,6 +166,21 @@ Each scheduled task receives stable matrix metadata:
 - `task.matrix.meta.runRowId`
 - `task.matrix.meta.evalRowId`
 - `task.matrix.inputs` for `caseOf(..., { input })` and `casesFromInputs(...)`
+
+## Orchestration Model
+
+`vieval` separates benchmark management from run reliability:
+
+- `comparison`: cross-project or cross-workspace benchmark. Use it for horizontal evaluation across multiple agent, memory, model, paper, or backend implementations. Methods do not need perfect project/case alignment; compare artifacts report project and case coverage.
+- `workspace`: a batch-management boundary for related eval projects. Use it when one benchmark family spans multiple task projects, roots, env settings, or model registrations.
+- `project`: one eval task project with discovery rules, model registrations, optional executor, matrix layers, and scoring/reporting behavior.
+- `experiment`: run metadata derived from explicit `--experiment` or, when omitted, stable matrix row metadata. It does not create an extra scheduler layer.
+- `task`: one eval definition discovered from files and expanded across inference executors plus run/eval matrix rows.
+- `case`: the scoring and evidence source inside a task. `context.score(...)` contributes normalized score evidence; `context.metric(...)` emits benchmark metadata for reports.
+- `attempt`: a full task rerun used to estimate reliability. With `autoAttempt`, each full attempt contributes evidence, so a fail-then-pass pair scores as a success rate rather than replacing the earlier failure.
+- `retry`: an in-case retry. With `autoRetry`, a case can recover inside one attempt; a retry pass still counts as that attempt passing.
+
+Config inheritance follows the same outside-in model: top-level defaults apply first, workspace/project entries refine them, and project-local plugins can append or override project-local models/reporters/concurrency without leaking to sibling projects.
 
 ## Config Example
 
@@ -256,7 +272,16 @@ export default defineConfig({
         },
       ],
       async executor(task, context) {
-        const model = context.model({ name: 'motion-default' })
+        const model = context.models.find(model =>
+          model.id === 'motion-default'
+          || model.model === 'motion-default'
+          || model.aliases.includes('motion-default'),
+        )
+
+        if (model == null) {
+          throw new Error('Missing configured model "motion-default".')
+        }
+
         const success = model.model === 'v2' && task.matrix.run.scenario === 'baseline'
 
         return {

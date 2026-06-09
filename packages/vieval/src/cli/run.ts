@@ -36,10 +36,12 @@ interface PreparedCliProjectExecution {
 
 type PreparedCliProjectResult
   = {
+    experimentMatrixRows: string[]
     kind: 'prepared'
     prepared: PreparedCliProjectExecution
   }
   | {
+    experimentMatrixRows: string[]
     kind: 'summary'
     summary: CliProjectSummary
   }
@@ -460,9 +462,56 @@ function sanitizeIdentitySegment(value: string): string {
   return normalized.replace(/[^\w.-]+/g, '-')
 }
 
-function createRunIdentity(options: RunVievalCliOptions): CliRunIdentity {
+function createExperimentMatrixRows(tasks: readonly ScheduledTask[]): string[] {
+  const rows = new Set<string>()
+
+  for (const task of tasks) {
+    const runRowId = task.matrix.meta.runRowId
+    const evalRowId = task.matrix.meta.evalRowId
+
+    if (runRowId !== 'default' && evalRowId !== 'default') {
+      rows.add(`run:${runRowId}+eval:${evalRowId}`)
+      continue
+    }
+
+    if (runRowId !== 'default') {
+      rows.add(`run:${runRowId}`)
+    }
+
+    if (evalRowId !== 'default') {
+      rows.add(`eval:${evalRowId}`)
+    }
+  }
+
+  return [...rows].sort((left, right) => left.localeCompare(right))
+}
+
+function resolveExperimentId(
+  options: RunVievalCliOptions,
+  preparedProjects: readonly PreparedCliProjectResult[],
+): string {
+  if (options.experiment != null) {
+    return sanitizeIdentitySegment(options.experiment)
+  }
+
+  const matrixRows = new Set<string>()
+  for (const project of preparedProjects) {
+    project.experimentMatrixRows.forEach(row => matrixRows.add(row))
+  }
+
+  if (matrixRows.size === 0) {
+    return 'default-experiment'
+  }
+
+  return sanitizeIdentitySegment(`matrix-${[...matrixRows].sort().join('--')}`)
+}
+
+function createRunIdentity(
+  options: RunVievalCliOptions,
+  preparedProjects: readonly PreparedCliProjectResult[],
+): CliRunIdentity {
   const workspaceId = sanitizeIdentitySegment(options.workspace ?? 'default-workspace')
-  const experimentId = sanitizeIdentitySegment(options.experiment ?? 'default-experiment')
+  const experimentId = resolveExperimentId(options, preparedProjects)
   const attemptId = sanitizeIdentitySegment(options.attempt ?? `attempt-${new Date().toISOString().replace(/[:.]/g, '-')}`)
 
   return {
@@ -950,6 +999,7 @@ async function prepareProject(project: NormalizedCliProjectConfig): Promise<Prep
 
     if (project.executor == null && !canAutoExecuteEntryTasks) {
       return {
+        experimentMatrixRows: createExperimentMatrixRows(tasks),
         kind: 'summary',
         summary: {
           caseSummary: null,
@@ -968,6 +1018,7 @@ async function prepareProject(project: NormalizedCliProjectConfig): Promise<Prep
     }
 
     return {
+      experimentMatrixRows: createExperimentMatrixRows(tasks),
       kind: 'prepared',
       prepared: {
         discoveredEvalFileCount: evalFilePaths.length,
@@ -981,6 +1032,7 @@ async function prepareProject(project: NormalizedCliProjectConfig): Promise<Prep
   }
   catch (error) {
     return {
+      experimentMatrixRows: [],
       kind: 'summary',
       summary: {
         caseSummary: null,
@@ -1202,7 +1254,6 @@ async function executePreparedProject(
  * - keeping business-agent eval files near their implementation packages
  */
 export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<CliRunOutput> {
-  const identity = createRunIdentity(options)
   const loadedConfig = await loadVievalCliConfig({
     configFilePath: options.configFilePath,
     cwd: options.cwd,
@@ -1214,29 +1265,33 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
     ? loadedConfig.reporting.openTelemetry.onRunEnd
     : undefined
   const restoreEnvironment = applyRunEnvironment(loadedConfig.env)
-  const eventRecorder = createEventRecorder(identity)
-  const reporter = createReporterWithEventCapture(
-    createRunReporter(options.reporter),
-    eventRecorder.record,
-  )
 
   let runError: unknown
   let runEndError: unknown
   let output: CliRunOutput | undefined
+  let reporter: CliRunReporter | undefined
   try {
+    const selectedProjects = filterProjectsByName(loadedConfig.projects, options.project ?? [])
+    const preparedProjects = await Promise.all(selectedProjects.map(async project => prepareProject(project)))
+    const identity = createRunIdentity(options, preparedProjects)
+    const eventRecorder = createEventRecorder(identity)
+    const runReporter = createReporterWithEventCapture(
+      createRunReporter(options.reporter),
+      eventRecorder.record,
+    )
+    reporter = runReporter
+
     output = await telemetry.withSpan('vieval.run', {
       'vieval.attempt.id': identity.attemptId,
       'vieval.experiment.id': identity.experimentId,
       'vieval.run.id': identity.runId,
       'vieval.workspace.id': identity.workspaceId,
     }, async () => {
-      const selectedProjects = filterProjectsByName(loadedConfig.projects, options.project ?? [])
       const workspaceScheduler = createSchedulerRuntime({
         concurrency: {
           workspace: resolveWorkspaceConcurrency(loadedConfig, options),
         },
       })
-      const preparedProjects = await Promise.all(selectedProjects.map(async project => prepareProject(project)))
       const executableProjects = preparedProjects
         .filter(project => project.kind === 'prepared')
         .map(project => project.prepared)
@@ -1260,13 +1315,13 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
         skippedTasks: 0,
       }
 
-      reporter.onRunStart({
+      runReporter.onRunStart({
         totalTasks,
       })
 
       for (const project of executableProjects) {
         for (const task of project.tasks) {
-          reporter.onTaskQueued(createTaskQueuePayload(task, project.name))
+          runReporter.onTaskQueued(createTaskQueuePayload(task, project.name))
         }
       }
 
@@ -1293,7 +1348,7 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
             identity,
             options.cacheProjectName,
             telemetry,
-            reporter,
+            runReporter,
             reporterCounters,
             eventRecorder.record,
             options,
@@ -1304,7 +1359,7 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
         .sort((left, right) => left.index - right.index)
         .map(item => item.summary)
 
-      reporter.onRunEnd({
+      runReporter.onRunEnd({
         failedTasks: reporterCounters.failedTasks,
         passedTasks: reporterCounters.passedTasks,
         skippedTasks: reporterCounters.skippedTasks + skippedSummaryTasks,
@@ -1347,7 +1402,7 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
         }
       }
     }
-    reporter.dispose()
+    reporter?.dispose()
     restoreEnvironment()
   }
 

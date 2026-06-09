@@ -2,10 +2,14 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { runCompareCli } from './compare'
 import { loadVievalComparisonConfig } from './comparison-config'
+import { readCaseRecordsFromReport } from './report-cases'
 import { runVievalCli } from './run'
 
 vi.mock('./comparison-config', () => ({
   loadVievalComparisonConfig: vi.fn(),
+}))
+vi.mock('./report-cases', () => ({
+  readCaseRecordsFromReport: vi.fn(),
 }))
 vi.mock('./run', () => ({
   runVievalCli: vi.fn(),
@@ -13,6 +17,7 @@ vi.mock('./run', () => ({
 
 describe('runCompareCli cache wiring', () => {
   it('reuses same benchmark case artifact path across method runs', async () => {
+    vi.mocked(readCaseRecordsFromReport).mockResolvedValue([])
     vi.mocked(loadVievalComparisonConfig).mockResolvedValue({
       config: {
         benchmark: {

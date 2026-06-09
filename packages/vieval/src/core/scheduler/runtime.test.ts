@@ -98,7 +98,7 @@ describe('createSchedulerRuntime', () => {
     await runCompletion
   })
 
-  it('isolates scoped concurrency across experiment lineages', async () => {
+  it('keeps experiment metadata out of scheduler queue partitioning', async () => {
     const started: string[] = []
     const releases = new Map<string, () => void>()
 
@@ -128,6 +128,11 @@ describe('createSchedulerRuntime', () => {
         },
       ),
     )
+
+    expect(started).toEqual(['baseline-1'])
+
+    releases.get('baseline-1')?.()
+    await waitForStartedCount(started, 2)
 
     expect(started).toEqual([
       'baseline-1',

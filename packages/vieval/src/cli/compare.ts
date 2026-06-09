@@ -1,12 +1,15 @@
 import process from 'node:process'
 
-import { resolve } from 'node:path'
+import { mkdtemp } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 
 import meow from 'meow'
 
 import { errorMessageFrom } from '@moeru/std'
 
 import { loadVievalComparisonConfig } from './comparison-config'
+import { readCaseRecordsFromReport } from './report-cases'
 import { buildCompareReportArtifact, writeCompareReportArtifact } from './report-compare'
 import { runVievalCli } from './run'
 
@@ -73,6 +76,7 @@ export function parseCompareCliArguments(argv: readonly string[]): ParsedCompare
 }
 
 export interface CompareMethodRunResult {
+  caseRecords: Awaited<ReturnType<typeof readCaseRecordsFromReport>>
   methodId: string
   output: Awaited<ReturnType<typeof runVievalCli>>
 }
@@ -93,14 +97,17 @@ export async function runCompareCli(argv: readonly string[]): Promise<CompareRun
     cwd: parsed.cwd,
   })
   const methodResults: CompareMethodRunResult[] = []
+  const reportRoot = await mkdtemp(join(tmpdir(), 'vieval-compare-'))
 
   for (const method of loaded.config.methods) {
     const methodWorkspace = resolve(method.workspace)
+    const methodReportOut = join(reportRoot, method.id)
     const output = await runVievalCli({
       cacheProjectName: loaded.config.benchmark.sharedCaseNamespace,
       configFilePath: method.configFilePath ?? resolve(methodWorkspace, 'vieval.config.ts'),
       cwd: methodWorkspace,
       project: [method.project],
+      reportOut: methodReportOut,
       workspace: loaded.config.benchmark.id,
     })
 
@@ -110,6 +117,7 @@ export async function runCompareCli(argv: readonly string[]): Promise<CompareRun
     }
 
     methodResults.push({
+      caseRecords: await readCaseRecordsFromReport(methodReportOut),
       methodId: method.id,
       output,
     })

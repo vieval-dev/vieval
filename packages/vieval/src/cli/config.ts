@@ -651,29 +651,116 @@ function normalizeProjectConfig(
   }
 }
 
-function normalizeConfig(config: CliConfig | null | undefined, cwd: string): NormalizedCliProjectConfig[] {
+function createProjectScopedConfig(
+  config: CliConfig | null | undefined,
+  project: CliProjectConfig,
+  normalizedProject: NormalizedCliProjectConfig,
+): CliProjectModeConfig {
+  const concurrency = config?.concurrency == null && normalizedProject.concurrency == null
+    ? undefined
+    : {
+        ...normalizedProject.concurrency,
+        workspace: config?.concurrency?.workspace,
+      }
+
+  return {
+    concurrency,
+    env: config?.env,
+    models: normalizedProject.models,
+    plugins: project.plugins,
+    projects: [
+      {
+        concurrency: normalizedProject.concurrency,
+        exclude: normalizedProject.exclude,
+        executor: normalizedProject.executor,
+        include: normalizedProject.include,
+        evalMatrix: normalizedProject.evalMatrix,
+        inferenceExecutors: normalizedProject.inferenceExecutors,
+        models: normalizedProject.models,
+        name: normalizedProject.name,
+        plugins: project.plugins,
+        reporters: normalizedProject.reporters,
+        root: normalizedProject.root,
+        runMatrix: normalizedProject.runMatrix,
+      },
+    ],
+    reporters: normalizedProject.reporters,
+    reporting: config?.reporting,
+  }
+}
+
+async function applyProjectPlugins(
+  config: CliConfig | null | undefined,
+  project: CliProjectConfig,
+  normalizedProject: NormalizedCliProjectConfig,
+  cwd: string,
+): Promise<NormalizedCliProjectConfig> {
+  if (project.plugins == null || project.plugins.length === 0) {
+    return normalizedProject
+  }
+
+  const scopedConfig = createProjectScopedConfig(config, project, normalizedProject)
+  const resolvedConfig = await applyVievalPlugins(scopedConfig) as CliProjectModeConfig
+  const scopedProject = scopedConfig.projects?.[0]
+  if (scopedProject == null) {
+    throw new Error('Project-local plugin normalization requires one scoped project.')
+  }
+  const resolvedProject = resolvedConfig.projects?.[0] ?? scopedProject
+
+  return normalizeProjectConfig(
+    {
+      ...resolvedProject,
+      concurrency: resolvedProject.concurrency === scopedProject.concurrency
+        ? toProjectConcurrencyDefaults(resolvedConfig.concurrency)
+        : resolvedProject.concurrency,
+      models: resolvedProject.models === scopedProject.models
+        ? resolvedConfig.models
+        : resolvedProject.models,
+      reporters: resolvedProject.reporters === scopedProject.reporters
+        ? resolvedConfig.reporters
+        : resolvedProject.reporters,
+    },
+    cwd,
+    undefined,
+    resolvedConfig.models ?? [],
+    resolvedConfig.reporters ?? [],
+  )
+}
+
+async function normalizeConfig(config: CliConfig | null | undefined, cwd: string): Promise<NormalizedCliProjectConfig[]> {
   if (config != null) {
     const mode = detectCliConfigMode(config)
     if (mode === 'comparisons') {
       throw new Error('vieval run requires project-mode config. Received comparison-mode config.')
     }
-    if (mode === 'workspaces') {
-      throw new Error('vieval run requires project-mode config. Received workspace-mode config.')
-    }
   }
 
-  const projects = config?.projects ?? [{ name: 'default' }]
+  const projects = config?.workspaces == null
+    ? ((config as CliProjectModeConfig | null | undefined)?.projects ?? [{ name: 'default' }])
+    : config.workspaces.map(workspace => ({
+        name: workspace.id,
+        root: workspace.root,
+      }))
   const inheritedConcurrency = toProjectConcurrencyDefaults(config?.concurrency)
   const inheritedModels = config?.models ?? []
   const inheritedReporterReferences = config?.reporters ?? []
 
-  return projects.map(project => normalizeProjectConfig(
-    project,
-    cwd,
-    inheritedConcurrency,
-    inheritedModels,
-    inheritedReporterReferences,
-  ))
+  return Promise.all(projects.map(async (project) => {
+    const normalizedProject = normalizeProjectConfig(
+      project,
+      cwd,
+      inheritedConcurrency,
+      inheritedModels,
+      inheritedReporterReferences,
+    )
+
+    return applyProjectPlugins(
+      config,
+      project,
+      normalizedProject,
+      cwd,
+    )
+  }))
 }
 
 function normalizeReportingConfig(config: CliReportingConfig | undefined): CliReportingConfig | undefined {
@@ -774,7 +861,7 @@ export async function loadVievalCliConfig(options: LoadVievalCliConfigOptions = 
         concurrency: undefined,
         configFilePath: null,
         env: {},
-        projects: normalizeConfig(null, cwd),
+        projects: await normalizeConfig(null, cwd),
         reporting: undefined,
       }
     }
@@ -785,7 +872,7 @@ export async function loadVievalCliConfig(options: LoadVievalCliConfigOptions = 
       concurrency: config.concurrency,
       configFilePath: loadedConfig.configFilePath,
       env: config.env ?? {},
-      projects: normalizeConfig(config, dirname(loadedConfig.configFilePath)),
+      projects: await normalizeConfig(config, dirname(loadedConfig.configFilePath)),
       reporting: normalizeReportingConfig(config.reporting),
     }
   }

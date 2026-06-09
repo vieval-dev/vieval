@@ -1142,7 +1142,98 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const runResult = await runPromise
 
-    expect(runResult.scores[0]?.score).toBe(1)
+    expect(runResult.scores[0]?.score).toBe(0.75)
+  })
+
+  /**
+   * it('scores auto attempts as independent evidence') verifies task-level attempt aggregation.
+   *
+   * @example
+   * autoAttempt: 1 with first attempt failing and second attempt passing -> exact score 0.5.
+   */
+  it('scores auto attempts as independent evidence instead of replacing earlier failures', async () => {
+    let runs = 0
+
+    const taskDefinition = describeTask('dsl-auto-attempt-evidence', () => {
+      caseOf('flaky-case', async () => {
+        runs += 1
+
+        if (runs === 1) {
+          throw new Error('first-attempt-failed')
+        }
+      }, {
+        autoAttempt: 1,
+        input: 'flaky',
+      })
+    })
+
+    const runResult = await taskDefinition.task?.run({
+      cache: createTestTaskCacheRuntime(),
+      models: createTestModels(),
+      task: {
+        entry: {
+          description: 'd',
+          directory: 'x',
+          filePath: '/tmp/x.eval.ts',
+          id: 'x',
+          name: 'x',
+        },
+        id: 'task-auto-attempt-evidence',
+        matrix: createScheduledTaskMatrix(),
+        inferenceExecutor: {
+          id: 'openai:gpt-4.1-mini',
+        },
+      },
+    })
+
+    expect(runs).toBe(2)
+    expect(runResult?.scores[0]?.score).toBe(0.5)
+  })
+
+  /**
+   * it('does not start a full auto attempt when in-case auto retry recovers') verifies retry and attempt boundaries.
+   *
+   * @example
+   * autoRetry: 1 and autoAttempt: 1 with retry pass -> exact score 1.
+   */
+  it('does not start a full auto attempt when in-case auto retry recovers', async () => {
+    let runs = 0
+
+    const taskDefinition = describeTask('dsl-auto-retry-before-auto-attempt', () => {
+      caseOf('retry-then-pass-case', async () => {
+        runs += 1
+
+        if (runs === 1) {
+          throw new Error('retry-first')
+        }
+      }, {
+        autoAttempt: 1,
+        autoRetry: 1,
+        input: 'retry-then-pass',
+      })
+    })
+
+    const runResult = await taskDefinition.task?.run({
+      cache: createTestTaskCacheRuntime(),
+      models: createTestModels(),
+      task: {
+        entry: {
+          description: 'd',
+          directory: 'x',
+          filePath: '/tmp/x.eval.ts',
+          id: 'x',
+          name: 'x',
+        },
+        id: 'task-auto-retry-before-auto-attempt',
+        matrix: createScheduledTaskMatrix(),
+        inferenceExecutor: {
+          id: 'openai:gpt-4.1-mini',
+        },
+      },
+    })
+
+    expect(runs).toBe(2)
+    expect(runResult?.scores[0]?.score).toBe(1)
   })
 
   it('passes an abort signal into case execution and aborts it on timeout', async () => {

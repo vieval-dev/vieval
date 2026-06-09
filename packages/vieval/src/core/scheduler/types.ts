@@ -22,7 +22,8 @@ export type SchedulerScope = 'workspace' | 'project' | 'task' | 'attempt' | 'cas
  * - runtime helpers need to know which hierarchical scope is being executed
  *
  * Expects:
- * - `workspaceId` and `experimentId` are always present
+ * - `workspaceId` is always present
+ * - `experimentId` is metadata for middleware and logging, not queue partitioning
  * - narrower ids are only provided when the selected scope requires them
  *
  * Returns:

@@ -67,6 +67,119 @@ describe('loadVievalCliConfig', () => {
     expect(loaded.projects[0].include).toEqual(['**/*.eval.ts'])
   })
 
+  it('normalizes workspace mode into projects with inherited models and config-relative roots', async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-cli-config-'))
+    temporaryDirectories.push(temporaryDirectory)
+
+    const configDirectory = join(temporaryDirectory, 'config')
+    await mkdir(configDirectory, { recursive: true })
+
+    const configFilePath = join(configDirectory, 'vieval.config.json')
+    await writeFile(
+      configFilePath,
+      JSON.stringify({
+        concurrency: {
+          case: 3,
+          task: 2,
+          workspace: 1,
+        },
+        models: [
+          {
+            id: 'openai/gpt-5-mini',
+            inferenceExecutor: 'openai',
+            inferenceExecutorId: 'openai',
+            model: 'openai/gpt-5-mini',
+          },
+        ],
+        reporters: ['./workspace-reporter.js'],
+        workspaces: [
+          {
+            id: 'workspace-a',
+            root: '../workspace-a',
+          },
+          {
+            id: 'workspace-b',
+            root: './nested/workspace-b',
+          },
+        ],
+      }),
+      'utf-8',
+    )
+
+    const loaded = await loadVievalCliConfig({
+      cwd: configDirectory,
+    })
+
+    expect(loaded.configFilePath).toBe(configFilePath)
+    expect(loaded.projects).toHaveLength(2)
+    expect(loaded.projects.map(project => project.name)).toEqual(['workspace-a', 'workspace-b'])
+    expect(loaded.projects.map(project => project.root)).toEqual([
+      join(temporaryDirectory, 'workspace-a'),
+      join(configDirectory, 'nested', 'workspace-b'),
+    ])
+    expect(loaded.projects.map(project => project.models.map(model => model.id))).toEqual([
+      ['openai/gpt-5-mini'],
+      ['openai/gpt-5-mini'],
+    ])
+    expect(loaded.projects.map(project => project.concurrency)).toEqual([
+      {
+        attempt: undefined,
+        case: 3,
+        project: undefined,
+        task: 2,
+      },
+      {
+        attempt: undefined,
+        case: 3,
+        project: undefined,
+        task: 2,
+      },
+    ])
+    expect(loaded.projects.map(project => project.reporters)).toEqual([
+      ['./workspace-reporter.js'],
+      ['./workspace-reporter.js'],
+    ])
+  })
+
+  it('throws when multiple top-level config modes are declared', async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-cli-config-'))
+    temporaryDirectories.push(temporaryDirectory)
+
+    await writeFile(
+      join(temporaryDirectory, 'vieval.config.json'),
+      JSON.stringify({
+        projects: [{ name: 'fixture-project' }],
+        workspaces: [{ id: 'fixture-workspace', root: './fixture-workspace' }],
+      }),
+      'utf-8',
+    )
+
+    await expect(loadVievalCliConfig({
+      cwd: temporaryDirectory,
+    })).rejects.toThrow('top-level keys are mutually exclusive')
+
+    await writeFile(
+      join(temporaryDirectory, 'vieval.config.json'),
+      JSON.stringify({
+        comparisons: [
+          {
+            benchmark: {
+              id: 'benchmark',
+              sharedCaseNamespace: 'benchmark',
+            },
+            id: 'comparison',
+          },
+        ],
+        workspaces: [{ id: 'fixture-workspace', root: './fixture-workspace' }],
+      }),
+      'utf-8',
+    )
+
+    await expect(loadVievalCliConfig({
+      cwd: temporaryDirectory,
+    })).rejects.toThrow('top-level keys are mutually exclusive')
+  })
+
   it('loads top-level env map from config', async () => {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-cli-config-'))
     temporaryDirectories.push(temporaryDirectory)
@@ -128,6 +241,97 @@ describe('loadVievalCliConfig', () => {
       'openai/gpt-5-nano',
     ])
     expect(loaded.projects[0]?.inferenceExecutors).toEqual([{ id: 'default' }])
+  })
+
+  it('applies project-local plugins after inherited project defaults', async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-cli-config-'))
+    temporaryDirectories.push(temporaryDirectory)
+
+    const configFilePath = join(temporaryDirectory, 'vieval.config.mjs')
+    await writeFile(
+      configFilePath,
+      [
+        'const model = (id) => ({',
+        '  aliases: [],',
+        '  id,',
+        '  inferenceExecutor: "test",',
+        '  inferenceExecutorId: "test",',
+        '  model: id,',
+        '})',
+        '',
+        'const topLevelModelPlugin = {',
+        '  name: "top-level-model-plugin",',
+        '  configVieval(config) {',
+        '    return {',
+        '      ...config,',
+        '      models: [',
+        '        ...(config.models ?? []),',
+        '        model("top-level-plugin:model"),',
+        '      ],',
+        '    }',
+        '  },',
+        '}',
+        '',
+        'const projectModelPlugin = {',
+        '  name: "project-model-plugin",',
+        '  configVieval(config) {',
+        '    return {',
+        '      ...config,',
+        '      models: [',
+        '        ...(config.models ?? []),',
+        '        model("project-local:model"),',
+        '      ],',
+        '    }',
+        '  },',
+        '}',
+        '',
+        'export default {',
+        '  concurrency: { task: 4, workspace: 2 },',
+        '  models: [model("global:model")],',
+        '  plugins: [topLevelModelPlugin],',
+        '  projects: [',
+        '    {',
+        '      concurrency: { case: 9 },',
+        '      name: "with-project-plugin",',
+        '      plugins: [projectModelPlugin],',
+        '    },',
+        '    {',
+        '      name: "without-project-plugin",',
+        '    },',
+        '    {',
+        '      models: [model("explicit-project:model")],',
+        '      name: "explicit-project-models",',
+        '      plugins: [projectModelPlugin],',
+        '    },',
+        '  ],',
+        '}',
+      ].join('\n'),
+      'utf-8',
+    )
+
+    const loaded = await loadVievalCliConfig({
+      cwd: temporaryDirectory,
+    })
+
+    expect(loaded.projects[0]?.models.map(model => model.id)).toEqual([
+      'global:model',
+      'top-level-plugin:model',
+      'project-local:model',
+    ])
+    expect(loaded.projects[1]?.models.map(model => model.id)).toEqual([
+      'global:model',
+      'top-level-plugin:model',
+    ])
+    expect(loaded.projects[2]?.models.map(model => model.id)).toEqual([
+      'explicit-project:model',
+      'project-local:model',
+    ])
+    expect(loaded.projects[0]?.concurrency).toEqual({
+      attempt: undefined,
+      case: 9,
+      project: undefined,
+      task: 4,
+    })
   })
 
   it('accepts runMatrix and evalMatrix layer objects', async () => {
