@@ -2,7 +2,7 @@
   "name": "@vieval/root",
   "type": "module",
   "private": true,
-  "packageManager": "pnpm@10.33.0",
+  "packageManager": "pnpm@11.9.0",
   "description": "Evaluation framework based on Vitest, the testing framework you familiar with, for agents, models, and more.",
   "author": {
     "name": "Vieval Team",
