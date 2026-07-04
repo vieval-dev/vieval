@@ -1,81 +1,3 @@
-function isConsonant(word: string, index: number): boolean {
-  const letter = word[index]
-  if (letter == null) {
-    return false
-  }
-
-  if ('aeiou'.includes(letter)) {
-    return false
-  }
-
-  if (letter === 'y') {
-    if (index === 0) {
-      return true
-    }
-
-    return !isConsonant(word, index - 1)
-  }
-
-  return true
-}
-
-function measure(word: string): number {
-  let count = 0
-  let inVowelSequence = false
-
-  for (let i = 0; i < word.length; i += 1) {
-    const consonant = isConsonant(word, i)
-    if (consonant) {
-      if (inVowelSequence) {
-        count += 1
-      }
-      inVowelSequence = false
-    }
-    else {
-      inVowelSequence = true
-    }
-  }
-
-  return count
-}
-
-function hasVowel(word: string): boolean {
-  for (let i = 0; i < word.length; i += 1) {
-    if (!isConsonant(word, i)) {
-      return true
-    }
-  }
-  return false
-}
-
-function endsWithDoubleConsonant(word: string): boolean {
-  if (word.length < 2) {
-    return false
-  }
-
-  const last = word[word.length - 1]
-  const previous = word[word.length - 2]
-  if (last !== previous) {
-    return false
-  }
-
-  return isConsonant(word, word.length - 1)
-}
-
-function cvc(word: string): boolean {
-  if (word.length < 3) {
-    return false
-  }
-
-  const i = word.length - 1
-  if (!isConsonant(word, i) || isConsonant(word, i - 1) || !isConsonant(word, i - 2)) {
-    return false
-  }
-
-  const last = word[i]
-  return last !== 'w' && last !== 'x' && last !== 'y'
-}
-
 /**
  * Stems a single English token using Porter stemming steps.
  */
@@ -201,4 +123,82 @@ export function stemEnglishPorter(word: string): string {
   }
 
   return value
+}
+
+function cvc(word: string): boolean {
+  if (word.length < 3) {
+    return false
+  }
+
+  const i = word.length - 1
+  if (!isConsonant(word, i) || isConsonant(word, i - 1) || !isConsonant(word, i - 2)) {
+    return false
+  }
+
+  const last = word[i]
+  return last !== 'w' && last !== 'x' && last !== 'y'
+}
+
+function endsWithDoubleConsonant(word: string): boolean {
+  if (word.length < 2) {
+    return false
+  }
+
+  const last = word[word.length - 1]
+  const previous = word[word.length - 2]
+  if (last !== previous) {
+    return false
+  }
+
+  return isConsonant(word, word.length - 1)
+}
+
+function hasVowel(word: string): boolean {
+  for (let i = 0; i < word.length; i += 1) {
+    if (!isConsonant(word, i)) {
+      return true
+    }
+  }
+  return false
+}
+
+function isConsonant(word: string, index: number): boolean {
+  const letter = word[index]
+  if (letter == null) {
+    return false
+  }
+
+  if ('aeiou'.includes(letter)) {
+    return false
+  }
+
+  if (letter === 'y') {
+    if (index === 0) {
+      return true
+    }
+
+    return !isConsonant(word, index - 1)
+  }
+
+  return true
+}
+
+function measure(word: string): number {
+  let count = 0
+  let inVowelSequence = false
+
+  for (let i = 0; i < word.length; i += 1) {
+    const consonant = isConsonant(word, i)
+    if (consonant) {
+      if (inVowelSequence) {
+        count += 1
+      }
+      inVowelSequence = false
+    }
+    else {
+      inVowelSequence = true
+    }
+  }
+
+  return count
 }

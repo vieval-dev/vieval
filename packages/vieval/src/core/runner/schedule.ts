@@ -11,32 +11,24 @@ export interface InferenceExecutor {
 }
 
 /**
+ * Maps matrix axis names to the values that should be expanded.
+ */
+export type RunnerMatrixDefinition = MatrixDefinition
+
+/**
+ * Accepts either flat axis definitions or one layered matrix object.
+ */
+export type RunnerMatrixInput = MatrixLayer | RunnerMatrixDefinition
+
+/**
  * Stores the selected value for each matrix axis.
  */
 export type RunnerMatrixSelection = Record<string, string>
 
 /**
- * Stores stable row ids for one resolved scheduled task matrix.
- */
-export interface ScheduledTaskMatrixMeta {
-  /**
-   * Stable row id for the resolved run matrix selection.
-   */
-  runRowId: string
-  /**
-   * Stable row id for the resolved eval matrix selection.
-   */
-  evalRowId: string
-}
-
-/**
  * Stores the structured matrix payload for one scheduled task.
  */
 export interface ScheduledTaskMatrix {
-  /**
-   * Runtime matrix selection visible to task code.
-   */
-  run: RunnerMatrixSelection
   /**
    * Eval-time matrix selection visible to task code.
    */
@@ -45,42 +37,28 @@ export interface ScheduledTaskMatrix {
    * Stable row ids for both scopes.
    */
   meta: ScheduledTaskMatrixMeta
+  /**
+   * Runtime matrix selection visible to task code.
+   */
+  run: RunnerMatrixSelection
 }
 
 /**
- * Maps matrix axis names to the values that should be expanded.
+ * Stores stable row ids for one resolved scheduled task matrix.
  */
-export type RunnerMatrixDefinition = MatrixDefinition
-
-/**
- * Accepts either flat axis definitions or one layered matrix object.
- */
-export type RunnerMatrixInput = RunnerMatrixDefinition | MatrixLayer
+export interface ScheduledTaskMatrixMeta {
+  /**
+   * Stable row id for the resolved eval matrix selection.
+   */
+  evalRowId: string
+  /**
+   * Stable row id for the resolved run matrix selection.
+   */
+  runRowId: string
+}
 
 const matrixLayerKeys = new Set(['disable', 'extend', 'override'])
 const ambiguousMatrixDefinitionErrorMessage = 'Ambiguous matrix definition: cannot mix reserved layer keys (disable, extend, override) with matrix axis keys.'
-
-/**
- * Represents one fully expanded runner task.
- */
-export interface ScheduledTask {
-  /**
-   * Stable task id derived from the entry, inferenceExecutor, and matrix selection.
-   */
-  id: string
-  /**
-   * The collected eval entry to execute.
-   */
-  entry: CollectedEvalEntry
-  /**
-   * The inferenceExecutor selected for this task.
-   */
-  inferenceExecutor: InferenceExecutor
-  /**
-   * The concrete scoped matrix selection for this task.
-   */
-  matrix: ScheduledTaskMatrix
-}
 
 /**
  * Configures how the runner should expand its execution matrix.
@@ -91,6 +69,10 @@ export interface CreateRunnerScheduleOptions {
    */
   entries: readonly CollectedEvalEntry[]
   /**
+   * Optional eval-time matrix axes expanded as a cartesian product.
+   */
+  evalMatrix?: RunnerMatrixInput
+  /**
    * Providers that should run each entry.
    */
   inferenceExecutors: readonly InferenceExecutor[]
@@ -98,203 +80,28 @@ export interface CreateRunnerScheduleOptions {
    * Optional run-time matrix axes expanded as a cartesian product.
    */
   runMatrix?: RunnerMatrixInput
+}
+
+/**
+ * Represents one fully expanded runner task.
+ */
+export interface ScheduledTask {
   /**
-   * Optional eval-time matrix axes expanded as a cartesian product.
+   * The collected eval entry to execute.
    */
-  evalMatrix?: RunnerMatrixInput
-}
-
-function encodeTaskIdSegment(value: string): string {
-  return encodeURIComponent(value)
-}
-
-function stringifyMatrixValue(value: MatrixValue): string {
-  return String(value)
-}
-
-function cloneMatrixSelection(matrix: RunnerMatrixSelection): RunnerMatrixSelection {
-  return { ...matrix }
-}
-
-function createScheduledTaskMatrix(
-  runMatrix: RunnerMatrixSelection,
-  evalMatrix: RunnerMatrixSelection,
-): ScheduledTaskMatrix {
-  return {
-    eval: cloneMatrixSelection(evalMatrix),
-    meta: {
-      evalRowId: createStableRowId(evalMatrix),
-      runRowId: createStableRowId(runMatrix),
-    },
-    run: cloneMatrixSelection(runMatrix),
-  }
-}
-
-function isMatrixLayer(matrix: RunnerMatrixInput): matrix is MatrixLayer {
-  const matrixKeys = Object.keys(matrix)
-  return (
-    matrixKeys.length > 0
-    && matrixKeys.every(key => matrixLayerKeys.has(key))
-  )
-}
-
-function assertNonAmbiguousMatrixDefinition(matrix: RunnerMatrixInput): void {
-  const matrixKeys = Object.keys(matrix)
-  const hasReservedKeys = matrixKeys.some(key => matrixLayerKeys.has(key))
-  const hasAxisKeys = matrixKeys.some(key => !matrixLayerKeys.has(key))
-
-  if (hasReservedKeys && hasAxisKeys) {
-    throw new TypeError(ambiguousMatrixDefinitionErrorMessage)
-  }
-}
-
-function normalizeLayerInputToAxes(matrix: RunnerMatrixInput | undefined): MatrixLayer | undefined {
-  if (matrix == null) {
-    return undefined
-  }
-
-  assertNonAmbiguousMatrixDefinition(matrix)
-
-  if (isMatrixLayer(matrix)) {
-    return matrix
-  }
-
-  return {
-    extend: matrix,
-  }
-}
-
-function dedupeAxisValues(values: readonly MatrixValue[]): string[] {
-  return Array.from(new Set(values.map(stringifyMatrixValue)))
-}
-
-function applyAxisValues(
-  axes: Map<string, string[]>,
-  definition: RunnerMatrixDefinition | undefined,
-  mode: 'extend' | 'override',
-): void {
-  if (definition == null) {
-    return
-  }
-
-  for (const [axis, values] of Object.entries(definition)) {
-    const nextValues = dedupeAxisValues(values)
-
-    if (mode === 'extend') {
-      const existingValues = axes.get(axis) ?? []
-      axes.set(axis, Array.from(new Set([...existingValues, ...nextValues])))
-      continue
-    }
-
-    axes.set(axis, nextValues)
-  }
-}
-
-function applyLayer(
-  baseAxes: ReadonlyMap<string, string[]>,
-  layer: MatrixLayer | undefined,
-): Map<string, string[]> {
-  const nextAxes = new Map<string, string[]>(
-    Array.from(baseAxes.entries()).map(([axis, values]) => [axis, [...values]]),
-  )
-
-  for (const axis of layer?.disable ?? []) {
-    nextAxes.delete(axis)
-  }
-
-  applyAxisValues(nextAxes, layer?.extend, 'extend')
-  applyAxisValues(nextAxes, layer?.override, 'override')
-
-  return nextAxes
-}
-
-function expandAxesToRows(axes: ReadonlyMap<string, readonly string[]>): RunnerMatrixSelection[] {
-  if (axes.size === 0) {
-    return [{}]
-  }
-
-  const dimensions = Array.from(axes.entries())
-
-  let selections: RunnerMatrixSelection[] = [{}]
-
-  for (const [axis, values] of dimensions) {
-    if (values.length === 0) {
-      return []
-    }
-
-    const nextSelections: RunnerMatrixSelection[] = []
-
-    for (const selection of selections) {
-      for (const value of values) {
-        nextSelections.push({
-          ...selection,
-          [axis]: value,
-        })
-      }
-    }
-
-    selections = nextSelections
-  }
-
-  return selections
-}
-
-function createStableRowId(matrix: RunnerMatrixSelection): string {
-  const segments = Object.entries(matrix)
-    .sort(([leftAxis], [rightAxis]) => leftAxis.localeCompare(rightAxis))
-    .map(([axis, value]) => `${encodeTaskIdSegment(axis)}=${encodeTaskIdSegment(value)}`)
-
-  if (segments.length === 0) {
-    return 'default'
-  }
-
-  return segments.join('&')
-}
-
-function createTaskId(entryId: string, inferenceExecutorId: string, runRowId: string, evalRowId: string): string {
-  const encodedEntryId = encodeTaskIdSegment(entryId)
-  const encodedProviderId = encodeTaskIdSegment(inferenceExecutorId)
-
-  return [
-    encodedEntryId,
-    encodedProviderId,
-    `run=${encodeTaskIdSegment(runRowId)}`,
-    `eval=${encodeTaskIdSegment(evalRowId)}`,
-  ].join('::')
-}
-
-function createResolvedRunAxes(
-  entry: CollectedEvalEntry,
-  runMatrix: RunnerMatrixInput | undefined,
-): Map<string, string[]> {
-  let resolvedAxes = new Map<string, string[]>()
-
-  for (const layerInput of [
-    runMatrix,
-    entry.matrix?.runMatrix,
-    entry.task?.matrix?.runMatrix,
-  ]) {
-    resolvedAxes = applyLayer(resolvedAxes, normalizeLayerInputToAxes(layerInput))
-  }
-
-  return resolvedAxes
-}
-
-function createResolvedEvalAxes(
-  entry: CollectedEvalEntry,
-  evalMatrix: RunnerMatrixInput | undefined,
-): Map<string, string[]> {
-  let resolvedAxes = new Map<string, string[]>()
-
-  for (const layerInput of [
-    evalMatrix,
-    entry.matrix?.evalMatrix,
-    entry.task?.matrix?.evalMatrix,
-  ]) {
-    resolvedAxes = applyLayer(resolvedAxes, normalizeLayerInputToAxes(layerInput))
-  }
-
-  return resolvedAxes
+  entry: CollectedEvalEntry
+  /**
+   * Stable task id derived from the entry, inferenceExecutor, and matrix selection.
+   */
+  id: string
+  /**
+   * The inferenceExecutor selected for this task.
+   */
+  inferenceExecutor: InferenceExecutor
+  /**
+   * The concrete scoped matrix selection for this task.
+   */
+  matrix: ScheduledTaskMatrix
 }
 
 /**
@@ -347,8 +154,8 @@ export function createRunnerSchedule(options: CreateRunnerScheduleOptions): Sche
               isolatedMatrix.meta.runRowId,
               isolatedMatrix.meta.evalRowId,
             ),
-            matrix: isolatedMatrix,
             inferenceExecutor,
+            matrix: isolatedMatrix,
           })
         }
       }
@@ -356,4 +163,197 @@ export function createRunnerSchedule(options: CreateRunnerScheduleOptions): Sche
   }
 
   return tasks
+}
+
+function applyAxisValues(
+  axes: Map<string, string[]>,
+  definition: RunnerMatrixDefinition | undefined,
+  mode: 'extend' | 'override',
+): void {
+  if (definition == null) {
+    return
+  }
+
+  for (const [axis, values] of Object.entries(definition)) {
+    const nextValues = dedupeAxisValues(values)
+
+    if (mode === 'extend') {
+      const existingValues = axes.get(axis) ?? []
+      axes.set(axis, Array.from(new Set([...existingValues, ...nextValues])))
+      continue
+    }
+
+    axes.set(axis, nextValues)
+  }
+}
+
+function applyLayer(
+  baseAxes: ReadonlyMap<string, string[]>,
+  layer: MatrixLayer | undefined,
+): Map<string, string[]> {
+  const nextAxes = new Map<string, string[]>(
+    Array.from(baseAxes.entries()).map(([axis, values]) => [axis, [...values]]),
+  )
+
+  for (const axis of layer?.disable ?? []) {
+    nextAxes.delete(axis)
+  }
+
+  applyAxisValues(nextAxes, layer?.extend, 'extend')
+  applyAxisValues(nextAxes, layer?.override, 'override')
+
+  return nextAxes
+}
+
+function assertNonAmbiguousMatrixDefinition(matrix: RunnerMatrixInput): void {
+  const matrixKeys = Object.keys(matrix)
+  const hasReservedKeys = matrixKeys.some(key => matrixLayerKeys.has(key))
+  const hasAxisKeys = matrixKeys.some(key => !matrixLayerKeys.has(key))
+
+  if (hasReservedKeys && hasAxisKeys) {
+    throw new TypeError(ambiguousMatrixDefinitionErrorMessage)
+  }
+}
+
+function cloneMatrixSelection(matrix: RunnerMatrixSelection): RunnerMatrixSelection {
+  return { ...matrix }
+}
+
+function createResolvedEvalAxes(
+  entry: CollectedEvalEntry,
+  evalMatrix: RunnerMatrixInput | undefined,
+): Map<string, string[]> {
+  let resolvedAxes = new Map<string, string[]>()
+
+  for (const layerInput of [
+    evalMatrix,
+    entry.matrix?.evalMatrix,
+    entry.task?.matrix?.evalMatrix,
+  ]) {
+    resolvedAxes = applyLayer(resolvedAxes, normalizeLayerInputToAxes(layerInput))
+  }
+
+  return resolvedAxes
+}
+
+function createResolvedRunAxes(
+  entry: CollectedEvalEntry,
+  runMatrix: RunnerMatrixInput | undefined,
+): Map<string, string[]> {
+  let resolvedAxes = new Map<string, string[]>()
+
+  for (const layerInput of [
+    runMatrix,
+    entry.matrix?.runMatrix,
+    entry.task?.matrix?.runMatrix,
+  ]) {
+    resolvedAxes = applyLayer(resolvedAxes, normalizeLayerInputToAxes(layerInput))
+  }
+
+  return resolvedAxes
+}
+
+function createScheduledTaskMatrix(
+  runMatrix: RunnerMatrixSelection,
+  evalMatrix: RunnerMatrixSelection,
+): ScheduledTaskMatrix {
+  return {
+    eval: cloneMatrixSelection(evalMatrix),
+    meta: {
+      evalRowId: createStableRowId(evalMatrix),
+      runRowId: createStableRowId(runMatrix),
+    },
+    run: cloneMatrixSelection(runMatrix),
+  }
+}
+
+function createStableRowId(matrix: RunnerMatrixSelection): string {
+  const segments = Object.entries(matrix)
+    .sort(([leftAxis], [rightAxis]) => leftAxis.localeCompare(rightAxis))
+    .map(([axis, value]) => `${encodeTaskIdSegment(axis)}=${encodeTaskIdSegment(value)}`)
+
+  if (segments.length === 0) {
+    return 'default'
+  }
+
+  return segments.join('&')
+}
+
+function createTaskId(entryId: string, inferenceExecutorId: string, runRowId: string, evalRowId: string): string {
+  const encodedEntryId = encodeTaskIdSegment(entryId)
+  const encodedProviderId = encodeTaskIdSegment(inferenceExecutorId)
+
+  return [
+    encodedEntryId,
+    encodedProviderId,
+    `run=${encodeTaskIdSegment(runRowId)}`,
+    `eval=${encodeTaskIdSegment(evalRowId)}`,
+  ].join('::')
+}
+
+function dedupeAxisValues(values: readonly MatrixValue[]): string[] {
+  return Array.from(new Set(values.map(stringifyMatrixValue)))
+}
+
+function encodeTaskIdSegment(value: string): string {
+  return encodeURIComponent(value)
+}
+
+function expandAxesToRows(axes: ReadonlyMap<string, readonly string[]>): RunnerMatrixSelection[] {
+  if (axes.size === 0) {
+    return [{}]
+  }
+
+  const dimensions = Array.from(axes.entries())
+
+  let selections: RunnerMatrixSelection[] = [{}]
+
+  for (const [axis, values] of dimensions) {
+    if (values.length === 0) {
+      return []
+    }
+
+    const nextSelections: RunnerMatrixSelection[] = []
+
+    for (const selection of selections) {
+      for (const value of values) {
+        nextSelections.push({
+          ...selection,
+          [axis]: value,
+        })
+      }
+    }
+
+    selections = nextSelections
+  }
+
+  return selections
+}
+
+function isMatrixLayer(matrix: RunnerMatrixInput): matrix is MatrixLayer {
+  const matrixKeys = Object.keys(matrix)
+  return (
+    matrixKeys.length > 0
+    && matrixKeys.every(key => matrixLayerKeys.has(key))
+  )
+}
+
+function normalizeLayerInputToAxes(matrix: RunnerMatrixInput | undefined): MatrixLayer | undefined {
+  if (matrix == null) {
+    return undefined
+  }
+
+  assertNonAmbiguousMatrixDefinition(matrix)
+
+  if (isMatrixLayer(matrix)) {
+    return matrix
+  }
+
+  return {
+    extend: matrix,
+  }
+}
+
+function stringifyMatrixValue(value: MatrixValue): string {
+  return String(value)
 }

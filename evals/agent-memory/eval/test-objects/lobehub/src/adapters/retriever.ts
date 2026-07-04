@@ -47,16 +47,16 @@ interface LobeHubMemoryRecord {
   id?: string
   layer?: string
   memory?: string | {
-    details?: string | null
-    summary?: string | null
-    title?: string | null
+    details?: null | string
+    summary?: null | string
+    title?: null | string
   }
   score?: number
   sourceIds?: string[]
 }
 
 interface LobeHubRetrievedContextResponse {
-  [layer: string]: unknown[] | undefined
+  [layer: string]: undefined | unknown[]
 }
 
 interface LobeHubRetrieveResponse {
@@ -68,112 +68,6 @@ interface LobeHubRetrieveResponse {
   }
   items?: LobeHubMemoryRecord[]
   retrievedContext?: LobeHubRetrievedContextResponse
-}
-
-async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
-  let lastErrorMessage = 'Unknown fetch error'
-  // NOTICE:
-  // Local LobeHub dev benchmark calls can occasionally hit undici header
-  // timeouts while the backend is still healthy. Retrying the whole retrieval
-  // request keeps long LoCoMo runs from failing after a single slow case.
-  // Removal condition: the benchmark endpoint supports server-side job
-  // polling or the caller gets first-class retry controls.
-  const fetchOnce = withRetry(async () => {
-    const response = await fetch(url, init)
-
-    if (response.ok || response.status < 500) {
-      return response
-    }
-
-    lastErrorMessage = `${response.status} ${response.statusText}`
-    throw new Error(`lobehub retrieve returned retryable status: ${lastErrorMessage}`)
-  }, {
-    onError(error) {
-      lastErrorMessage = errorMessageFrom(error) ?? lastErrorMessage
-    },
-    retry: 2,
-    retryDelay: 1000,
-    retryDelayFactor: 2,
-    retryDelayMax: 3000,
-  })
-
-  try {
-    return await fetchOnce()
-  }
-  catch (error) {
-    throw new Error(`lobehub retrieve failed after retry: ${errorMessageFrom(error) ?? lastErrorMessage}`)
-  }
-}
-
-/**
- * Parses comma-separated header pairs.
- *
- * Before:
- * - "Authorization=Bearer token,X-Benchmark=locomo"
- *
- * After:
- * - { Authorization: "Bearer token", "X-Benchmark": "locomo" }
- */
-function parseHeaderPairs(value?: string): Record<string, string> {
-  return value
-    ?.split(',')
-    .filter(Boolean)
-    .reduce<Record<string, string>>((headers, pair) => {
-      const [key, ...valueParts] = pair.split('=')
-      const headerName = key?.trim()
-      const headerValue = valueParts.join('=').trim()
-
-      if (headerName && headerValue) {
-        headers[headerName] = headerValue
-      }
-
-      return headers
-    }, {}) ?? {}
-}
-
-function formatMemoryRecord(item: LobeHubMemoryRecord): string {
-  if (typeof item.memory === 'string')
-    return item.memory
-
-  const parts = [
-    item.layer ? `Layer: ${item.layer}` : undefined,
-    item.memory?.title ? `Title: ${item.memory.title}` : undefined,
-    item.memory?.summary ? `Summary: ${item.memory.summary}` : undefined,
-    item.memory?.details ? `Details: ${item.memory.details}` : undefined,
-  ]
-
-  return parts.filter((part): part is string => Boolean(part)).join('\n')
-}
-
-function countRetrievedLayers(retrievedContext: LobeHubRetrievedContextResponse | undefined): Record<string, number> | undefined {
-  if (retrievedContext == null) {
-    return undefined
-  }
-
-  return Object.fromEntries(
-    Object.entries(retrievedContext).map(([layer, items]) => [
-      layer,
-      Array.isArray(items) ? items.length : 0,
-    ]),
-  )
-}
-
-function sumLayerCounts(counts: Record<string, number> | undefined): number | undefined {
-  if (counts == null) {
-    return undefined
-  }
-
-  return Object.values(counts).reduce((sum, count) => sum + count, 0)
-}
-
-function getContextIds(items: LobeHubMemoryRecord[]): string[] {
-  return items.flatMap((item) => {
-    if (item.sourceIds != null && item.sourceIds.length > 0) {
-      return item.sourceIds
-    }
-
-    return item.id == null ? [] : [item.id]
-  })
 }
 
 /**
@@ -247,4 +141,110 @@ export function createLobeHubRetrieverAdapter(options: LobeHubRetrieverAdapterOp
       }
     },
   }
+}
+
+function countRetrievedLayers(retrievedContext: LobeHubRetrievedContextResponse | undefined): Record<string, number> | undefined {
+  if (retrievedContext == null) {
+    return undefined
+  }
+
+  return Object.fromEntries(
+    Object.entries(retrievedContext).map(([layer, items]) => [
+      layer,
+      Array.isArray(items) ? items.length : 0,
+    ]),
+  )
+}
+
+async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+  let lastErrorMessage = 'Unknown fetch error'
+  // NOTICE:
+  // Local LobeHub dev benchmark calls can occasionally hit undici header
+  // timeouts while the backend is still healthy. Retrying the whole retrieval
+  // request keeps long LoCoMo runs from failing after a single slow case.
+  // Removal condition: the benchmark endpoint supports server-side job
+  // polling or the caller gets first-class retry controls.
+  const fetchOnce = withRetry(async () => {
+    const response = await fetch(url, init)
+
+    if (response.ok || response.status < 500) {
+      return response
+    }
+
+    lastErrorMessage = `${response.status} ${response.statusText}`
+    throw new Error(`lobehub retrieve returned retryable status: ${lastErrorMessage}`)
+  }, {
+    onError(error) {
+      lastErrorMessage = errorMessageFrom(error) ?? lastErrorMessage
+    },
+    retry: 2,
+    retryDelay: 1000,
+    retryDelayFactor: 2,
+    retryDelayMax: 3000,
+  })
+
+  try {
+    return await fetchOnce()
+  }
+  catch (error) {
+    throw new Error(`lobehub retrieve failed after retry: ${errorMessageFrom(error) ?? lastErrorMessage}`)
+  }
+}
+
+function formatMemoryRecord(item: LobeHubMemoryRecord): string {
+  if (typeof item.memory === 'string')
+    return item.memory
+
+  const parts = [
+    item.layer ? `Layer: ${item.layer}` : undefined,
+    item.memory?.title ? `Title: ${item.memory.title}` : undefined,
+    item.memory?.summary ? `Summary: ${item.memory.summary}` : undefined,
+    item.memory?.details ? `Details: ${item.memory.details}` : undefined,
+  ]
+
+  return parts.filter((part): part is string => Boolean(part)).join('\n')
+}
+
+function getContextIds(items: LobeHubMemoryRecord[]): string[] {
+  return items.flatMap((item) => {
+    if (item.sourceIds != null && item.sourceIds.length > 0) {
+      return item.sourceIds
+    }
+
+    return item.id == null ? [] : [item.id]
+  })
+}
+
+/**
+ * Parses comma-separated header pairs.
+ *
+ * Before:
+ * - "Authorization=Bearer token,X-Benchmark=locomo"
+ *
+ * After:
+ * - { Authorization: "Bearer token", "X-Benchmark": "locomo" }
+ */
+function parseHeaderPairs(value?: string): Record<string, string> {
+  return value
+    ?.split(',')
+    .filter(Boolean)
+    .reduce<Record<string, string>>((headers, pair) => {
+      const [key, ...valueParts] = pair.split('=')
+      const headerName = key?.trim()
+      const headerValue = valueParts.join('=').trim()
+
+      if (headerName && headerValue) {
+        headers[headerName] = headerValue
+      }
+
+      return headers
+    }, {}) ?? {}
+}
+
+function sumLayerCounts(counts: Record<string, number> | undefined): number | undefined {
+  if (counts == null) {
+    return undefined
+  }
+
+  return Object.values(counts).reduce((sum, count) => sum + count, 0)
 }

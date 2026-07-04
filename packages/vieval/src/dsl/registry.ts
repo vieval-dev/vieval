@@ -3,24 +3,11 @@ import type { EvalDefinition } from '../config'
 import process from 'node:process'
 
 interface EvalDefinitionRegistryStore {
-  activeModuleHref: string | null
+  activeModuleHref: null | string
   registeredDefinitionsByModule: Map<string, EvalDefinition[]>
 }
 
 const registryStoreSymbol = Symbol.for('vieval.dsl.registry.store')
-
-function getRegistryStore(): EvalDefinitionRegistryStore {
-  const processWithStore = process as NodeJS.Process & {
-    [registryStoreSymbol]?: EvalDefinitionRegistryStore
-  }
-
-  processWithStore[registryStoreSymbol] ??= {
-    activeModuleHref: null,
-    registeredDefinitionsByModule: new Map<string, EvalDefinition[]>(),
-  }
-
-  return processWithStore[registryStoreSymbol]
-}
 
 /**
  * Starts module-scoped eval registration collection.
@@ -28,6 +15,16 @@ function getRegistryStore(): EvalDefinitionRegistryStore {
 export function beginModuleRegistration(moduleHref: string): void {
   const store = getRegistryStore()
   store.activeModuleHref = moduleHref
+}
+
+/**
+ * Consumes registered definitions for one module and clears stored state.
+ */
+export function consumeModuleRegistrations(moduleHref: string): EvalDefinition[] {
+  const store = getRegistryStore()
+  const definitions = store.registeredDefinitionsByModule.get(moduleHref) ?? []
+  store.registeredDefinitionsByModule.delete(moduleHref)
+  return definitions
 }
 
 /**
@@ -53,12 +50,15 @@ export function registerEvalDefinition(definition: EvalDefinition): void {
   store.registeredDefinitionsByModule.set(store.activeModuleHref, existing)
 }
 
-/**
- * Consumes registered definitions for one module and clears stored state.
- */
-export function consumeModuleRegistrations(moduleHref: string): EvalDefinition[] {
-  const store = getRegistryStore()
-  const definitions = store.registeredDefinitionsByModule.get(moduleHref) ?? []
-  store.registeredDefinitionsByModule.delete(moduleHref)
-  return definitions
+function getRegistryStore(): EvalDefinitionRegistryStore {
+  const processWithStore = process as NodeJS.Process & {
+    [registryStoreSymbol]?: EvalDefinitionRegistryStore
+  }
+
+  processWithStore[registryStoreSymbol] ??= {
+    activeModuleHref: null,
+    registeredDefinitionsByModule: new Map<string, EvalDefinition[]>(),
+  }
+
+  return processWithStore[registryStoreSymbol]
 }

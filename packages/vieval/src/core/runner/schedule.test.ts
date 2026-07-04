@@ -18,25 +18,18 @@ function createEntry(
   }
 }
 
-function createTask(definition: Partial<TaskDefinition> = {}): TaskDefinition {
+function createExpectedMatrix(
+  runMatrix: Record<string, string>,
+  evalMatrix: Record<string, string>,
+) {
   return {
-    id: definition.id ?? 'task',
-    run: definition.run ?? (() => ({ scores: [] })),
-    ...definition,
+    eval: evalMatrix,
+    meta: {
+      evalRowId: createRowIdSegment(evalMatrix),
+      runRowId: createRowIdSegment(runMatrix),
+    },
+    run: runMatrix,
   }
-}
-
-function encodeSegment(value: string): string {
-  return encodeURIComponent(value)
-}
-
-function createRowIdSegment(matrix: Record<string, string>): string {
-  const normalized = Object.entries(matrix)
-    .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
-    .map(([axis, value]) => `${encodeSegment(axis)}=${encodeSegment(value)}`)
-    .join('&')
-
-  return normalized.length > 0 ? normalized : 'default'
 }
 
 function createExpectedTaskId(
@@ -53,18 +46,25 @@ function createExpectedTaskId(
   ].join('::')
 }
 
-function createExpectedMatrix(
-  runMatrix: Record<string, string>,
-  evalMatrix: Record<string, string>,
-) {
+function createRowIdSegment(matrix: Record<string, string>): string {
+  const normalized = Object.entries(matrix)
+    .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+    .map(([axis, value]) => `${encodeSegment(axis)}=${encodeSegment(value)}`)
+    .join('&')
+
+  return normalized.length > 0 ? normalized : 'default'
+}
+
+function createTask(definition: Partial<TaskDefinition> = {}): TaskDefinition {
   return {
-    eval: evalMatrix,
-    meta: {
-      evalRowId: createRowIdSegment(evalMatrix),
-      runRowId: createRowIdSegment(runMatrix),
-    },
-    run: runMatrix,
+    id: definition.id ?? 'task',
+    run: definition.run ?? (() => ({ scores: [] })),
+    ...definition,
   }
+}
+
+function encodeSegment(value: string): string {
+  return encodeURIComponent(value)
 }
 
 describe('createRunnerSchedule', () => {
@@ -73,14 +73,14 @@ describe('createRunnerSchedule', () => {
       entries: [
         createEntry('agent/chess-commentary/chess-commentary'),
       ],
-      runMatrix: {
-        difficulty: ['rapid', 'blitz'],
-        promptStyle: ['concise', 'verbose'],
-      },
       inferenceExecutors: [
         { id: 'openai:gpt-4.1-mini' },
         { id: 'openai:gpt-4.1' },
       ],
+      runMatrix: {
+        difficulty: ['rapid', 'blitz'],
+        promptStyle: ['concise', 'verbose'],
+      },
     })
 
     expect(schedule).toHaveLength(8)
@@ -165,14 +165,14 @@ describe('createRunnerSchedule', () => {
       {
         entry: createEntry('alpha'),
         id: createExpectedTaskId('alpha', 'inferenceExecutor-a', {}, {}),
-        matrix: createExpectedMatrix({}, {}),
         inferenceExecutor: { id: 'inferenceExecutor-a' },
+        matrix: createExpectedMatrix({}, {}),
       },
       {
         entry: createEntry('beta'),
         id: createExpectedTaskId('beta', 'inferenceExecutor-a', {}, {}),
-        matrix: createExpectedMatrix({}, {}),
         inferenceExecutor: { id: 'inferenceExecutor-a' },
+        matrix: createExpectedMatrix({}, {}),
       },
     ])
   })
@@ -180,10 +180,10 @@ describe('createRunnerSchedule', () => {
   it('isolates matrix objects between tasks', () => {
     const schedule = createRunnerSchedule({
       entries: [createEntry('alpha'), createEntry('beta')],
+      inferenceExecutors: [{ id: 'inferenceExecutor-a' }],
       runMatrix: {
         difficulty: ['rapid'],
       },
-      inferenceExecutors: [{ id: 'inferenceExecutor-a' }],
     })
 
     expect(schedule).toHaveLength(2)
@@ -214,14 +214,14 @@ describe('createRunnerSchedule', () => {
         createEntry('entry::alpha'),
         createEntry('entry'),
       ],
-      runMatrix: {
-        'axis::name': ['left::right', 'left'],
-        'axis': ['name=left', 'name'],
-      },
       inferenceExecutors: [
         { id: 'inferenceExecutor=value' },
         { id: 'inferenceExecutor' },
       ],
+      runMatrix: {
+        'axis': ['name=left', 'name'],
+        'axis::name': ['left::right', 'left'],
+      },
     })
 
     const taskIds = schedule.map(task => task.id)
@@ -458,13 +458,13 @@ describe('createRunnerSchedule', () => {
     const reversedSchedule = createRunnerSchedule({
       entries: [createEntry('alpha')],
       evalMatrix: {
-        rubric: ['strict'],
         promptStyle: ['concise'],
+        rubric: ['strict'],
       },
       inferenceExecutors: [{ id: 'inferenceExecutor-a' }],
       runMatrix: {
-        scenario: ['baseline'],
         model: ['gpt-4.1-mini'],
+        scenario: ['baseline'],
       },
     })
 

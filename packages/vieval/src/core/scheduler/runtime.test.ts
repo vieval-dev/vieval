@@ -20,12 +20,12 @@ describe('createSchedulerRuntime', () => {
     ].map(({ caseId, projectName }) =>
       runtime.runCase(
         {
-          experimentId: 'baseline',
-          scope: 'case',
-          workspaceId: 'ws',
-          projectName,
           attemptIndex: 0,
           caseId,
+          experimentId: 'baseline',
+          projectName,
+          scope: 'case',
+          workspaceId: 'ws',
         },
         async () => {
           started.push(caseId)
@@ -68,11 +68,11 @@ describe('createSchedulerRuntime', () => {
     const runs = [0, 1, 2, 3].map(index =>
       runtime.runCase(
         {
+          attemptIndex: 0,
+          caseId: `case-${index}`,
           experimentId: 'baseline',
           scope: 'case',
           workspaceId: 'ws',
-          attemptIndex: 0,
-          caseId: `case-${index}`,
         },
         async () => {
           active += 1
@@ -114,13 +114,13 @@ describe('createSchedulerRuntime', () => {
     ].map(({ experimentId, runId }) =>
       runtime.runCase(
         {
-          experimentId,
-          scope: 'case',
-          workspaceId: 'ws',
-          projectName: 'project-a',
-          taskId: 'task-a',
           attemptIndex: 0,
           caseId: runId,
+          experimentId,
+          projectName: 'project-a',
+          scope: 'case',
+          taskId: 'task-a',
+          workspaceId: 'ws',
         },
         async () => {
           started.push(runId)
@@ -183,11 +183,11 @@ describe('createSchedulerRuntime', () => {
 
     await runtime.runCase(
       {
+        attemptIndex: 0,
+        caseId: 'case-1',
         experimentId: 'baseline',
         scope: 'case',
         workspaceId: 'ws',
-        attemptIndex: 0,
-        caseId: 'case-1',
       },
       async () => {
         events.push('work')
@@ -234,11 +234,11 @@ describe('createSchedulerRuntime', () => {
     await expect(
       runtime.runCase(
         {
+          attemptIndex: 0,
+          caseId: 'case-1',
           experimentId: 'baseline',
           scope: 'case',
           workspaceId: 'ws',
-          attemptIndex: 0,
-          caseId: 'case-1',
         },
         async () => {
           events.push('work')
@@ -292,11 +292,11 @@ describe('createSchedulerRuntime', () => {
     await expect(
       runtime.runCase(
         {
+          attemptIndex: 0,
+          caseId: 'case-1',
           experimentId: 'baseline',
           scope: 'case',
           workspaceId: 'ws',
-          attemptIndex: 0,
-          caseId: 'case-1',
         },
         async () => {
           events.push('work')
@@ -344,11 +344,11 @@ describe('createSchedulerRuntime', () => {
     await expect(
       runtime.runCase(
         {
+          attemptIndex: 0,
+          caseId: 'case-1',
           experimentId: 'baseline',
           scope: 'case',
           workspaceId: 'ws',
-          attemptIndex: 0,
-          caseId: 'case-1',
         },
         async () => {
           events.push('work')
@@ -397,11 +397,11 @@ describe('createSchedulerRuntime', () => {
     await expect(
       runtime.runCase(
         {
+          attemptIndex: 0,
+          caseId: 'case-1',
           experimentId: 'baseline',
           scope: 'case',
           workspaceId: 'ws',
-          attemptIndex: 0,
-          caseId: 'case-1',
         },
         async () => {
           events.push('work')
@@ -451,6 +451,26 @@ describe('createSchedulerRuntime', () => {
   })
 })
 
+async function drainMappedReleases(
+  releases: Map<string, () => void>,
+  runCompletion: Promise<unknown>,
+): Promise<void> {
+  for (;;) {
+    const pendingReleases = [...releases.values()]
+    releases.clear()
+    pendingReleases.forEach(resolve => resolve())
+
+    const isComplete = await Promise.race([
+      runCompletion.then(() => true),
+      new Promise<false>(resolve => setTimeout(resolve, 0, false)),
+    ])
+
+    if (isComplete) {
+      return
+    }
+  }
+}
+
 async function drainQueuedReleases(
   releases: Array<() => void>,
   runCompletion: Promise<unknown>,
@@ -472,25 +492,5 @@ async function drainQueuedReleases(
 async function waitForStartedCount(started: string[], count: number): Promise<void> {
   while (started.length < count) {
     await new Promise(resolve => setTimeout(resolve, 0))
-  }
-}
-
-async function drainMappedReleases(
-  releases: Map<string, () => void>,
-  runCompletion: Promise<unknown>,
-): Promise<void> {
-  for (;;) {
-    const pendingReleases = [...releases.values()]
-    releases.clear()
-    pendingReleases.forEach(resolve => resolve())
-
-    const isComplete = await Promise.race([
-      runCompletion.then(() => true),
-      new Promise<false>(resolve => setTimeout(resolve, 0, false)),
-    ])
-
-    if (isComplete) {
-      return
-    }
   }
 }

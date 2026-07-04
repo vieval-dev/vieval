@@ -44,24 +44,6 @@ const evalRunHelpText = `
     --json       Print machine-readable JSON output
 `
 
-function normalizeCliArgv(argv: readonly string[]): string[] {
-  const normalizedArgv = argv[0] === '--'
-    ? argv.slice(1)
-    : [...argv]
-
-  return normalizedArgv[0] === 'run'
-    ? normalizedArgv.slice(1)
-    : normalizedArgv
-}
-
-function normalizeProjectNames(projectNames: string | string[] | undefined): string[] {
-  if (typeof projectNames === 'string') {
-    return [projectNames]
-  }
-
-  return projectNames ?? []
-}
-
 /**
  * Parses `vieval run` CLI arguments into one normalized execution payload.
  *
@@ -78,9 +60,20 @@ function normalizeProjectNames(projectNames: string | string[] | undefined): str
 export function parseCliArguments(argv: readonly string[]): ParsedCliArguments {
   const cli = meow(evalRunHelpText, {
     argv: normalizeCliArgv(argv),
-    importMeta: import.meta,
     flags: {
+      attempt: {
+        type: 'string',
+      },
+      attemptConcurrency: {
+        type: 'number',
+      },
+      caseConcurrency: {
+        type: 'number',
+      },
       config: {
+        type: 'string',
+      },
+      experiment: {
         type: 'string',
       },
       json: {
@@ -91,34 +84,23 @@ export function parseCliArguments(argv: readonly string[]): ParsedCliArguments {
         isMultiple: true,
         type: 'string',
       },
-      workspace: {
-        type: 'string',
-      },
-      experiment: {
-        type: 'string',
-      },
-      attempt: {
-        type: 'string',
-      },
-      workspaceConcurrency: {
-        type: 'number',
-      },
       projectConcurrency: {
-        type: 'number',
-      },
-      taskConcurrency: {
-        type: 'number',
-      },
-      attemptConcurrency: {
-        type: 'number',
-      },
-      caseConcurrency: {
         type: 'number',
       },
       reportOut: {
         type: 'string',
       },
+      taskConcurrency: {
+        type: 'number',
+      },
+      workspace: {
+        type: 'string',
+      },
+      workspaceConcurrency: {
+        type: 'number',
+      },
     },
+    importMeta: import.meta,
   })
 
   return {
@@ -201,4 +183,22 @@ export async function runEvalRunCli(argv: readonly string[]): Promise<void> {
     process.stderr.write(`[${packageJSON.name}] ${errorMessage}\n`)
     process.exitCode = 1
   }
+}
+
+function normalizeCliArgv(argv: readonly string[]): string[] {
+  const normalizedArgv = argv[0] === '--'
+    ? argv.slice(1)
+    : [...argv]
+
+  return normalizedArgv[0] === 'run'
+    ? normalizedArgv.slice(1)
+    : normalizedArgv
+}
+
+function normalizeProjectNames(projectNames: string | string[] | undefined): string[] {
+  if (typeof projectNames === 'string') {
+    return [projectNames]
+  }
+
+  return projectNames ?? []
 }

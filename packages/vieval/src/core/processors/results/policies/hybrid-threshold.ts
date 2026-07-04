@@ -1,20 +1,6 @@
 import type { AggregatedRunResults } from '../../../runner/aggregate'
 
 /**
- * Violation emitted when result policies fail.
- */
-export interface ResultPolicyViolation {
-  /**
-   * Stable policy id.
-   */
-  policyId: string
-  /**
-   * Human-readable violation reason.
-   */
-  reason: string
-}
-
-/**
  * Configures hybrid-threshold policy behavior.
  */
 export interface HybridThresholdPolicyOptions {
@@ -30,6 +16,20 @@ export interface HybridThresholdPolicyOptions {
    * @default 0.6
    */
   minProviderHybridScore?: number
+}
+
+/**
+ * Violation emitted when result policies fail.
+ */
+export interface ResultPolicyViolation {
+  /**
+   * Stable policy id.
+   */
+  policyId: string
+  /**
+   * Human-readable violation reason.
+   */
+  reason: string
 }
 
 /**

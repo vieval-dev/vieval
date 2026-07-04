@@ -31,12 +31,42 @@ export interface ToolCallContainer {
   toolCalls?: readonly ToolCall[]
 }
 
-function toKeywordArray(keywords: string | readonly string[]): readonly string[] {
-  if (typeof keywords === 'string') {
-    return [keywords]
-  }
-
-  return keywords
+interface VievalCustomMatchers {
+  /**
+   * Asserts that text excludes forbidden keywords.
+   *
+   * Example:
+   * `expect('calm answer').toMustExclude(['bestmove'])`
+   */
+  toMustExclude: (keywords: readonly string[] | string, options?: KeywordMatcherOptions) => void
+  /**
+   * Asserts that text includes required keywords.
+   *
+   * Example:
+   * `expect('calm answer').toMustInclude(['calm'])`
+   */
+  toMustInclude: (keywords: readonly string[] | string, options?: KeywordMatcherOptions) => void
+  /**
+   * Asserts structured output satisfies a validator.
+   *
+   * Example:
+   * `expect(value).toSatisfyStructuredOutput(isMyShape)`
+   */
+  toSatisfyStructuredOutput: <TValue>(validator: (value: unknown) => value is TValue) => void
+  /**
+   * Asserts selected tool-call args satisfy validator.
+   *
+   * Example:
+   * `expect({ toolCalls }).toSatisfyToolCallArgs('builtIn_sparkCommand', isSparkArgs)`
+   */
+  toSatisfyToolCallArgs: (toolName: string, validator: (args: unknown) => boolean) => void
+  /**
+   * Asserts rubric score is greater than a threshold.
+   *
+   * Example:
+   * `expect({ score: 0.91 }).toScoreRubricGreaterThan(0.8)`
+   */
+  toScoreRubricGreaterThan: (threshold: number) => void
 }
 
 /**
@@ -57,7 +87,7 @@ export function installVievalExpectMatchers(): void {
   const expect = getRuntimeExpect()
 
   expect.extend({
-    toMustExclude(received: unknown, keywords: string | readonly string[], options: KeywordMatcherOptions = {}) {
+    toMustExclude(received: unknown, keywords: readonly string[] | string, options: KeywordMatcherOptions = {}) {
       const keywordList = toKeywordArray(keywords)
 
       if (typeof received !== 'string') {
@@ -86,7 +116,7 @@ export function installVievalExpectMatchers(): void {
       }
     },
 
-    toMustInclude(received: unknown, keywords: string | readonly string[], options: KeywordMatcherOptions = {}) {
+    toMustInclude(received: unknown, keywords: readonly string[] | string, options: KeywordMatcherOptions = {}) {
       const keywordList = toKeywordArray(keywords)
 
       if (typeof received !== 'string') {
@@ -116,32 +146,6 @@ export function installVievalExpectMatchers(): void {
       }
     },
 
-    toScoreRubricGreaterThan(received: unknown, threshold: number) {
-      const score = typeof received === 'number'
-        ? received
-        : (received as RubricJudgeResult | null)?.score
-
-      if (typeof score !== 'number') {
-        return {
-          message: () => 'Expected received value to be a number or RubricJudgeResult.',
-          pass: false,
-        }
-      }
-
-      const pass = score > threshold
-
-      return {
-        message: () => {
-          if (pass) {
-            return `Expected rubric score ${score} to be less than or equal to ${threshold}.`
-          }
-
-          return `Expected rubric score ${score} to be greater than ${threshold}.`
-        },
-        pass,
-      }
-    },
-
     toSatisfyStructuredOutput<T>(received: unknown, validator: (value: unknown) => value is T) {
       const pass = validator(received)
 
@@ -158,7 +162,7 @@ export function installVievalExpectMatchers(): void {
       toolName: string,
       validator: (args: unknown) => boolean,
     ) {
-      const toolCalls = (received as ToolCallContainer | null)?.toolCalls
+      const toolCalls = (received as null | ToolCallContainer)?.toolCalls
 
       if (toolCalls == null) {
         return {
@@ -184,51 +188,47 @@ export function installVievalExpectMatchers(): void {
         pass,
       }
     },
+
+    toScoreRubricGreaterThan(received: unknown, threshold: number) {
+      const score = typeof received === 'number'
+        ? received
+        : (received as null | RubricJudgeResult)?.score
+
+      if (typeof score !== 'number') {
+        return {
+          message: () => 'Expected received value to be a number or RubricJudgeResult.',
+          pass: false,
+        }
+      }
+
+      const pass = score > threshold
+
+      return {
+        message: () => {
+          if (pass) {
+            return `Expected rubric score ${score} to be less than or equal to ${threshold}.`
+          }
+
+          return `Expected rubric score ${score} to be greater than ${threshold}.`
+        },
+        pass,
+      }
+    },
   })
 }
 
-interface VievalCustomMatchers {
-  /**
-   * Asserts that text includes required keywords.
-   *
-   * Example:
-   * `expect('calm answer').toMustInclude(['calm'])`
-   */
-  toMustInclude: (keywords: string | readonly string[], options?: KeywordMatcherOptions) => void
-  /**
-   * Asserts that text excludes forbidden keywords.
-   *
-   * Example:
-   * `expect('calm answer').toMustExclude(['bestmove'])`
-   */
-  toMustExclude: (keywords: string | readonly string[], options?: KeywordMatcherOptions) => void
-  /**
-   * Asserts rubric score is greater than a threshold.
-   *
-   * Example:
-   * `expect({ score: 0.91 }).toScoreRubricGreaterThan(0.8)`
-   */
-  toScoreRubricGreaterThan: (threshold: number) => void
-  /**
-   * Asserts structured output satisfies a validator.
-   *
-   * Example:
-   * `expect(value).toSatisfyStructuredOutput(isMyShape)`
-   */
-  toSatisfyStructuredOutput: <TValue>(validator: (value: unknown) => value is TValue) => void
-  /**
-   * Asserts selected tool-call args satisfy validator.
-   *
-   * Example:
-   * `expect({ toolCalls }).toSatisfyToolCallArgs('builtIn_sparkCommand', isSparkArgs)`
-   */
-  toSatisfyToolCallArgs: (toolName: string, validator: (args: unknown) => boolean) => void
+function toKeywordArray(keywords: readonly string[] | string): readonly string[] {
+  if (typeof keywords === 'string') {
+    return [keywords]
+  }
+
+  return keywords
 }
 
 /* eslint-disable unused-imports/no-unused-vars */
 declare module '@vitest/expect' {
-  interface Matchers<T = any> extends VievalCustomMatchers {}
   interface Assertion<T = any> extends VievalCustomMatchers {}
+  interface Matchers<T = any> extends VievalCustomMatchers {}
 }
 
 declare module 'vitest' {

@@ -10,13 +10,13 @@ import { sleep as defaultSleep, errorMessageFrom, errorNameFrom } from '@moeru/s
  */
 export interface RetryPolicy {
   /**
-   * Maximum number of total attempts, including the first try.
-   */
-  maxAttempts: number
-  /**
    * Returns the wait time for a retry attempt.
    */
   delayMs: (attempt: number) => number
+  /**
+   * Maximum number of total attempts, including the first try.
+   */
+  maxAttempts: number
   /**
    * Determines whether an error can be retried safely.
    */
@@ -40,17 +40,17 @@ export interface RetryPolicy {
  */
 export interface RetryPolicyOptions {
   /**
-   * Maximum total attempts, including the first request.
-   *
-   * @default 3
-   */
-  maxAttempts?: number
-  /**
    * Computes the delay for a retry attempt.
    *
    * The attempt number starts at `1` for the first retry.
    */
   delayMs?: (attempt: number) => number
+  /**
+   * Maximum total attempts, including the first request.
+   *
+   * @default 3
+   */
+  maxAttempts?: number
   /**
    * Overrides the retry classifier.
    */
@@ -62,7 +62,7 @@ export interface RetryPolicyOptions {
 }
 
 const retryableStatusCodes = new Set([408, 425, 429, 500, 502, 503, 504])
-const retryableErrorNames = new Set(['TimeoutError', 'FetchError'])
+const retryableErrorNames = new Set(['FetchError', 'TimeoutError'])
 const retryableMessagePatterns = [
   /rate limit/i,
   /rate-limited/i,
@@ -80,28 +80,15 @@ const retryableMessagePatterns = [
   /timeout/i,
 ]
 
-function getStatusCode(error: unknown): number | undefined {
-  if (error == null || typeof error !== 'object') {
-    return undefined
-  }
+export function createRetryPolicy(options: RetryPolicyOptions = {}): RetryPolicy {
+  const maxAttempts = assertValidMaxAttempts(options.maxAttempts ?? 3)
 
-  const maybeStatusCode = (error as { statusCode?: unknown }).statusCode
-  if (typeof maybeStatusCode === 'number') {
-    return maybeStatusCode
+  return {
+    delayMs: options.delayMs ?? defaultDelayMs,
+    maxAttempts,
+    shouldRetry: options.shouldRetry ?? isRetriableProviderError,
+    sleep: options.sleep ?? defaultSleep,
   }
-
-  const maybeStatus = (error as { status?: unknown }).status
-  if (typeof maybeStatus === 'number') {
-    return maybeStatus
-  }
-
-  const response = (error as { response?: unknown }).response
-  if (response == null || typeof response !== 'object') {
-    return undefined
-  }
-
-  const responseStatus = (response as { status?: unknown }).status
-  return typeof responseStatus === 'number' ? responseStatus : undefined
 }
 
 /**
@@ -133,42 +120,6 @@ export function isRetriableProviderError(error: unknown): boolean {
   return retryableMessagePatterns.some(pattern => pattern.test(errorMessage))
 }
 
-function defaultDelayMs(attempt: number): number {
-  return 500 * 2 ** (attempt - 1)
-}
-
-/**
- * Creates a retry policy for provider work.
- *
- * Use when:
- * - you need a reusable retry runner for eval-time provider calls
- * - you want to keep retry behavior deterministic in tests
- *
- * Expects:
- * - callers to treat `maxAttempts` as total attempts, not retries
- *
- * Throws:
- * - `RangeError` when `maxAttempts` is not a finite integer greater than or equal to `1`
- */
-function assertValidMaxAttempts(value: number): number {
-  if (!Number.isFinite(value) || !Number.isInteger(value) || value < 1) {
-    throw new RangeError('maxAttempts must be a finite integer greater than or equal to 1.')
-  }
-
-  return value
-}
-
-export function createRetryPolicy(options: RetryPolicyOptions = {}): RetryPolicy {
-  const maxAttempts = assertValidMaxAttempts(options.maxAttempts ?? 3)
-
-  return {
-    maxAttempts,
-    delayMs: options.delayMs ?? defaultDelayMs,
-    shouldRetry: options.shouldRetry ?? isRetriableProviderError,
-    sleep: options.sleep ?? defaultSleep,
-  }
-}
-
 /**
  * Runs an operation with bounded retries.
  *
@@ -197,4 +148,53 @@ export async function runWithRetry<T>(operation: () => Promise<T>, policy: Retry
   }
 
   throw new Error('Retry loop exited without returning a value.')
+}
+
+/**
+ * Creates a retry policy for provider work.
+ *
+ * Use when:
+ * - you need a reusable retry runner for eval-time provider calls
+ * - you want to keep retry behavior deterministic in tests
+ *
+ * Expects:
+ * - callers to treat `maxAttempts` as total attempts, not retries
+ *
+ * Throws:
+ * - `RangeError` when `maxAttempts` is not a finite integer greater than or equal to `1`
+ */
+function assertValidMaxAttempts(value: number): number {
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value < 1) {
+    throw new RangeError('maxAttempts must be a finite integer greater than or equal to 1.')
+  }
+
+  return value
+}
+
+function defaultDelayMs(attempt: number): number {
+  return 500 * 2 ** (attempt - 1)
+}
+
+function getStatusCode(error: unknown): number | undefined {
+  if (error == null || typeof error !== 'object') {
+    return undefined
+  }
+
+  const maybeStatusCode = (error as { statusCode?: unknown }).statusCode
+  if (typeof maybeStatusCode === 'number') {
+    return maybeStatusCode
+  }
+
+  const maybeStatus = (error as { status?: unknown }).status
+  if (typeof maybeStatus === 'number') {
+    return maybeStatus
+  }
+
+  const response = (error as { response?: unknown }).response
+  if (response == null || typeof response !== 'object') {
+    return undefined
+  }
+
+  const responseStatus = (response as { status?: unknown }).status
+  return typeof responseStatus === 'number' ? responseStatus : undefined
 }

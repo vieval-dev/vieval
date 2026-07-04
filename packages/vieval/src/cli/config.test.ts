@@ -47,10 +47,10 @@ describe('loadVievalCliConfig', () => {
       JSON.stringify({
         projects: [
           {
+            exclude: ['**/ignore/**'],
+            include: ['**/*.eval.ts'],
             name: 'fixture-project',
             root: './nested',
-            include: ['**/*.eval.ts'],
-            exclude: ['**/ignore/**'],
           },
         ],
       }),

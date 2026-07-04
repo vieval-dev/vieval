@@ -9,11 +9,11 @@ describeTask('analysis', () => {
     const openai = openrouterFromRunContext(task.model())
 
     const agent = createEmotionAnalysisAgent({
+      model: openai.model,
       provider: createOpenAI({
         apiKey: openai.apiKey,
         baseURL: openai.baseURL,
       }),
-      model: openai.model,
     })
 
     const res = await agent.handle('I am feeling very happy today!')

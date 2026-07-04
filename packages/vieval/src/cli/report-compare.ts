@@ -16,26 +16,10 @@ export interface CompareMethodSummary {
 export interface CompareProjectSummary {
   caseCount: number
   distinctCaseCount: number
-  exactAverage: number | null
+  exactAverage: null | number
   executed: boolean
-  hybridAverage: number | null
+  hybridAverage: null | number
   name: string
-  runCount: number
-  taskCount: number
-}
-
-/**
- * Method-level compare row with coverage counts and weighted score averages.
- */
-export interface CompareSummaryRow {
-  caseCount: number
-  distinctCaseCount: number
-  exactAverage: number | null
-  hybridAverage: number | null
-  executedProjectCount: number
-  methodId: string
-  projectCount: number
-  projects: CompareProjectSummary[]
   runCount: number
   taskCount: number
 }
@@ -44,6 +28,22 @@ export interface CompareReportArtifact {
   benchmarkId: string
   methods: CompareSummaryRow[]
   reportPath: string
+}
+
+/**
+ * Method-level compare row with coverage counts and weighted score averages.
+ */
+export interface CompareSummaryRow {
+  caseCount: number
+  distinctCaseCount: number
+  exactAverage: null | number
+  executedProjectCount: number
+  hybridAverage: null | number
+  methodId: string
+  projectCount: number
+  projects: CompareProjectSummary[]
+  runCount: number
+  taskCount: number
 }
 
 /**
@@ -100,12 +100,21 @@ export function buildCompareReportArtifact(args: {
   }
 }
 
-function countCasesForProject(caseRecords: readonly CaseRecord[], projectName: string): number {
-  return caseRecords.filter(record => record.projectName === projectName).length
+/**
+ * Writes compare report artifact as JSON.
+ */
+export async function writeCompareReportArtifact(args: {
+  artifact: CompareReportArtifact
+  outputPath: string
+}): Promise<string> {
+  const outputPath = resolve(args.outputPath)
+  await mkdir(dirname(outputPath), { recursive: true })
+  await writeFile(outputPath, `${JSON.stringify(args.artifact, null, 2)}\n`, 'utf-8')
+  return outputPath
 }
 
-function countDistinctCasesForProject(caseRecords: readonly CaseRecord[], projectName: string): number {
-  return countDistinctCases(caseRecords.filter(record => record.projectName === projectName))
+function countCasesForProject(caseRecords: readonly CaseRecord[], projectName: string): number {
+  return caseRecords.filter(record => record.projectName === projectName).length
 }
 
 function countDistinctCases(caseRecords: readonly CaseRecord[]): number {
@@ -118,10 +127,14 @@ function countDistinctCases(caseRecords: readonly CaseRecord[]): number {
   return caseKeys.size
 }
 
+function countDistinctCasesForProject(caseRecords: readonly CaseRecord[], projectName: string): number {
+  return countDistinctCases(caseRecords.filter(record => record.projectName === projectName))
+}
+
 function createWeightedAverage(
   projects: readonly CompareProjectSummary[],
-  selectAverage: (project: CompareProjectSummary) => number | null,
-): number | null {
+  selectAverage: (project: CompareProjectSummary) => null | number,
+): null | number {
   let weightedScoreTotal = 0
   let weightTotal = 0
 
@@ -140,17 +153,4 @@ function createWeightedAverage(
   }
 
   return weightedScoreTotal / weightTotal
-}
-
-/**
- * Writes compare report artifact as JSON.
- */
-export async function writeCompareReportArtifact(args: {
-  artifact: CompareReportArtifact
-  outputPath: string
-}): Promise<string> {
-  const outputPath = resolve(args.outputPath)
-  await mkdir(dirname(outputPath), { recursive: true })
-  await writeFile(outputPath, `${JSON.stringify(args.artifact, null, 2)}\n`, 'utf-8')
-  return outputPath
 }

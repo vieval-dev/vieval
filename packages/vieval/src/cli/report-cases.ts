@@ -17,6 +17,14 @@ import { getCaseSelectorValue } from './report-selectors'
 
 export type ReportCasesFormat = 'json' | 'jsonl' | 'table'
 
+/** One grouped case summary produced by `vieval report cases --group-by`. */
+export interface ReportCasesGroupSummary {
+  /** Number of case records in this group. */
+  count: number
+  /** Score averages/sums/counts for this group. */
+  scores: ScoreSummary
+}
+
 /** Options for inspecting normalized `cases.jsonl` report artifacts. */
 export interface ReportCasesOptions {
   /** Output format for the command response. */
@@ -27,20 +35,12 @@ export interface ReportCasesOptions {
   where?: readonly string[]
 }
 
-/** One grouped case summary produced by `vieval report cases --group-by`. */
-export interface ReportCasesGroupSummary {
-  /** Number of case records in this group. */
-  count: number
-  /** Score averages/sums/counts for this group. */
-  scores: ScoreSummary
-}
-
 /** Structured output for case inspection and optional grouped summaries. */
 export interface ReportCasesOutput {
-  /** Filtered case records. */
-  records: CaseRecord[]
   /** Grouped summaries keyed by `<groupKey>=<groupValue>`, when requested. */
   groups?: Record<string, ReportCasesGroupSummary>
+  /** Filtered case records. */
+  records: CaseRecord[]
 }
 
 interface ParsedReportCasesCliArguments extends ReportCasesOptions {
@@ -58,6 +58,36 @@ const reportCasesHelpText = `
     --where        Equality filter "key=value"; repeatable
     --group-by     Case field, score name, or metric name used for grouped score summaries
 `
+
+/**
+ * Builds filtered case inspection output.
+ *
+ * Use when:
+ * - `vieval report cases` needs deterministic JSON/table output
+ * - tests need pure filtering and grouping behavior without process I/O
+ *
+ * Expects:
+ * - `where` filters use `key=value`
+ * - lookup keys may target direct case fields, score names, or metric names
+ *
+ * Returns:
+ * - filtered records plus grouped score summaries when `groupBy` is present
+ */
+export function buildReportCasesOutput(
+  records: readonly CaseRecord[],
+  options: ReportCasesOptions,
+): ReportCasesOutput {
+  const whereFilters = (options.where ?? []).map(parseSelector)
+  const filteredRecords = records.filter(record => matchesWhereFilters(record, whereFilters))
+  const groups = options.groupBy == null
+    ? undefined
+    : buildCaseGroups(filteredRecords, options.groupBy)
+
+  return {
+    groups,
+    records: [...filteredRecords],
+  }
+}
 
 /**
  * Reads normalized case records from one report run directory or report root.
@@ -99,36 +129,6 @@ export async function readCaseRecordsFromReport(reportPath: string): Promise<Cas
   }
 
   return records
-}
-
-/**
- * Builds filtered case inspection output.
- *
- * Use when:
- * - `vieval report cases` needs deterministic JSON/table output
- * - tests need pure filtering and grouping behavior without process I/O
- *
- * Expects:
- * - `where` filters use `key=value`
- * - lookup keys may target direct case fields, score names, or metric names
- *
- * Returns:
- * - filtered records plus grouped score summaries when `groupBy` is present
- */
-export function buildReportCasesOutput(
-  records: readonly CaseRecord[],
-  options: ReportCasesOptions,
-): ReportCasesOutput {
-  const whereFilters = (options.where ?? []).map(parseSelector)
-  const filteredRecords = records.filter(record => matchesWhereFilters(record, whereFilters))
-  const groups = options.groupBy == null
-    ? undefined
-    : buildCaseGroups(filteredRecords, options.groupBy)
-
-  return {
-    groups,
-    records: [...filteredRecords],
-  }
 }
 
 /**
@@ -175,6 +175,78 @@ export async function runReportCasesCli(argv: readonly string[]): Promise<void> 
   }
 }
 
+function addScores(summary: ScoreSummary, scores: Record<string, number>): void {
+  for (const [scoreName, value] of Object.entries(scores)) {
+    summary[scoreName] ??= { average: 0, count: 0, sum: 0 }
+    summary[scoreName].count += 1
+    summary[scoreName].sum += value
+  }
+}
+
+function buildCaseGroups(records: readonly CaseRecord[], groupBy: string): Record<string, ReportCasesGroupSummary> {
+  const groups: Record<string, ReportCasesGroupSummary> = {}
+
+  for (const record of records) {
+    const resolved = getCaseSelectorValue(record, groupBy)
+    if (!resolved.exists) {
+      continue
+    }
+
+    const groupKey = `${groupBy}=${String(resolved.value)}`
+    groups[groupKey] ??= { count: 0, scores: {} }
+    groups[groupKey].count += 1
+    addScores(groups[groupKey].scores, record.scores)
+  }
+
+  return Object.fromEntries(
+    Object.entries(groups)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([groupKey, group]) => [groupKey, {
+        count: group.count,
+        scores: finalizeScores(group.scores),
+      } satisfies ReportCasesGroupSummary]),
+  )
+}
+
+function finalizeScores(summary: ScoreSummary): ScoreSummary {
+  return Object.fromEntries(
+    Object.entries(summary)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([scoreName, bucket]) => [scoreName, {
+        average: bucket.count === 0 ? 0 : bucket.sum / bucket.count,
+        count: bucket.count,
+        sum: bucket.sum,
+      }]),
+  )
+}
+
+function formatCasesTable(output: ReportCasesOutput): string {
+  const lines = [
+    'CASES  vieval report',
+    `Case count ${output.records.length}`,
+  ]
+
+  if (output.groups != null) {
+    lines.push('Groups')
+    for (const [groupKey, group] of Object.entries(output.groups)) {
+      const scoreText = Object.entries(group.scores)
+        .map(([scoreName, bucket]) => `${scoreName}=${bucket.average.toFixed(3)}`)
+        .join(' ')
+      lines.push(`${groupKey}  count=${group.count}${scoreText.length > 0 ? ` ${scoreText}` : ''}`)
+    }
+  }
+
+  return lines.join('\n')
+}
+
+function matchesWhereFilters(record: CaseRecord, whereFilters: ReadonlyArray<{ key: string, value: string }>): boolean {
+  return whereFilters.every((parsed) => {
+    const resolved = getCaseSelectorValue(record, parsed.key)
+
+    return resolved.exists && String(resolved.value) === parsed.value
+  })
+}
+
 function normalizeCliArgv(argv: readonly string[]): string[] {
   const normalizedArgv = argv[0] === '--'
     ? argv.slice(1)
@@ -189,6 +261,19 @@ function normalizeCliArgv(argv: readonly string[]): string[] {
   }
 
   return normalizedArgv
+}
+
+function normalizeReportCasesFormat(value: string): ReportCasesFormat {
+  const normalized = value.toLowerCase()
+  if (normalized === 'json') {
+    return 'json'
+  }
+
+  if (normalized === 'jsonl') {
+    return 'jsonl'
+  }
+
+  return 'table'
 }
 
 function parseReportCasesCliArguments(argv: readonly string[]): ParsedReportCasesCliArguments {
@@ -223,17 +308,16 @@ function parseReportCasesCliArguments(argv: readonly string[]): ParsedReportCase
   }
 }
 
-function normalizeReportCasesFormat(value: string): ReportCasesFormat {
-  const normalized = value.toLowerCase()
-  if (normalized === 'json') {
-    return 'json'
+function parseSelector(selector: string): { key: string, value: string } {
+  const separatorIndex = selector.indexOf('=')
+  if (separatorIndex <= 0 || separatorIndex === selector.length - 1) {
+    throw new Error(`Invalid selector "${selector}". Expected "key=value".`)
   }
 
-  if (normalized === 'jsonl') {
-    return 'jsonl'
+  return {
+    key: selector.slice(0, separatorIndex).trim(),
+    value: selector.slice(separatorIndex + 1).trim(),
   }
-
-  return 'table'
 }
 
 async function resolveCaseRecordPaths(reportPath: string): Promise<string[]> {
@@ -254,88 +338,4 @@ async function resolveCaseRecordPaths(reportPath: string): Promise<string[]> {
   })
 
   return discovered.sort((left, right) => left.localeCompare(right))
-}
-
-function matchesWhereFilters(record: CaseRecord, whereFilters: ReadonlyArray<{ key: string, value: string }>): boolean {
-  return whereFilters.every((parsed) => {
-    const resolved = getCaseSelectorValue(record, parsed.key)
-
-    return resolved.exists && String(resolved.value) === parsed.value
-  })
-}
-
-function parseSelector(selector: string): { key: string, value: string } {
-  const separatorIndex = selector.indexOf('=')
-  if (separatorIndex <= 0 || separatorIndex === selector.length - 1) {
-    throw new Error(`Invalid selector "${selector}". Expected "key=value".`)
-  }
-
-  return {
-    key: selector.slice(0, separatorIndex).trim(),
-    value: selector.slice(separatorIndex + 1).trim(),
-  }
-}
-
-function buildCaseGroups(records: readonly CaseRecord[], groupBy: string): Record<string, ReportCasesGroupSummary> {
-  const groups: Record<string, ReportCasesGroupSummary> = {}
-
-  for (const record of records) {
-    const resolved = getCaseSelectorValue(record, groupBy)
-    if (!resolved.exists) {
-      continue
-    }
-
-    const groupKey = `${groupBy}=${String(resolved.value)}`
-    groups[groupKey] ??= { count: 0, scores: {} }
-    groups[groupKey].count += 1
-    addScores(groups[groupKey].scores, record.scores)
-  }
-
-  return Object.fromEntries(
-    Object.entries(groups)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([groupKey, group]) => [groupKey, {
-        count: group.count,
-        scores: finalizeScores(group.scores),
-      } satisfies ReportCasesGroupSummary]),
-  )
-}
-
-function addScores(summary: ScoreSummary, scores: Record<string, number>): void {
-  for (const [scoreName, value] of Object.entries(scores)) {
-    summary[scoreName] ??= { average: 0, count: 0, sum: 0 }
-    summary[scoreName].count += 1
-    summary[scoreName].sum += value
-  }
-}
-
-function finalizeScores(summary: ScoreSummary): ScoreSummary {
-  return Object.fromEntries(
-    Object.entries(summary)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([scoreName, bucket]) => [scoreName, {
-        average: bucket.count === 0 ? 0 : bucket.sum / bucket.count,
-        count: bucket.count,
-        sum: bucket.sum,
-      }]),
-  )
-}
-
-function formatCasesTable(output: ReportCasesOutput): string {
-  const lines = [
-    'CASES  vieval report',
-    `Case count ${output.records.length}`,
-  ]
-
-  if (output.groups != null) {
-    lines.push('Groups')
-    for (const [groupKey, group] of Object.entries(output.groups)) {
-      const scoreText = Object.entries(group.scores)
-        .map(([scoreName, bucket]) => `${scoreName}=${bucket.average.toFixed(3)}`)
-        .join(' ')
-      lines.push(`${groupKey}  count=${group.count}${scoreText.length > 0 ? ` ${scoreText}` : ''}`)
-    }
-  }
-
-  return lines.join('\n')
 }

@@ -5,30 +5,30 @@ import { defineConfig, loadEnv } from '../../../src'
 import { chatModelFrom, ChatModels } from '../../../src/plugins/chat-models'
 
 export default defineConfig({
+  env: loadEnv('test', dirname(fileURLToPath(import.meta.url)), ''),
   plugins: [
     ChatModels({
       models: [
         chatModelFrom({
           aliases: ['judge-mini'],
-          model: 'gpt-4.1-mini',
           inferenceExecutor: 'openai',
+          model: 'gpt-4.1-mini',
         }),
       ],
     }),
   ],
-  env: loadEnv('test', dirname(fileURLToPath(import.meta.url)), ''),
   projects: [
     {
+      evalMatrix: {
+        rubric: ['default'],
+      },
+      exclude: [],
+      include: ['evals/*.eval.ts'],
       name: 'example-pattern-byoa-bring-your-own-agent',
       root: '.',
-      include: ['evals/*.eval.ts'],
-      exclude: [],
       runMatrix: {
         model: ['judge-mini'],
         scenario: ['default'],
-      },
-      evalMatrix: {
-        rubric: ['default'],
       },
     },
   ],

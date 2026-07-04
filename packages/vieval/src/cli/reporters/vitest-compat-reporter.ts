@@ -2,7 +2,15 @@ import type { CliReporterCaseEndPayload, CliReporterCaseStartPayload, CliReporte
 
 import { pathToFileURL } from 'node:url'
 
-type Awaitable<T> = T | Promise<T>
+/**
+ * Normalized test-case-like entity delivered to vitest-compatible reporter hooks.
+ */
+export interface VievalVitestCompatCase {
+  id: string
+  module: VievalVitestCompatModule
+  name: string
+  state: 'failed' | 'passed' | 'pending' | 'skipped'
+}
 
 /**
  * Normalized module-like entity delivered to vitest-compatible reporter hooks.
@@ -11,16 +19,6 @@ export interface VievalVitestCompatModule {
   id: string
   name: string
   projectName: string
-}
-
-/**
- * Normalized test-case-like entity delivered to vitest-compatible reporter hooks.
- */
-export interface VievalVitestCompatCase {
-  id: string
-  name: string
-  module: VievalVitestCompatModule
-  state: 'failed' | 'passed' | 'pending' | 'skipped'
 }
 
 /**
@@ -46,6 +44,23 @@ export interface VievalVitestCompatReporter {
 }
 
 /**
+ * Project-scoped bridge that adapts vieval lifecycle events to vitest-style hooks.
+ */
+export interface VievalVitestCompatReporterBridge {
+  onCaseEnd: (payload: CliReporterCaseEndPayload) => Promise<void>
+  onCaseStart: (payload: CliReporterCaseStartPayload) => Promise<void>
+  onRunEnd: (options: { failed: boolean }) => Promise<void>
+  onRunStart: () => Promise<void>
+  onTaskEnd: (payload: CliReporterTaskEndPayload) => Promise<void>
+  onTaskQueued: (payload: CliReporterTaskQueuedPayload) => Promise<void>
+  onTaskStart: (payload: CliReporterTaskStartPayload) => Promise<void>
+}
+
+export type VievalVitestCompatReporterReference
+  = readonly [VievalVitestCompatReporterValue, unknown?]
+    | VievalVitestCompatReporterValue
+
+/**
  * Supported project reporter references.
  *
  * - String: module path or package name, default export used.
@@ -57,94 +72,7 @@ export interface VievalVitestCompatReporter {
  */
 export type VievalVitestCompatReporterValue = string | VievalVitestCompatReporter
 
-export type VievalVitestCompatReporterReference
-  = VievalVitestCompatReporterValue
-    | readonly [VievalVitestCompatReporterValue, unknown?]
-
-function isReporterReferenceTuple(
-  reference: VievalVitestCompatReporterReference,
-): reference is readonly [VievalVitestCompatReporterValue, unknown?] {
-  return Array.isArray(reference)
-}
-
-function isAbsoluteLikePath(value: string): boolean {
-  return value.startsWith('/')
-    || value.startsWith('./')
-    || value.startsWith('../')
-    || /^[A-Z]:[\\/]/i.test(value)
-}
-
-async function loadReporterModule(path: string): Promise<unknown> {
-  if (isAbsoluteLikePath(path)) {
-    return import(pathToFileURL(path).href)
-  }
-
-  return import(path)
-}
-
-function normalizeReporterReference(reference: VievalVitestCompatReporterReference): {
-  options: unknown
-  value: VievalVitestCompatReporterValue
-} {
-  if (isReporterReferenceTuple(reference)) {
-    return {
-      options: reference[1],
-      value: reference[0],
-    }
-  }
-
-  return {
-    options: undefined,
-    value: reference,
-  }
-}
-
-function createReporterInstance(moduleValue: unknown, options: unknown): VievalVitestCompatReporter | null {
-  const candidate = moduleValue as { default?: unknown }
-  const value = candidate.default ?? moduleValue
-
-  if (value == null) {
-    return null
-  }
-
-  if (typeof value === 'function') {
-    const reporter = new (value as new (options?: unknown) => unknown)(options)
-    return reporter as VievalVitestCompatReporter
-  }
-
-  if (typeof value === 'object') {
-    return value as VievalVitestCompatReporter
-  }
-
-  return null
-}
-
-async function emitToReporters(
-  reporters: readonly VievalVitestCompatReporter[],
-  callback: (reporter: VievalVitestCompatReporter) => Awaitable<void> | void,
-): Promise<void> {
-  await Promise.all(reporters.map(async (reporter) => {
-    try {
-      await callback(reporter)
-    }
-    catch {
-      // Reporter errors are intentionally swallowed to keep task execution deterministic.
-    }
-  }))
-}
-
-/**
- * Project-scoped bridge that adapts vieval lifecycle events to vitest-style hooks.
- */
-export interface VievalVitestCompatReporterBridge {
-  onCaseEnd: (payload: CliReporterCaseEndPayload) => Promise<void>
-  onCaseStart: (payload: CliReporterCaseStartPayload) => Promise<void>
-  onTaskEnd: (payload: CliReporterTaskEndPayload) => Promise<void>
-  onTaskQueued: (payload: CliReporterTaskQueuedPayload) => Promise<void>
-  onTaskStart: (payload: CliReporterTaskStartPayload) => Promise<void>
-  onRunEnd: (options: { failed: boolean }) => Promise<void>
-  onRunStart: () => Promise<void>
-}
+type Awaitable<T> = Promise<T> | T
 
 /**
  * Creates a project-level vitest-compatible reporter bridge.
@@ -161,7 +89,7 @@ export interface VievalVitestCompatReporterBridge {
 export async function createVievalVitestCompatReporterBridge(options: {
   projectName: string
   references: readonly VievalVitestCompatReporterReference[]
-}): Promise<VievalVitestCompatReporterBridge | null> {
+}): Promise<null | VievalVitestCompatReporterBridge> {
   if (options.references.length === 0) {
     return null
   }
@@ -271,5 +199,77 @@ export async function createVievalVitestCompatReporterBridge(options: {
       const module = getOrCreateModule(payload.taskId)
       await emitToReporters(loadedReporters, reporter => reporter.onTestModuleStart?.(module))
     },
+  }
+}
+
+function createReporterInstance(moduleValue: unknown, options: unknown): null | VievalVitestCompatReporter {
+  const candidate = moduleValue as { default?: unknown }
+  const value = candidate.default ?? moduleValue
+
+  if (value == null) {
+    return null
+  }
+
+  if (typeof value === 'function') {
+    const reporter = new (value as new (options?: unknown) => unknown)(options)
+    return reporter as VievalVitestCompatReporter
+  }
+
+  if (typeof value === 'object') {
+    return value as VievalVitestCompatReporter
+  }
+
+  return null
+}
+
+async function emitToReporters(
+  reporters: readonly VievalVitestCompatReporter[],
+  callback: (reporter: VievalVitestCompatReporter) => Awaitable<void> | void,
+): Promise<void> {
+  await Promise.all(reporters.map(async (reporter) => {
+    try {
+      await callback(reporter)
+    }
+    catch {
+      // Reporter errors are intentionally swallowed to keep task execution deterministic.
+    }
+  }))
+}
+
+function isAbsoluteLikePath(value: string): boolean {
+  return value.startsWith('/')
+    || value.startsWith('./')
+    || value.startsWith('../')
+    || /^[A-Z]:[\\/]/i.test(value)
+}
+
+function isReporterReferenceTuple(
+  reference: VievalVitestCompatReporterReference,
+): reference is readonly [VievalVitestCompatReporterValue, unknown?] {
+  return Array.isArray(reference)
+}
+
+async function loadReporterModule(path: string): Promise<unknown> {
+  if (isAbsoluteLikePath(path)) {
+    return import(pathToFileURL(path).href)
+  }
+
+  return import(path)
+}
+
+function normalizeReporterReference(reference: VievalVitestCompatReporterReference): {
+  options: unknown
+  value: VievalVitestCompatReporterValue
+} {
+  if (isReporterReferenceTuple(reference)) {
+    return {
+      options: reference[1],
+      value: reference[0],
+    }
+  }
+
+  return {
+    options: undefined,
+    value: reference,
   }
 }

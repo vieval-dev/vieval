@@ -3,6 +3,37 @@ import type { LoCoMoAnswerGeneratorAdapter } from '../contracts'
 import { createHash } from 'node:crypto'
 
 /**
+ * Options for creating a cached LoCoMo answer generator.
+ *
+ * Use when:
+ * - wrapping an existing answer generator with task-cache backed prediction reuse
+ *
+ * Expects:
+ * - `cache` to provide the minimal Vieval cache file APIs
+ * - `generator` to be the uncached answer generator
+ * - `mode` to define miss behavior
+ * - `namespaceParts` to contain stable cache identity inputs
+ */
+export interface CachedLoCoMoAnswerGeneratorOptions {
+  /**
+   * Task cache runtime from Vieval case context.
+   */
+  cache: LoCoMoAnswerPredictionCacheRuntime
+  /**
+   * Underlying generator used on cache miss when mode allows writes.
+   */
+  generator: LoCoMoAnswerGeneratorAdapter
+  /**
+   * Cache hit/miss behavior.
+   */
+  mode: LoCoMoAnswerPredictionCacheMode
+  /**
+   * Stable cache identity fields.
+   */
+  namespaceParts: LoCoMoAnswerPredictionCacheNamespaceParts
+}
+
+/**
  * Controls how LoCoMo generated-answer cache is used.
  *
  * Use when:
@@ -46,6 +77,10 @@ export interface LoCoMoAnswerPredictionCacheNamespaceParts {
   topK: number
 }
 
+interface CachedLoCoMoAnswerPrediction {
+  prediction: string
+}
+
 interface LoCoMoAnswerPredictionCacheRuntime {
   namespace: (name: string) => {
     file: (options: { ext?: string, key: readonly string[] }) => {
@@ -57,38 +92,59 @@ interface LoCoMoAnswerPredictionCacheRuntime {
 }
 
 /**
- * Options for creating a cached LoCoMo answer generator.
+ * Wraps a LoCoMo answer generator with deterministic prediction caching.
  *
  * Use when:
- * - wrapping an existing answer generator with task-cache backed prediction reuse
+ * - repeated benchmark runs should not regenerate expensive LLM predictions
+ * - read-only benchmark replays should fail instead of making accidental model calls
  *
  * Expects:
- * - `cache` to provide the minimal Vieval cache file APIs
- * - `generator` to be the uncached answer generator
- * - `mode` to define miss behavior
- * - `namespaceParts` to contain stable cache identity inputs
+ * - cache namespace identity to include dataset, prompt, retriever, generator, and topK
+ * - context-sensitive hash to change when retrieved context or generated prompt changes
+ *
+ * Returns:
+ * - a benchmark-compatible answer generator with cache hit/miss behavior controlled by mode
  */
-export interface CachedLoCoMoAnswerGeneratorOptions {
-  /**
-   * Task cache runtime from Vieval case context.
-   */
-  cache: LoCoMoAnswerPredictionCacheRuntime
-  /**
-   * Underlying generator used on cache miss when mode allows writes.
-   */
-  generator: LoCoMoAnswerGeneratorAdapter
-  /**
-   * Cache hit/miss behavior.
-   */
-  mode: LoCoMoAnswerPredictionCacheMode
-  /**
-   * Stable cache identity fields.
-   */
-  namespaceParts: LoCoMoAnswerPredictionCacheNamespaceParts
-}
+export function createCachedLoCoMoAnswerGenerator(
+  options: CachedLoCoMoAnswerGeneratorOptions,
+): LoCoMoAnswerGeneratorAdapter {
+  if (options.mode === 'off') {
+    return options.generator
+  }
 
-interface CachedLoCoMoAnswerPrediction {
-  prediction: string
+  return {
+    async generateAnswer(input) {
+      const entry = options.cache.namespace('locomo-answer-predictions').file({
+        ext: 'json',
+        key: [
+          options.namespaceParts.datasetHash,
+          options.namespaceParts.promptVersion,
+          options.namespaceParts.retrieverId,
+          options.generator.id,
+          `top-k-${options.namespaceParts.topK}`,
+          normalizeCaseIdForCachePath(input.caseId),
+          hashPredictionInput({
+            contextText: input.contextText,
+            question: input.question,
+          }),
+        ],
+      })
+
+      if (await entry.exists()) {
+        const cached = await entry.loadAsExpectFixture<CachedLoCoMoAnswerPrediction>()
+        return cached.prediction
+      }
+
+      if (options.mode === 'read-only') {
+        throw new Error(`Missing cached LoCoMo answer prediction for ${input.caseId}`)
+      }
+
+      const prediction = await options.generator.generateAnswer(input)
+      await entry.writeJson({ prediction } satisfies CachedLoCoMoAnswerPrediction)
+      return prediction
+    },
+    id: `${options.generator.id}-cached-${options.mode}`,
+  }
 }
 
 /**
@@ -143,60 +199,4 @@ function hashPredictionInput(input: {
  */
 function normalizeCaseIdForCachePath(caseId: string): string {
   return caseId.replaceAll('::', '--')
-}
-
-/**
- * Wraps a LoCoMo answer generator with deterministic prediction caching.
- *
- * Use when:
- * - repeated benchmark runs should not regenerate expensive LLM predictions
- * - read-only benchmark replays should fail instead of making accidental model calls
- *
- * Expects:
- * - cache namespace identity to include dataset, prompt, retriever, generator, and topK
- * - context-sensitive hash to change when retrieved context or generated prompt changes
- *
- * Returns:
- * - a benchmark-compatible answer generator with cache hit/miss behavior controlled by mode
- */
-export function createCachedLoCoMoAnswerGenerator(
-  options: CachedLoCoMoAnswerGeneratorOptions,
-): LoCoMoAnswerGeneratorAdapter {
-  if (options.mode === 'off') {
-    return options.generator
-  }
-
-  return {
-    id: `${options.generator.id}-cached-${options.mode}`,
-    async generateAnswer(input) {
-      const entry = options.cache.namespace('locomo-answer-predictions').file({
-        ext: 'json',
-        key: [
-          options.namespaceParts.datasetHash,
-          options.namespaceParts.promptVersion,
-          options.namespaceParts.retrieverId,
-          options.generator.id,
-          `top-k-${options.namespaceParts.topK}`,
-          normalizeCaseIdForCachePath(input.caseId),
-          hashPredictionInput({
-            contextText: input.contextText,
-            question: input.question,
-          }),
-        ],
-      })
-
-      if (await entry.exists()) {
-        const cached = await entry.loadAsExpectFixture<CachedLoCoMoAnswerPrediction>()
-        return cached.prediction
-      }
-
-      if (options.mode === 'read-only') {
-        throw new Error(`Missing cached LoCoMo answer prediction for ${input.caseId}`)
-      }
-
-      const prediction = await options.generator.generateAnswer(input)
-      await entry.writeJson({ prediction } satisfies CachedLoCoMoAnswerPrediction)
-      return prediction
-    },
-  }
 }

@@ -6,6 +6,23 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { runScheduledTasks } from './run'
 
+function createScheduledTask() {
+  return {
+    entry: {
+      description: 'desc',
+      directory: 'dir',
+      filePath: '/tmp/entry.eval.ts',
+      id: 'entry-1',
+      name: 'entry-1',
+    },
+    id: 'task-1',
+    inferenceExecutor: {
+      id: 'openai:gpt-4.1-mini',
+    },
+    matrix: createScheduledTaskMatrix(),
+  } as const
+}
+
 function createScheduledTaskMatrix() {
   return {
     eval: {},
@@ -19,23 +36,6 @@ function createScheduledTaskMatrix() {
   }
 }
 
-function createScheduledTask() {
-  return {
-    entry: {
-      description: 'desc',
-      directory: 'dir',
-      filePath: '/tmp/entry.eval.ts',
-      id: 'entry-1',
-      name: 'entry-1',
-    },
-    id: 'task-1',
-    matrix: createScheduledTaskMatrix(),
-    inferenceExecutor: {
-      id: 'openai:gpt-4.1-mini',
-    },
-  } as const
-}
-
 function createScheduledTaskWithId(taskId: string) {
   return {
     ...createScheduledTask(),
@@ -47,8 +47,8 @@ function createSuccessfulRunResult(task: ScheduledTask): RunResult {
   return {
     entryId: task.entry.id,
     id: task.id,
-    matrix: task.matrix,
     inferenceExecutorId: task.inferenceExecutor.id,
+    matrix: task.matrix,
     scores: [{ kind: 'exact', score: 1 }],
   }
 }
@@ -63,8 +63,8 @@ describe('runScheduledTasks', () => {
       return {
         entryId: task.entry.id,
         id: task.id,
-        matrix: task.matrix,
         inferenceExecutorId: task.inferenceExecutor.id,
+        matrix: task.matrix,
         scores: [
           { kind: 'exact', score: 1 },
         ],

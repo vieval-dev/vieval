@@ -20,8 +20,8 @@ describe('report cases', () => {
     const reportPath = join(process.cwd(), '.tmp', dir)
     await mkdir(reportPath, { recursive: true })
     await writeFile(join(reportPath, 'cases.jsonl'), [
-      JSON.stringify({ schemaVersion: 1, attemptId: 'a', caseId: '1', caseName: 'One', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.locomo.category': 1 }, projectName: 'p', retryCount: 0, runId: 'r', scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' }),
-      JSON.stringify({ schemaVersion: 1, attemptId: 'a', caseId: '2', caseName: 'Two', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.locomo.category': 2 }, projectName: 'p', retryCount: 0, runId: 'r', scores: { exact: 0 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' }),
+      JSON.stringify({ attemptId: 'a', caseId: '1', caseName: 'One', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.locomo.category': 1 }, projectName: 'p', retryCount: 0, runId: 'r', schemaVersion: 1, scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' }),
+      JSON.stringify({ attemptId: 'a', caseId: '2', caseName: 'Two', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.locomo.category': 2 }, projectName: 'p', retryCount: 0, runId: 'r', schemaVersion: 1, scores: { exact: 0 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' }),
     ].join('\n').concat('\n'), 'utf-8')
 
     const records = await readCaseRecordsFromReport(reportPath)
@@ -37,8 +37,8 @@ describe('report cases', () => {
    */
   it('groups cases by a metric key', () => {
     const output = buildReportCasesOutput([
-      { schemaVersion: 1, attemptId: 'a', caseId: '1', caseName: 'One', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.locomo.category': 2 }, projectName: 'p', retryCount: 0, runId: 'r', scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
-      { schemaVersion: 1, attemptId: 'a', caseId: '2', caseName: 'Two', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.locomo.category': 2 }, projectName: 'p', retryCount: 0, runId: 'r', scores: { exact: 0 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
+      { attemptId: 'a', caseId: '1', caseName: 'One', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.locomo.category': 2 }, projectName: 'p', retryCount: 0, runId: 'r', schemaVersion: 1, scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
+      { attemptId: 'a', caseId: '2', caseName: 'Two', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.locomo.category': 2 }, projectName: 'p', retryCount: 0, runId: 'r', schemaVersion: 1, scores: { exact: 0 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
     ], { format: 'json', groupBy: 'benchmark.locomo.category' })
 
     expect(output.groups?.['benchmark.locomo.category=2']?.count).toBe(2)
@@ -55,8 +55,8 @@ describe('report cases', () => {
     const rightRun = join(reportRoot, 'workspace', 'project', 'experiment', 'attempt-b', 'run-b')
     await mkdir(leftRun, { recursive: true })
     await mkdir(rightRun, { recursive: true })
-    await writeFile(join(leftRun, 'cases.jsonl'), `${JSON.stringify({ schemaVersion: 1, attemptId: 'a', caseId: 'left', caseName: 'Left', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: {}, projectName: 'p', retryCount: 0, runId: 'left-run', scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' })}\n`, 'utf-8')
-    await writeFile(join(rightRun, 'cases.jsonl'), `${JSON.stringify({ schemaVersion: 1, attemptId: 'b', caseId: 'right', caseName: 'Right', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: {}, projectName: 'p', retryCount: 0, runId: 'right-run', scores: { exact: 0 }, startedAt: 's', state: 'failed', taskId: 't', workspaceId: 'w' })}\n`, 'utf-8')
+    await writeFile(join(leftRun, 'cases.jsonl'), `${JSON.stringify({ attemptId: 'a', caseId: 'left', caseName: 'Left', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: {}, projectName: 'p', retryCount: 0, runId: 'left-run', schemaVersion: 1, scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' })}\n`, 'utf-8')
+    await writeFile(join(rightRun, 'cases.jsonl'), `${JSON.stringify({ attemptId: 'b', caseId: 'right', caseName: 'Right', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: {}, projectName: 'p', retryCount: 0, runId: 'right-run', schemaVersion: 1, scores: { exact: 0 }, startedAt: 's', state: 'failed', taskId: 't', workspaceId: 'w' })}\n`, 'utf-8')
 
     const directRecords = await readCaseRecordsFromReport(join(leftRun, 'cases.jsonl'))
     const rootRecords = await readCaseRecordsFromReport(reportRoot)

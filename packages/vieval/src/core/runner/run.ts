@@ -9,24 +9,6 @@ import { limitConcurrency } from '@vitest/runner/utils'
 import { aggregateRunResults } from './aggregate'
 
 /**
- * Executes one scheduled runner task and returns a normalized run result.
- *
- * Use when:
- * - a scheduler already selected the task and execution context
- * - the caller wants a typed executor contract for runner workers
- *
- * Expects:
- * - the task context to be ready for model resolution and task-scoped work
- *
- * Returns:
- * - a normalized run result with score entries ready for aggregation
- */
-export type ScheduledTaskExecutor = (
-  task: ScheduledTask,
-  context: TaskExecutionContext,
-) => Promise<RunResult>
-
-/**
  * Terminal task state reported by runner lifecycle hooks.
  *
  * Use when:
@@ -35,7 +17,7 @@ export type ScheduledTaskExecutor = (
  * Expects:
  * - hooks treat the value as final for the completed task
  */
-export type RunnerTaskState = 'passed' | 'failed'
+export type RunnerTaskState = 'failed' | 'passed'
 
 /**
  * Optional runner execution hooks used while processing scheduled tasks.
@@ -56,15 +38,11 @@ export interface RunScheduledTasksOptions {
    */
   createExecutionContext?: (task: ScheduledTask) => TaskExecutionContext
   /**
-   * Runs before the executor starts handling a task.
+   * Maximum number of tasks to execute concurrently.
    *
-   * Use when:
-   * - callers want to observe task activation before execution begins
-   *
-   * Expects:
-   * - thrown errors abort the task before executor work starts
+   * @default 1
    */
-  onTaskStart?: (task: ScheduledTask) => void
+  maxConcurrency?: number
   /**
    * Runs after the executor settles for a task.
    *
@@ -77,30 +55,34 @@ export interface RunScheduledTasksOptions {
    */
   onTaskEnd?: (task: ScheduledTask, state: RunnerTaskState) => void
   /**
-   * Maximum number of tasks to execute concurrently.
+   * Runs before the executor starts handling a task.
    *
-   * @default 1
+   * Use when:
+   * - callers want to observe task activation before execution begins
+   *
+   * Expects:
+   * - thrown errors abort the task before executor work starts
    */
-  maxConcurrency?: number
+  onTaskStart?: (task: ScheduledTask) => void
 }
 
-function createDefaultExecutionContext(): TaskExecutionContext {
-  const cache: TaskCacheRuntime = {
-    namespace(name) {
-      return {
-        file(options) {
-          const key = options.key.join('/')
-          throw new Error(`Task cache runtime is not configured. Requested namespace "${name}" and key "${key}".`)
-        },
-      }
-    },
-  }
-
-  return {
-    cache,
-    models: [],
-  }
-}
+/**
+ * Executes one scheduled runner task and returns a normalized run result.
+ *
+ * Use when:
+ * - a scheduler already selected the task and execution context
+ * - the caller wants a typed executor contract for runner workers
+ *
+ * Expects:
+ * - the task context to be ready for model resolution and task-scoped work
+ *
+ * Returns:
+ * - a normalized run result with score entries ready for aggregation
+ */
+export type ScheduledTaskExecutor = (
+  task: ScheduledTask,
+  context: TaskExecutionContext,
+) => Promise<RunResult>
 
 /**
  * Error thrown when a scheduled run fails before producing a normalized result.
@@ -118,14 +100,6 @@ export class RunnerExecutionError extends Error {
     this.taskId = taskId
     this.cause = cause
   }
-}
-
-function createRunnerExecutionError(taskId: string, cause: unknown): RunnerExecutionError {
-  if (cause instanceof RunnerExecutionError && cause.taskId === taskId) {
-    return cause
-  }
-
-  return new RunnerExecutionError(taskId, cause)
 }
 
 /**
@@ -220,4 +194,30 @@ export async function runScheduledTasks(
     .map(item => item.result)
 
   return aggregateRunResults(sortedResults)
+}
+
+function createDefaultExecutionContext(): TaskExecutionContext {
+  const cache: TaskCacheRuntime = {
+    namespace(name) {
+      return {
+        file(options) {
+          const key = options.key.join('/')
+          throw new Error(`Task cache runtime is not configured. Requested namespace "${name}" and key "${key}".`)
+        },
+      }
+    },
+  }
+
+  return {
+    cache,
+    models: [],
+  }
+}
+
+function createRunnerExecutionError(taskId: string, cause: unknown): RunnerExecutionError {
+  if (cause instanceof RunnerExecutionError && cause.taskId === taskId) {
+    return cause
+  }
+
+  return new RunnerExecutionError(taskId, cause)
 }

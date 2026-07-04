@@ -2,7 +2,36 @@ import type { CaseRecord } from './report-records'
 
 import { stableStringify } from './report-selectors'
 
-type LocalOtlpAttributeScalar = boolean | null | number | string
+/** Local deterministic JSON shape for trace, log, and metric report artifacts. */
+export interface LocalOtlpProjection {
+  /** OTLP-like log container written to `otlp/logs.json`. */
+  logs: {
+    resourceLogs: Array<{
+      scopeLogs: Array<{
+        logRecords: LocalOtlpLogRecord[]
+        scope: { name: string }
+      }>
+    }>
+  }
+  /** OTLP-like metric container written to `otlp/metrics.json`. */
+  metrics: {
+    resourceMetrics: Array<{
+      scopeMetrics: Array<{
+        metrics: LocalOtlpMetric[]
+        scope: { name: string }
+      }>
+    }>
+  }
+  /** OTLP-like trace container written to `otlp/traces.json`. */
+  traces: {
+    resourceSpans: Array<{
+      scopeSpans: Array<{
+        scope: { name: string }
+        spans: LocalOtlpSpan[]
+      }>
+    }>
+  }
+}
 
 interface LocalOtlpAnyValue {
   arrayValue?: {
@@ -18,12 +47,7 @@ interface LocalOtlpAttribute {
   value: LocalOtlpAnyValue
 }
 
-interface LocalOtlpSpan {
-  attributes: LocalOtlpAttribute[]
-  endTimeUnixNano?: string
-  name: string
-  startTimeUnixNano?: string
-}
+type LocalOtlpAttributeScalar = boolean | null | number | string
 
 interface LocalOtlpLogRecord {
   attributes: LocalOtlpAttribute[]
@@ -43,35 +67,11 @@ interface LocalOtlpMetric {
   name: string
 }
 
-/** Local deterministic JSON shape for trace, log, and metric report artifacts. */
-export interface LocalOtlpProjection {
-  /** OTLP-like trace container written to `otlp/traces.json`. */
-  traces: {
-    resourceSpans: Array<{
-      scopeSpans: Array<{
-        scope: { name: string }
-        spans: LocalOtlpSpan[]
-      }>
-    }>
-  }
-  /** OTLP-like log container written to `otlp/logs.json`. */
-  logs: {
-    resourceLogs: Array<{
-      scopeLogs: Array<{
-        logRecords: LocalOtlpLogRecord[]
-        scope: { name: string }
-      }>
-    }>
-  }
-  /** OTLP-like metric container written to `otlp/metrics.json`. */
-  metrics: {
-    resourceMetrics: Array<{
-      scopeMetrics: Array<{
-        metrics: LocalOtlpMetric[]
-        scope: { name: string }
-      }>
-    }>
-  }
+interface LocalOtlpSpan {
+  attributes: LocalOtlpAttribute[]
+  endTimeUnixNano?: string
+  name: string
+  startTimeUnixNano?: string
 }
 
 /**
@@ -181,14 +181,60 @@ export function buildLocalOtlpProjection(args: { records: readonly CaseRecord[],
   }
 }
 
-function toAttributes(attributes: Record<string, unknown>): LocalOtlpAttribute[] {
-  return Object.entries(attributes)
-    .filter(([, value]) => value !== undefined)
-    .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
-    .map(([key, value]) => ({
-      key,
-      value: toAnyValue(value),
-    }))
+function collectProjectNames(records: readonly CaseRecord[]): string[] {
+  return [...new Set(records.map(record => record.projectName))]
+    .sort((left, right) => left.localeCompare(right))
+}
+
+function collectScoreKinds(records: readonly CaseRecord[]): string[] {
+  return [...new Set(records.flatMap(record => Object.keys(record.scores)))]
+    .sort((left, right) => left.localeCompare(right))
+}
+
+function collectTasks(records: readonly CaseRecord[]): Array<{ projectName: string, taskId: string }> {
+  const tasks = new Map<string, { projectName: string, taskId: string }>()
+  for (const record of records) {
+    tasks.set(`${record.projectName}\0${record.taskId}`, {
+      projectName: record.projectName,
+      taskId: record.taskId,
+    })
+  }
+
+  return [...tasks.values()].sort((left, right) => {
+    const projectOrder = left.projectName.localeCompare(right.projectName)
+    return projectOrder === 0
+      ? left.taskId.localeCompare(right.taskId)
+      : projectOrder
+  })
+}
+
+function isAttributeScalar(value: unknown): value is LocalOtlpAttributeScalar {
+  return value == null || typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string'
+}
+
+function isoToUnixNano(value: string): string {
+  const preciseMatch = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/.exec(value)
+  if (preciseMatch != null) {
+    const [, secondsPart, fraction = '', zone] = preciseMatch
+    const unixMilliseconds = Date.parse(`${secondsPart}.000${zone}`)
+    if (!Number.isFinite(unixMilliseconds)) {
+      return '0'
+    }
+
+    // NOTICE: OTLP JSON represents unix nanos as int64. We parse the fractional
+    // seconds directly so traces can preserve microsecond/nanosecond precision
+    // when upstream event timestamps contain more precision than Date can store.
+    return String((BigInt(unixMilliseconds) * 1_000_000n) + BigInt(fraction.padEnd(9, '0').slice(0, 9)))
+  }
+
+  const unixMilliseconds = Date.parse(value)
+  if (!Number.isFinite(unixMilliseconds)) {
+    return '0'
+  }
+
+  // NOTICE: OTLP JSON represents unix nanos as int64. We keep strings to avoid
+  // JavaScript precision loss above Number.MAX_SAFE_INTEGER.
+  return String(BigInt(unixMilliseconds) * 1_000_000n)
 }
 
 function toAnyValue(value: unknown): LocalOtlpAnyValue {
@@ -221,58 +267,12 @@ function toAnyValue(value: unknown): LocalOtlpAnyValue {
   return { stringValue: stableStringify(value) }
 }
 
-function isAttributeScalar(value: unknown): value is LocalOtlpAttributeScalar {
-  return value == null || typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string'
-}
-
-function isoToUnixNano(value: string): string {
-  const preciseMatch = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/.exec(value)
-  if (preciseMatch != null) {
-    const [, secondsPart, fraction = '', zone] = preciseMatch
-    const unixMilliseconds = Date.parse(`${secondsPart}.000${zone}`)
-    if (!Number.isFinite(unixMilliseconds)) {
-      return '0'
-    }
-
-    // NOTICE: OTLP JSON represents unix nanos as int64. We parse the fractional
-    // seconds directly so traces can preserve microsecond/nanosecond precision
-    // when upstream event timestamps contain more precision than Date can store.
-    return String((BigInt(unixMilliseconds) * 1_000_000n) + BigInt(fraction.padEnd(9, '0').slice(0, 9)))
-  }
-
-  const unixMilliseconds = Date.parse(value)
-  if (!Number.isFinite(unixMilliseconds)) {
-    return '0'
-  }
-
-  // NOTICE: OTLP JSON represents unix nanos as int64. We keep strings to avoid
-  // JavaScript precision loss above Number.MAX_SAFE_INTEGER.
-  return String(BigInt(unixMilliseconds) * 1_000_000n)
-}
-
-function collectScoreKinds(records: readonly CaseRecord[]): string[] {
-  return [...new Set(records.flatMap(record => Object.keys(record.scores)))]
-    .sort((left, right) => left.localeCompare(right))
-}
-
-function collectProjectNames(records: readonly CaseRecord[]): string[] {
-  return [...new Set(records.map(record => record.projectName))]
-    .sort((left, right) => left.localeCompare(right))
-}
-
-function collectTasks(records: readonly CaseRecord[]): Array<{ projectName: string, taskId: string }> {
-  const tasks = new Map<string, { projectName: string, taskId: string }>()
-  for (const record of records) {
-    tasks.set(`${record.projectName}\0${record.taskId}`, {
-      projectName: record.projectName,
-      taskId: record.taskId,
-    })
-  }
-
-  return [...tasks.values()].sort((left, right) => {
-    const projectOrder = left.projectName.localeCompare(right.projectName)
-    return projectOrder === 0
-      ? left.taskId.localeCompare(right.taskId)
-      : projectOrder
-  })
+function toAttributes(attributes: Record<string, unknown>): LocalOtlpAttribute[] {
+  return Object.entries(attributes)
+    .filter(([, value]) => value !== undefined)
+    .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+    .map(([key, value]) => ({
+      key,
+      value: toAnyValue(value),
+    }))
 }

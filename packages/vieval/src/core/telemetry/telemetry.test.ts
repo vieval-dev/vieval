@@ -122,18 +122,18 @@ describe('telemetry runtime', () => {
 
     await telemetry.withSpan('vieval.case', {
       missing: undefined,
+      mixedArray: ['a', 1, true],
       nested: ['a', [1, null]],
       nil: null,
       scalar: 'case-1',
-      mixedArray: ['a', 1, true],
       scalarArray: ['a', 'b'],
     }, async () => undefined)
 
     expect(tracer.startActiveSpan).toHaveBeenCalledWith('vieval.case', {
       attributes: {
+        mixedArray: JSON.stringify(['a', 1, true]),
         nested: JSON.stringify(['a', [1, null]]),
         scalar: 'case-1',
-        mixedArray: JSON.stringify(['a', 1, true]),
         scalarArray: ['a', 'b'],
       },
     }, expect.any(Function))
@@ -160,10 +160,10 @@ describe('telemetry runtime', () => {
     await telemetry.withSpan('vieval.case', {}, async () => {
       telemetry.addEvent('vieval.case.metric', {
         missing: undefined,
+        mixedArray: ['a', 1, false],
         nested: ['a', [1, null]],
         nil: null,
         scalar: 1,
-        mixedArray: ['a', 1, false],
         scalarArray: ['a', 'b'],
       })
       telemetry.setAttributes({
@@ -173,9 +173,9 @@ describe('telemetry runtime', () => {
     })
 
     expect(span.addEvent).toHaveBeenCalledWith('vieval.case.metric', {
+      mixedArray: JSON.stringify(['a', 1, false]),
       nested: JSON.stringify(['a', [1, null]]),
       scalar: 1,
-      mixedArray: JSON.stringify(['a', 1, false]),
       scalarArray: ['a', 'b'],
     })
     expect(span.setAttributes).toHaveBeenCalledWith({

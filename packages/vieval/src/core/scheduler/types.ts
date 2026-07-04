@@ -1,42 +1,39 @@
 /**
- * Hierarchical scheduler scopes used by the queue runtime.
+ * Options accepted by {@link createSchedulerRuntime}.
  *
  * Use when:
- * - selecting which concurrency cap applies to a unit of work
- * - ordering middleware acquisition and release hooks
+ * - constructing a scheduler runtime with queue limits or middleware
  *
  * Expects:
- * - values move from broad to narrow scope in this order:
- *   `workspace -> project -> task -> attempt -> case`
+ * - omitted configuration falls back to unbounded execution for that concern
  *
  * Returns:
- * - a string literal scope identifier
+ * - queue and middleware configuration for the runtime
  */
-export type SchedulerScope = 'workspace' | 'project' | 'task' | 'attempt' | 'case'
+export interface CreateSchedulerRuntimeOptions {
+  concurrency?: SchedulerConcurrencyConfig
+  middleware?: SchedulerMiddleware[]
+}
 
 /**
- * Context carried through queue acquisition, execution, and release.
+ * Per-scope concurrency limits used by the scheduler runtime.
  *
  * Use when:
- * - middleware needs stable identifiers for logging or instrumentation
- * - runtime helpers need to know which hierarchical scope is being executed
+ * - bounding parallel work for a specific scope
+ * - disabling a scope cap by omitting its entry
  *
  * Expects:
- * - `workspaceId` is always present
- * - `experimentId` is metadata for middleware and logging, not queue partitioning
- * - narrower ids are only provided when the selected scope requires them
+ * - values are positive integers when provided
  *
  * Returns:
- * - a serializable scope context object
+ * - a partial map of scheduler scope to concurrency cap
  */
-export interface SchedulerScopeContext {
-  scope: SchedulerScope
-  workspaceId: string
-  experimentId: string
-  projectName?: string
-  taskId?: string
-  attemptIndex?: number
-  caseId?: string
+export interface SchedulerConcurrencyConfig {
+  attempt?: number
+  case?: number
+  project?: number
+  task?: number
+  workspace?: number
 }
 
 /**
@@ -64,44 +61,6 @@ export interface SchedulerMiddleware {
 }
 
 /**
- * Per-scope concurrency limits used by the scheduler runtime.
- *
- * Use when:
- * - bounding parallel work for a specific scope
- * - disabling a scope cap by omitting its entry
- *
- * Expects:
- * - values are positive integers when provided
- *
- * Returns:
- * - a partial map of scheduler scope to concurrency cap
- */
-export interface SchedulerConcurrencyConfig {
-  workspace?: number
-  project?: number
-  task?: number
-  attempt?: number
-  case?: number
-}
-
-/**
- * Options accepted by {@link createSchedulerRuntime}.
- *
- * Use when:
- * - constructing a scheduler runtime with queue limits or middleware
- *
- * Expects:
- * - omitted configuration falls back to unbounded execution for that concern
- *
- * Returns:
- * - queue and middleware configuration for the runtime
- */
-export interface CreateSchedulerRuntimeOptions {
-  concurrency?: SchedulerConcurrencyConfig
-  middleware?: SchedulerMiddleware[]
-}
-
-/**
  * Runtime API used to execute case-level work through scheduler policies.
  *
  * Use when:
@@ -118,4 +77,45 @@ export interface SchedulerRuntime {
     context: SchedulerScopeContext,
     execute: () => Promise<T>,
   ) => Promise<T>
+}
+
+/**
+ * Hierarchical scheduler scopes used by the queue runtime.
+ *
+ * Use when:
+ * - selecting which concurrency cap applies to a unit of work
+ * - ordering middleware acquisition and release hooks
+ *
+ * Expects:
+ * - values move from broad to narrow scope in this order:
+ *   `workspace -> project -> task -> attempt -> case`
+ *
+ * Returns:
+ * - a string literal scope identifier
+ */
+export type SchedulerScope = 'attempt' | 'case' | 'project' | 'task' | 'workspace'
+
+/**
+ * Context carried through queue acquisition, execution, and release.
+ *
+ * Use when:
+ * - middleware needs stable identifiers for logging or instrumentation
+ * - runtime helpers need to know which hierarchical scope is being executed
+ *
+ * Expects:
+ * - `workspaceId` is always present
+ * - `experimentId` is metadata for middleware and logging, not queue partitioning
+ * - narrower ids are only provided when the selected scope requires them
+ *
+ * Returns:
+ * - a serializable scope context object
+ */
+export interface SchedulerScopeContext {
+  attemptIndex?: number
+  caseId?: string
+  experimentId: string
+  projectName?: string
+  scope: SchedulerScope
+  taskId?: string
+  workspaceId: string
 }

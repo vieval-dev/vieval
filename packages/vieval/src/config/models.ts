@@ -16,13 +16,17 @@ import type { TaskExecutionPolicy } from './types'
  */
 export interface ModelDefinition {
   /**
+   * Alias names that can resolve this model.
+   */
+  aliases: string[]
+  /**
+   * Optional execution policy hints attached to this model.
+   */
+  executionPolicy?: TaskExecutionPolicy
+  /**
    * Stable model id.
    */
   id: string
-  /**
-   * Inference-executor id used for matching and reporting.
-   */
-  inferenceExecutorId: string
   /**
    * Executor reference passed through config.
    *
@@ -31,17 +35,13 @@ export interface ModelDefinition {
    */
   inferenceExecutor: unknown
   /**
+   * Inference-executor id used for matching and reporting.
+   */
+  inferenceExecutorId: string
+  /**
    * Concrete model name passed to the inference executor.
    */
   model: string
-  /**
-   * Alias names that can resolve this model.
-   */
-  aliases: string[]
-  /**
-   * Optional execution policy hints attached to this model.
-   */
-  executionPolicy?: TaskExecutionPolicy
   /**
    * Optional model-level call parameters.
    */

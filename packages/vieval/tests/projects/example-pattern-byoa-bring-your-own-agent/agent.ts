@@ -26,8 +26,8 @@ export async function runMinimalAgent(context: TaskRunContext): Promise<number> 
   const inferenceExecutorRuntime = createOpenAIFromEnv({ env: merge(process.env) }, { model: taskModel.model })
 
   const messages: Array<{ content: string, role: 'system' | 'user' }> = [
-    { role: 'system', content: 'You are a concise chess companion. Keep output under 8 words.' },
-    { role: 'user', content: `Scenario "${context.task.entry.name}": react in one short line.` },
+    { content: 'You are a concise chess companion. Keep output under 8 words.', role: 'system' },
+    { content: `Scenario "${context.task.entry.name}": react in one short line.`, role: 'user' },
   ]
 
   emitChatModelRequestTelemetry(context, {
@@ -46,8 +46,8 @@ export async function runMinimalAgent(context: TaskRunContext): Promise<number> 
     const response = await inferenceExecutorRuntime.adapter.runWithRetry(async () => {
       return await generateText({
         ...inferenceExecutorRuntime.adapter.provider.chat(inferenceExecutorRuntime.model),
-        messages,
         max_tokens: 32,
+        messages,
       })
     })
 

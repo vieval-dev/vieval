@@ -24,41 +24,33 @@ const POINTER = '❯'
 const TREE_NODE_END = '└'
 const TREE_NODE_MIDDLE = '├'
 
-interface SummaryReporterCounterState {
-  completed: number
-  failed: number
-  passed: number
-  skipped: number
-  timeout: number
-  total: number
-}
-
 /**
- * Additional task metadata accepted by the live summary reporter.
+ * Reporter contract for live summary state plus window row generation.
  *
  * Use when:
- * - queue events can provide richer task labels before CLI wiring is complete
- * - tests need to set deterministic display names and case totals
+ * - CLI code needs the reporter lifecycle plus `getWindowRows()`
+ * - tests need to inspect the rendered terminal rows directly
  *
  * Expects:
- * - all fields are optional and fall back to the base task identifier when absent
+ * - lifecycle calls follow the scheduled task execution order
+ * - `getWindowRows()` is safe before, during, and after a run
  *
  * Returns:
- * - metadata merged into queued task state
+ * - a `CliReporter`-compatible reporter with row generation helpers
  */
-export interface SummaryReporterTaskQueuedPayload extends CliReporterTaskQueuedPayload {
+export interface SummaryReporter extends CliReporter {
   /**
-   * Stable display label shown in the active window.
+   * Builds the current live summary window rows.
    */
-  displayName?: string
+  getWindowRows: (options?: SummaryReporterWindowRowsOptions) => string[]
   /**
-   * Project label rendered as a badge prefix.
+   * Handles case start events with additional display metadata.
    */
-  projectName?: string
+  onCaseStart: (payload: SummaryReporterCaseStartPayload) => void
   /**
-   * Total number of cases expected for the task.
+   * Handles task queue events with additional display metadata.
    */
-  totalCases?: number
+  onTaskQueued: (payload: SummaryReporterTaskQueuedPayload) => void
 }
 
 /**
@@ -106,6 +98,34 @@ export interface SummaryReporterOptions {
 }
 
 /**
+ * Additional task metadata accepted by the live summary reporter.
+ *
+ * Use when:
+ * - queue events can provide richer task labels before CLI wiring is complete
+ * - tests need to set deterministic display names and case totals
+ *
+ * Expects:
+ * - all fields are optional and fall back to the base task identifier when absent
+ *
+ * Returns:
+ * - metadata merged into queued task state
+ */
+export interface SummaryReporterTaskQueuedPayload extends CliReporterTaskQueuedPayload {
+  /**
+   * Stable display label shown in the active window.
+   */
+  displayName?: string
+  /**
+   * Project label rendered as a badge prefix.
+   */
+  projectName?: string
+  /**
+   * Total number of cases expected for the task.
+   */
+  totalCases?: number
+}
+
+/**
  * Row generation options for the live summary window.
  *
  * Use when:
@@ -124,35 +144,6 @@ export interface SummaryReporterWindowRowsOptions {
   maxRows?: number
 }
 
-/**
- * Reporter contract for live summary state plus window row generation.
- *
- * Use when:
- * - CLI code needs the reporter lifecycle plus `getWindowRows()`
- * - tests need to inspect the rendered terminal rows directly
- *
- * Expects:
- * - lifecycle calls follow the scheduled task execution order
- * - `getWindowRows()` is safe before, during, and after a run
- *
- * Returns:
- * - a `CliReporter`-compatible reporter with row generation helpers
- */
-export interface SummaryReporter extends CliReporter {
-  /**
-   * Builds the current live summary window rows.
-   */
-  getWindowRows: (options?: SummaryReporterWindowRowsOptions) => string[]
-  /**
-   * Handles task queue events with additional display metadata.
-   */
-  onTaskQueued: (payload: SummaryReporterTaskQueuedPayload) => void
-  /**
-   * Handles case start events with additional display metadata.
-   */
-  onCaseStart: (payload: SummaryReporterCaseStartPayload) => void
-}
-
 interface ActiveCaseState {
   autoRetry: number | undefined
   caseId: string
@@ -162,7 +153,21 @@ interface ActiveCaseState {
   startedAt: number
 }
 
-type SummaryTaskLifecycleState = 'queued' | 'running' | 'finished'
+interface ProgressTimingState {
+  elapsedDurationMs: number
+  estimatedDurationMs?: number
+}
+
+interface SummaryReporterCounterState {
+  completed: number
+  failed: number
+  passed: number
+  skipped: number
+  timeout: number
+  total: number
+}
+
+type SummaryTaskLifecycleState = 'finished' | 'queued' | 'running'
 
 interface TaskRuntimeState {
   caseOrderCounter: number
@@ -179,137 +184,62 @@ interface TaskRuntimeState {
   totalCases: number
 }
 
-interface ProgressTimingState {
-  elapsedDurationMs: number
-  estimatedDurationMs?: number
-}
-
 class SummaryReporterStateMachine implements SummaryReporter {
-  private readonly options: SummaryReporterOptions
-  private readonly taskCounters = createCounterState()
   private readonly caseCounters = createCounterState()
-  private readonly tasks = new Map<string, TaskRuntimeState>()
+  private readonly options: SummaryReporterOptions
   private queueOrderCounter = 0
   private startedAtMs = 0
   private startTime = ''
+  private readonly taskCounters = createCounterState()
+  private readonly tasks = new Map<string, TaskRuntimeState>()
 
   constructor(options: SummaryReporterOptions) {
     this.options = options
   }
 
   /**
-   * Handles run startup.
+   * Releases reporter resources.
    *
    * Use when:
-   * - a new CLI run is starting and the summary state must reset
+   * - CLI cleanup runs from a `finally` block
    *
    * Expects:
-   * - `totalTasks` matches the scheduled task count for the run
+   * - repeated calls are safe
    *
    * Returns:
    * - no direct value
    */
-  onRunStart(payload: CliReporterRunStartPayload): void {
-    this.tasks.clear()
-    this.queueOrderCounter = 0
-    resetCounterState(this.taskCounters, payload.totalTasks)
-    resetCounterState(this.caseCounters, 0)
-    this.startedAtMs = this.options.getNow()
-    this.startTime = formatTimeString(new Date(this.options.getWallClockNow()))
-  }
+  dispose(): void {}
 
   /**
-   * Handles task queue events.
+   * Builds the current live summary window rows.
    *
    * Use when:
-   * - a scheduled task becomes visible in the live summary before it starts
+   * - the live reporter or tests need a snapshot of the active window
    *
    * Expects:
-   * - `taskId` is stable across later lifecycle events
+   * - `maxRows`, when present, keeps footer rows visible
    *
    * Returns:
-   * - no direct value
+   * - terminal rows in display order
    */
-  onTaskQueued(payload: SummaryReporterTaskQueuedPayload): void {
-    const task = this.getOrCreateTaskState(payload.taskId)
+  getWindowRows(options?: SummaryReporterWindowRowsOptions): string[] {
+    const activeRows = this.createActiveRows()
+    const footerRows = this.createFooterRows()
+    const maxRows = options?.maxRows
+    const footerBlock = [...footerRows, '']
 
-    if (task.state === 'finished') {
-      return
+    if (maxRows == null || maxRows <= 0) {
+      const activeBlock = ['', ...activeRows, ...(activeRows.length > 0 ? [''] : [])]
+      return [...activeBlock, ...footerBlock]
     }
 
-    task.displayName = payload.displayName ?? task.displayName
-    task.projectName = payload.projectName ?? task.projectName
-    this.syncTaskTotalCases(task, payload.totalCases)
-  }
-
-  /**
-   * Handles task start events.
-   *
-   * Use when:
-   * - a queued task begins executing
-   *
-   * Expects:
-   * - the task was previously queued or can be synthesized from its identifier
-   *
-   * Returns:
-   * - no direct value
-   */
-  onTaskStart(payload: CliReporterTaskStartPayload): void {
-    const task = this.getOrCreateTaskState(payload.taskId)
-
-    if (task.state === 'finished') {
-      return
+    if (maxRows <= footerBlock.length) {
+      return footerBlock.slice(-maxRows)
     }
 
-    task.state = 'running'
-    task.startedAt ??= this.options.getNow()
-  }
-
-  /**
-   * Handles case start events.
-   *
-   * Use when:
-   * - a running task starts one case and slow-case tracking may begin
-   *
-   * Expects:
-   * - `caseId` is stable for the lifetime of the running case
-   *
-   * Returns:
-   * - no direct value
-   */
-  onCaseStart(payload: SummaryReporterCaseStartPayload): void {
-    const task = this.getOrCreateTaskState(payload.taskId)
-
-    if (task.state === 'finished') {
-      return
-    }
-
-    task.state = 'running'
-    task.startedAt ??= this.options.getNow()
-
-    if (task.settledCaseIds.has(payload.caseId)) {
-      return
-    }
-
-    const existingCase = task.runningCases.get(payload.caseId)
-    if (existingCase != null) {
-      existingCase.autoRetry = payload.autoRetry
-      existingCase.caseName = payload.caseName ?? payload.caseId
-      existingCase.retryIndex = payload.retryIndex
-      return
-    }
-
-    task.caseOrderCounter += 1
-    task.runningCases.set(payload.caseId, {
-      autoRetry: payload.autoRetry,
-      caseId: payload.caseId,
-      caseName: payload.caseName ?? payload.caseId,
-      order: task.caseOrderCounter,
-      retryIndex: payload.retryIndex,
-      startedAt: this.options.getNow(),
-    })
-
-    this.syncTaskTotalCases(task)
+    const availableActiveRows = Math.max(0, maxRows - footerBlock.length)
+    return [...createBoundedActiveBlock(activeRows, availableActiveRows), ...footerBlock]
   }
 
   /**
@@ -361,6 +291,94 @@ class SummaryReporterStateMachine implements SummaryReporter {
   }
 
   /**
+   * Handles case start events.
+   *
+   * Use when:
+   * - a running task starts one case and slow-case tracking may begin
+   *
+   * Expects:
+   * - `caseId` is stable for the lifetime of the running case
+   *
+   * Returns:
+   * - no direct value
+   */
+  onCaseStart(payload: SummaryReporterCaseStartPayload): void {
+    const task = this.getOrCreateTaskState(payload.taskId)
+
+    if (task.state === 'finished') {
+      return
+    }
+
+    task.state = 'running'
+    task.startedAt ??= this.options.getNow()
+
+    if (task.settledCaseIds.has(payload.caseId)) {
+      return
+    }
+
+    const existingCase = task.runningCases.get(payload.caseId)
+    if (existingCase != null) {
+      existingCase.autoRetry = payload.autoRetry
+      existingCase.caseName = payload.caseName ?? payload.caseId
+      existingCase.retryIndex = payload.retryIndex
+      return
+    }
+
+    task.caseOrderCounter += 1
+    task.runningCases.set(payload.caseId, {
+      autoRetry: payload.autoRetry,
+      caseId: payload.caseId,
+      caseName: payload.caseName ?? payload.caseId,
+      order: task.caseOrderCounter,
+      retryIndex: payload.retryIndex,
+      startedAt: this.options.getNow(),
+    })
+
+    this.syncTaskTotalCases(task)
+  }
+
+  /**
+   * Handles run completion.
+   *
+   * Use when:
+   * - the caller has final task totals and wants the footer normalized
+   *
+   * Expects:
+   * - payload counters are final terminal task totals
+   *
+   * Returns:
+   * - no direct value
+   */
+  onRunEnd(payload: CliReporterRunEndPayload): void {
+    this.taskCounters.total = payload.totalTasks
+    this.taskCounters.passed = payload.passedTasks
+    this.taskCounters.failed = payload.failedTasks
+    this.taskCounters.skipped = payload.skippedTasks
+    this.taskCounters.completed = payload.passedTasks + payload.failedTasks + payload.skippedTasks
+  }
+
+  /**
+   * Handles run startup.
+   *
+   * Use when:
+   * - a new CLI run is starting and the summary state must reset
+   *
+   * Expects:
+   * - `totalTasks` matches the scheduled task count for the run
+   *
+   * Returns:
+   * - no direct value
+   */
+  onRunStart(payload: CliReporterRunStartPayload): void {
+    this.tasks.clear()
+    this.queueOrderCounter = 0
+    resetCounterState(this.taskCounters, payload.totalTasks)
+    resetCounterState(this.caseCounters, 0)
+    this.startedAtMs = this.options.getNow()
+    this.startTime = formatTimeString(new Date(this.options.getWallClockNow()))
+  }
+
+  /**
    * Handles task completion.
    *
    * Use when:
@@ -399,68 +417,50 @@ class SummaryReporterStateMachine implements SummaryReporter {
   }
 
   /**
-   * Handles run completion.
+   * Handles task queue events.
    *
    * Use when:
-   * - the caller has final task totals and wants the footer normalized
+   * - a scheduled task becomes visible in the live summary before it starts
    *
    * Expects:
-   * - payload counters are final terminal task totals
+   * - `taskId` is stable across later lifecycle events
    *
    * Returns:
    * - no direct value
    */
-  onRunEnd(payload: CliReporterRunEndPayload): void {
-    this.taskCounters.total = payload.totalTasks
-    this.taskCounters.passed = payload.passedTasks
-    this.taskCounters.failed = payload.failedTasks
-    this.taskCounters.skipped = payload.skippedTasks
-    this.taskCounters.completed = payload.passedTasks + payload.failedTasks + payload.skippedTasks
+  onTaskQueued(payload: SummaryReporterTaskQueuedPayload): void {
+    const task = this.getOrCreateTaskState(payload.taskId)
+
+    if (task.state === 'finished') {
+      return
+    }
+
+    task.displayName = payload.displayName ?? task.displayName
+    task.projectName = payload.projectName ?? task.projectName
+    this.syncTaskTotalCases(task, payload.totalCases)
   }
 
   /**
-   * Releases reporter resources.
+   * Handles task start events.
    *
    * Use when:
-   * - CLI cleanup runs from a `finally` block
+   * - a queued task begins executing
    *
    * Expects:
-   * - repeated calls are safe
+   * - the task was previously queued or can be synthesized from its identifier
    *
    * Returns:
    * - no direct value
    */
-  dispose(): void {}
+  onTaskStart(payload: CliReporterTaskStartPayload): void {
+    const task = this.getOrCreateTaskState(payload.taskId)
 
-  /**
-   * Builds the current live summary window rows.
-   *
-   * Use when:
-   * - the live reporter or tests need a snapshot of the active window
-   *
-   * Expects:
-   * - `maxRows`, when present, keeps footer rows visible
-   *
-   * Returns:
-   * - terminal rows in display order
-   */
-  getWindowRows(options?: SummaryReporterWindowRowsOptions): string[] {
-    const activeRows = this.createActiveRows()
-    const footerRows = this.createFooterRows()
-    const maxRows = options?.maxRows
-    const footerBlock = [...footerRows, '']
-
-    if (maxRows == null || maxRows <= 0) {
-      const activeBlock = ['', ...activeRows, ...(activeRows.length > 0 ? [''] : [])]
-      return [...activeBlock, ...footerBlock]
+    if (task.state === 'finished') {
+      return
     }
 
-    if (maxRows <= footerBlock.length) {
-      return footerBlock.slice(-maxRows)
-    }
-
-    const availableActiveRows = Math.max(0, maxRows - footerBlock.length)
-    return [...createBoundedActiveBlock(activeRows, availableActiveRows), ...footerBlock]
+    task.state = 'running'
+    task.startedAt ??= this.options.getNow()
   }
 
   private createActiveRows(): string[] {
@@ -566,6 +566,71 @@ class SummaryReporterStateMachine implements SummaryReporter {
 }
 
 /**
+ * Creates the live summary reporter state machine for `vieval` CLI runs.
+ *
+ * Use when:
+ * - the CLI wants Vitest-style active rows and live counters
+ * - tests need a deterministic reporter surface without touching the terminal
+ *
+ * Expects:
+ * - queue/start/end events describe task lifecycle in order
+ * - `getNow()` remains monotonic within one run
+ * - `getWallClockNow()` returns the wall-clock run start timestamp
+ *
+ * Returns:
+ * - a reporter compatible with the base CLI lifecycle plus `getWindowRows()`
+ *
+ * Call stack:
+ *
+ * {@link createSummaryReporter}
+ *   -> {@link SummaryReporterStateMachine.onTaskQueued}
+ *   -> {@link SummaryReporterStateMachine.onCaseStart}
+ *   -> {@link SummaryReporterStateMachine.getWindowRows}
+ */
+export function createSummaryReporter(options: SummaryReporterOptions): SummaryReporter {
+  return new SummaryReporterStateMachine(options)
+}
+
+function compareActiveTasks(left: TaskRuntimeState, right: TaskRuntimeState): number {
+  const leftProject = left.projectName ?? ''
+  const rightProject = right.projectName ?? ''
+
+  if (leftProject !== rightProject) {
+    return leftProject.localeCompare(rightProject)
+  }
+
+  const displayNameOrder = left.displayName.localeCompare(right.displayName)
+
+  if (displayNameOrder !== 0) {
+    return displayNameOrder
+  }
+
+  return left.queueOrder - right.queueOrder
+}
+
+function countRunningCases(tasks: Iterable<TaskRuntimeState>): number {
+  let runningCount = 0
+
+  for (const task of tasks) {
+    runningCount += task.runningCases.size
+  }
+
+  return runningCount
+}
+
+function countRunningTasks(tasks: Iterable<TaskRuntimeState>): number {
+  let runningCount = 0
+
+  for (const task of tasks) {
+    if (task.state === 'running') {
+      runningCount += 1
+    }
+  }
+
+  return runningCount
+}
+
+/**
  * Creates the active task block while keeping room for summary footer rows.
  *
  * Use when:
@@ -609,32 +674,6 @@ function createBoundedActiveBlock(activeRows: readonly string[], maxRows: number
   ]
 }
 
-/**
- * Creates the live summary reporter state machine for `vieval` CLI runs.
- *
- * Use when:
- * - the CLI wants Vitest-style active rows and live counters
- * - tests need a deterministic reporter surface without touching the terminal
- *
- * Expects:
- * - queue/start/end events describe task lifecycle in order
- * - `getNow()` remains monotonic within one run
- * - `getWallClockNow()` returns the wall-clock run start timestamp
- *
- * Returns:
- * - a reporter compatible with the base CLI lifecycle plus `getWindowRows()`
- *
- * Call stack:
- *
- * {@link createSummaryReporter}
- *   -> {@link SummaryReporterStateMachine.onTaskQueued}
- *   -> {@link SummaryReporterStateMachine.onCaseStart}
- *   -> {@link SummaryReporterStateMachine.getWindowRows}
- */
-export function createSummaryReporter(options: SummaryReporterOptions): SummaryReporter {
-  return new SummaryReporterStateMachine(options)
-}
-
 function createCounterState(): SummaryReporterCounterState {
   return {
     completed: 0,
@@ -646,44 +685,43 @@ function createCounterState(): SummaryReporterCounterState {
   }
 }
 
-function resetCounterState(counter: SummaryReporterCounterState, total: number): void {
-  counter.completed = 0
-  counter.failed = 0
-  counter.passed = 0
-  counter.skipped = 0
-  counter.timeout = 0
-  counter.total = total
-}
-
-function sumTaskCaseTotals(tasks: Iterable<TaskRuntimeState>): number {
-  let total = 0
-
-  for (const task of tasks) {
-    total += task.totalCases
+function estimateTaskDurationMs(task: TaskRuntimeState, now: number): number | undefined {
+  if (task.startedAt == null) {
+    return undefined
   }
 
-  return total
+  return estimateTotalDurationMs(
+    task.completedCases,
+    task.totalCases,
+    Math.max(0, now - task.startedAt),
+  )
 }
 
-function compareActiveTasks(left: TaskRuntimeState, right: TaskRuntimeState): number {
-  const leftProject = left.projectName ?? ''
-  const rightProject = right.projectName ?? ''
-
-  if (leftProject !== rightProject) {
-    return leftProject.localeCompare(rightProject)
+function estimateTotalDurationMs(
+  completedCount: number,
+  totalCount: number,
+  elapsedDurationMs: number,
+): number | undefined {
+  if (completedCount === 0 || totalCount === 0) {
+    return undefined
   }
 
-  const displayNameOrder = left.displayName.localeCompare(right.displayName)
-
-  if (displayNameOrder !== 0) {
-    return displayNameOrder
-  }
-
-  return left.queueOrder - right.queueOrder
+  const averageDurationMs = elapsedDurationMs / completedCount
+  return Math.round(averageDurationMs * totalCount)
 }
 
-function padSummaryTitle(label: string): string {
-  return `${c.dim(label.padEnd(8))} `
+function formatActiveConcurrencyState(options: {
+  caseRunningCount: number
+  taskRunningCount: number
+}): string {
+  return [
+    options.taskRunningCount > 0
+      ? c.bold(c.yellow(`${options.taskRunningCount} ${pluralize('task', options.taskRunningCount)} running`))
+      : c.dim('0 tasks running'),
+    options.caseRunningCount > 0
+      ? c.bold(c.yellow(`${options.caseRunningCount} ${pluralize('case', options.caseRunningCount)} running`))
+      : c.dim('0 cases running'),
+  ].join(c.dim(' | '))
 }
 
 function formatCounterState(
@@ -701,36 +739,6 @@ function formatCounterState(
     counter.timeout > 0 ? c.bold(c.yellow(`${counter.timeout} timeout`)) : c.dim(`${counter.timeout} timeout`),
     counter.skipped > 0 ? c.yellow(`${counter.skipped} skipped`) : c.dim(`${counter.skipped} skipped`),
   ].join(c.dim(' | ')) + c.gray(` (${counter.total})`) + formatTimingSuffix(timing)
-}
-
-function formatActiveConcurrencyState(options: {
-  caseRunningCount: number
-  taskRunningCount: number
-}): string {
-  return [
-    options.taskRunningCount > 0
-      ? c.bold(c.yellow(`${options.taskRunningCount} ${pluralize('task', options.taskRunningCount)} running`))
-      : c.dim('0 tasks running'),
-    options.caseRunningCount > 0
-      ? c.bold(c.yellow(`${options.caseRunningCount} ${pluralize('case', options.caseRunningCount)} running`))
-      : c.dim('0 cases running'),
-  ].join(c.dim(' | '))
-}
-
-function pluralize(noun: string, count: number): string {
-  return count === 1 ? noun : `${noun}s`
-}
-
-function formatRetrySuffix(activeCase: ActiveCaseState): string {
-  if (activeCase.retryIndex == null || activeCase.retryIndex <= 0 || activeCase.autoRetry == null || activeCase.autoRetry <= 0) {
-    return ''
-  }
-
-  return c.dim(` retry ${activeCase.retryIndex}/${activeCase.autoRetry}`)
-}
-
-function formatTimeString(date: Date): string {
-  return date.toTimeString().split(' ')[0] ?? ''
 }
 
 function formatDuration(durationMs: number): string {
@@ -771,51 +779,12 @@ function formatProjectBadge(projectName: string | undefined, isTTY: boolean): st
   return `${c.black(background(` ${projectName} `))} `
 }
 
-function countRunningCases(tasks: Iterable<TaskRuntimeState>): number {
-  let runningCount = 0
-
-  for (const task of tasks) {
-    runningCount += task.runningCases.size
+function formatRetrySuffix(activeCase: ActiveCaseState): string {
+  if (activeCase.retryIndex == null || activeCase.retryIndex <= 0 || activeCase.autoRetry == null || activeCase.autoRetry <= 0) {
+    return ''
   }
 
-  return runningCount
-}
-
-function countRunningTasks(tasks: Iterable<TaskRuntimeState>): number {
-  let runningCount = 0
-
-  for (const task of tasks) {
-    if (task.state === 'running') {
-      runningCount += 1
-    }
-  }
-
-  return runningCount
-}
-
-function estimateTaskDurationMs(task: TaskRuntimeState, now: number): number | undefined {
-  if (task.startedAt == null) {
-    return undefined
-  }
-
-  return estimateTotalDurationMs(
-    task.completedCases,
-    task.totalCases,
-    Math.max(0, now - task.startedAt),
-  )
-}
-
-function estimateTotalDurationMs(
-  completedCount: number,
-  totalCount: number,
-  elapsedDurationMs: number,
-): number | undefined {
-  if (completedCount === 0 || totalCount === 0) {
-    return undefined
-  }
-
-  const averageDurationMs = elapsedDurationMs / completedCount
-  return Math.round(averageDurationMs * totalCount)
+  return c.dim(` retry ${activeCase.retryIndex}/${activeCase.autoRetry}`)
 }
 
 function formatTaskProgressSuffix(task: TaskRuntimeState, now: number): string {
@@ -829,6 +798,10 @@ function formatTaskProgressSuffix(task: TaskRuntimeState, now: number): string {
   })}`
 }
 
+function formatTimeString(date: Date): string {
+  return date.toTimeString().split(' ')[0] ?? ''
+}
+
 function formatTimingSuffix(timing: ProgressTimingState): string {
   const parts = [`elapsed ${formatHumanDuration(timing.elapsedDurationMs)}`]
 
@@ -837,4 +810,31 @@ function formatTimingSuffix(timing: ProgressTimingState): string {
   }
 
   return ` (${parts.join(', ')})`
+}
+
+function padSummaryTitle(label: string): string {
+  return `${c.dim(label.padEnd(8))} `
+}
+
+function pluralize(noun: string, count: number): string {
+  return count === 1 ? noun : `${noun}s`
+}
+
+function resetCounterState(counter: SummaryReporterCounterState, total: number): void {
+  counter.completed = 0
+  counter.failed = 0
+  counter.passed = 0
+  counter.skipped = 0
+  counter.timeout = 0
+  counter.total = total
+}
+
+function sumTaskCaseTotals(tasks: Iterable<TaskRuntimeState>): number {
+  let total = 0
+
+  for (const task of tasks) {
+    total += task.totalCases
+  }
+
+  return total
 }

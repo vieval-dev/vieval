@@ -1,4 +1,117 @@
 /**
+ * Reporter lifecycle contract for `vieval` CLI output.
+ *
+ * Use when:
+ * - wiring live or no-op reporting into CLI execution
+ * - testing reporter orchestration without touching terminal state
+ *
+ * Expects:
+ * - lifecycle methods are called in run order
+ * - `dispose()` is safe to call more than once
+ */
+export interface CliReporter {
+  /**
+   * Releases any reporter resources.
+   */
+  dispose: () => void
+  /**
+   * Handles case completion.
+   */
+  onCaseEnd: (payload: CliReporterCaseEndPayload) => void
+  /**
+   * Handles case start.
+   */
+  onCaseStart: (payload: CliReporterCaseStartPayload) => void
+  /**
+   * Handles run completion.
+   */
+  onRunEnd: (payload: CliReporterRunEndPayload) => void
+  /**
+   * Handles run startup.
+   */
+  onRunStart: (payload: CliReporterRunStartPayload) => void
+  /**
+   * Handles task completion.
+   */
+  onTaskEnd: (payload: CliReporterTaskEndPayload) => void
+  /**
+   * Handles task queueing.
+   */
+  onTaskQueued: (payload: CliReporterTaskQueuedPayload) => void
+  /**
+   * Handles task start.
+   */
+  onTaskStart: (payload: CliReporterTaskStartPayload) => void
+}
+
+/**
+ * Payload emitted when a case finishes executing.
+ *
+ * Use when:
+ * - updating in-flight counters and case completion state
+ *
+ * Expects:
+ * - `taskId` matches the owning task
+ * - `caseId` matches the started case
+ * - `state` is the terminal case result
+ */
+export interface CliReporterCaseEndPayload {
+  /**
+   * Stable case identifier within the task.
+   */
+  caseId: string
+  /**
+   * Optional failure message when `state` is `failed`.
+   */
+  errorMessage?: string
+  /**
+   * Optional case output payload for report artifacts.
+   */
+  output?: unknown
+  /**
+   * Terminal outcome for the case.
+   */
+  state: CliReporterCaseState
+  /**
+   * Stable task identifier.
+   */
+  taskId: string
+}
+
+/**
+ * Payload emitted when a case starts executing.
+ *
+ * Use when:
+ * - showing fine-grained progress within a task
+ *
+ * Expects:
+ * - `taskId` matches the owning task
+ * - `caseId` uniquely identifies the case within the task
+ */
+export interface CliReporterCaseStartPayload {
+  /**
+   * Maximum retry count configured for this case.
+   */
+  autoRetry?: number
+  /**
+   * Stable case identifier within the task.
+   */
+  caseId: string
+  /**
+   * Optional case input payload for report artifacts.
+   */
+  input?: unknown
+  /**
+   * Current retry attempt index, where `0` is the first try.
+   */
+  retryIndex?: number
+  /**
+   * Stable task identifier.
+   */
+  taskId: string
+}
+
+/**
  * Allowed lifecycle outcomes for one task case.
  *
  * Use when:
@@ -8,19 +121,35 @@
  * Expects:
  * - reporters treat the values as terminal case results
  */
-export type CliReporterCaseState = 'passed' | 'failed' | 'skipped' | 'timeout'
+export type CliReporterCaseState = 'failed' | 'passed' | 'skipped' | 'timeout'
 
 /**
- * Allowed lifecycle outcomes for one task.
+ * Payload emitted when the overall run finishes.
  *
  * Use when:
- * - reporting task completion state
- * - aggregating task execution into a terminal summary
+ * - rendering final totals after all tasks settle
  *
  * Expects:
- * - reporters treat the values as terminal task results
+ * - counters represent the final terminal totals for the run
  */
-export type CliReporterTaskState = 'passed' | 'failed' | 'skipped'
+export interface CliReporterRunEndPayload {
+  /**
+   * Total number of failed tasks.
+   */
+  failedTasks: number
+  /**
+   * Total number of passed tasks.
+   */
+  passedTasks: number
+  /**
+   * Total number of skipped tasks.
+   */
+  skippedTasks: number
+  /**
+   * Total number of tasks included in the run.
+   */
+  totalTasks: number
+}
 
 /**
  * Payload emitted when a run begins.
@@ -36,6 +165,27 @@ export interface CliReporterRunStartPayload {
    * Total number of tasks included in the run.
    */
   totalTasks: number
+}
+
+/**
+ * Payload emitted when a task finishes executing.
+ *
+ * Use when:
+ * - moving a task from active state into a terminal state
+ *
+ * Expects:
+ * - `taskId` matches the started task
+ * - `state` is the terminal task result
+ */
+export interface CliReporterTaskEndPayload {
+  /**
+   * Terminal outcome for the task.
+   */
+  state: CliReporterTaskState
+  /**
+   * Stable task identifier.
+   */
+  taskId: string
 }
 
 /**
@@ -75,163 +225,13 @@ export interface CliReporterTaskStartPayload {
 }
 
 /**
- * Payload emitted when a case starts executing.
+ * Allowed lifecycle outcomes for one task.
  *
  * Use when:
- * - showing fine-grained progress within a task
+ * - reporting task completion state
+ * - aggregating task execution into a terminal summary
  *
  * Expects:
- * - `taskId` matches the owning task
- * - `caseId` uniquely identifies the case within the task
+ * - reporters treat the values as terminal task results
  */
-export interface CliReporterCaseStartPayload {
-  /**
-   * Maximum retry count configured for this case.
-   */
-  autoRetry?: number
-  /**
-   * Optional case input payload for report artifacts.
-   */
-  input?: unknown
-  /**
-   * Stable task identifier.
-   */
-  taskId: string
-  /**
-   * Current retry attempt index, where `0` is the first try.
-   */
-  retryIndex?: number
-  /**
-   * Stable case identifier within the task.
-   */
-  caseId: string
-}
-
-/**
- * Payload emitted when a case finishes executing.
- *
- * Use when:
- * - updating in-flight counters and case completion state
- *
- * Expects:
- * - `taskId` matches the owning task
- * - `caseId` matches the started case
- * - `state` is the terminal case result
- */
-export interface CliReporterCaseEndPayload {
-  /**
-   * Stable task identifier.
-   */
-  taskId: string
-  /**
-   * Stable case identifier within the task.
-   */
-  caseId: string
-  /**
-   * Optional case output payload for report artifacts.
-   */
-  output?: unknown
-  /**
-   * Terminal outcome for the case.
-   */
-  state: CliReporterCaseState
-  /**
-   * Optional failure message when `state` is `failed`.
-   */
-  errorMessage?: string
-}
-
-/**
- * Payload emitted when a task finishes executing.
- *
- * Use when:
- * - moving a task from active state into a terminal state
- *
- * Expects:
- * - `taskId` matches the started task
- * - `state` is the terminal task result
- */
-export interface CliReporterTaskEndPayload {
-  /**
-   * Stable task identifier.
-   */
-  taskId: string
-  /**
-   * Terminal outcome for the task.
-   */
-  state: CliReporterTaskState
-}
-
-/**
- * Payload emitted when the overall run finishes.
- *
- * Use when:
- * - rendering final totals after all tasks settle
- *
- * Expects:
- * - counters represent the final terminal totals for the run
- */
-export interface CliReporterRunEndPayload {
-  /**
-   * Total number of tasks included in the run.
-   */
-  totalTasks: number
-  /**
-   * Total number of passed tasks.
-   */
-  passedTasks: number
-  /**
-   * Total number of failed tasks.
-   */
-  failedTasks: number
-  /**
-   * Total number of skipped tasks.
-   */
-  skippedTasks: number
-}
-
-/**
- * Reporter lifecycle contract for `vieval` CLI output.
- *
- * Use when:
- * - wiring live or no-op reporting into CLI execution
- * - testing reporter orchestration without touching terminal state
- *
- * Expects:
- * - lifecycle methods are called in run order
- * - `dispose()` is safe to call more than once
- */
-export interface CliReporter {
-  /**
-   * Handles run startup.
-   */
-  onRunStart: (payload: CliReporterRunStartPayload) => void
-  /**
-   * Handles task queueing.
-   */
-  onTaskQueued: (payload: CliReporterTaskQueuedPayload) => void
-  /**
-   * Handles task start.
-   */
-  onTaskStart: (payload: CliReporterTaskStartPayload) => void
-  /**
-   * Handles case start.
-   */
-  onCaseStart: (payload: CliReporterCaseStartPayload) => void
-  /**
-   * Handles case completion.
-   */
-  onCaseEnd: (payload: CliReporterCaseEndPayload) => void
-  /**
-   * Handles task completion.
-   */
-  onTaskEnd: (payload: CliReporterTaskEndPayload) => void
-  /**
-   * Handles run completion.
-   */
-  onRunEnd: (payload: CliReporterRunEndPayload) => void
-  /**
-   * Releases any reporter resources.
-   */
-  dispose: () => void
-}
+export type CliReporterTaskState = 'failed' | 'passed' | 'skipped'

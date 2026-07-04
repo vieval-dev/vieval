@@ -5,30 +5,16 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { caseOf, casesFromInputs, describeEval, describeTask } from './task'
 
-function createTestTaskCacheRuntime() {
-  return {
-    namespace() {
-      return {
-        file() {
-          return {
-            async exists() {
-              return false
-            },
-          }
-        },
-      }
-    },
-  } as any
-}
+function createDeferredPromise() {
+  let resolve!: () => void
+  const promise = new Promise<void>((promiseResolve) => {
+    resolve = promiseResolve
+  })
 
-function createTestModels() {
-  return [{
-    aliases: [],
-    id: 'openai:gpt-4.1-mini',
-    inferenceExecutor: 'openai',
-    inferenceExecutorId: 'openai',
-    model: 'gpt-4.1-mini',
-  }]
+  return {
+    promise,
+    resolve,
+  }
 }
 
 function createScheduledTaskMatrix() {
@@ -47,16 +33,30 @@ function createScheduledTaskMatrix() {
   }
 }
 
-function createDeferredPromise() {
-  let resolve!: () => void
-  const promise = new Promise<void>((promiseResolve) => {
-    resolve = promiseResolve
-  })
+function createTestModels() {
+  return [{
+    aliases: [],
+    id: 'openai:gpt-4.1-mini',
+    inferenceExecutor: 'openai',
+    inferenceExecutorId: 'openai',
+    model: 'gpt-4.1-mini',
+  }]
+}
 
+function createTestTaskCacheRuntime() {
   return {
-    promise,
-    resolve,
-  }
+    namespace() {
+      return {
+        file() {
+          return {
+            async exists() {
+              return false
+            },
+          }
+        },
+      }
+    },
+  } as any
 }
 
 async function waitForExpectation(assertion: () => void, attempts = 20): Promise<void> {
@@ -96,10 +96,10 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
           name: 'x',
         },
         id: 'x',
-        matrix: createScheduledTaskMatrix(),
         inferenceExecutor: {
           id: 'openai:gpt-4.1-mini',
         },
+        matrix: createScheduledTaskMatrix(),
       },
     })
 
@@ -128,10 +128,10 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
           name: 'x',
         },
         id: 'x',
-        matrix: createScheduledTaskMatrix(),
         inferenceExecutor: {
           id: 'openai:gpt-4.1-mini',
         },
+        matrix: createScheduledTaskMatrix(),
       },
     })
 
@@ -140,7 +140,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
   it('emits reporter hooks around each case without changing the score average', async () => {
     const startPayloads: Array<{ index: number, name: string, total: number }> = []
-    const endPayloads: Array<{ index: number, name: string, state: 'passed' | 'failed' | 'timeout', total: number }> = []
+    const endPayloads: Array<{ index: number, name: string, state: 'failed' | 'passed' | 'timeout', total: number }> = []
     let resolveFirstCase: (() => void) | undefined
 
     const taskDefinition = describeTask('dsl-hooks', () => {
@@ -159,11 +159,11 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
       cache: createTestTaskCacheRuntime(),
       models: createTestModels(),
       reporterHooks: {
-        onCaseStart(payload) {
-          startPayloads.push(payload)
-        },
         onCaseEnd(payload) {
           endPayloads.push(payload)
+        },
+        onCaseStart(payload) {
+          startPayloads.push(payload)
         },
       },
       task: {
@@ -175,10 +175,10 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
           name: 'x',
         },
         id: 'task-hooks',
-        matrix: createScheduledTaskMatrix(),
         inferenceExecutor: {
           id: 'openai:gpt-4.1-mini',
         },
+        matrix: createScheduledTaskMatrix(),
       },
     })
 
@@ -225,10 +225,10 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
           name: 'x',
         },
         id: 'task-scoped-matrix',
-        matrix: createScheduledTaskMatrix(),
         inferenceExecutor: {
           id: 'openai:gpt-4.1-mini',
         },
+        matrix: createScheduledTaskMatrix(),
       },
     })
 
@@ -264,10 +264,10 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
           name: 'x',
         },
         id: 'task-matrix-isolation',
-        matrix: createScheduledTaskMatrix(),
         inferenceExecutor: {
           id: 'openai:gpt-4.1-mini',
         },
+        matrix: createScheduledTaskMatrix(),
       },
     })
 
@@ -846,10 +846,10 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
           name: 'x',
         },
         id: 'task-timeout',
-        matrix: createScheduledTaskMatrix(),
         inferenceExecutor: {
           id: 'openai:gpt-4.1-mini',
         },
+        matrix: createScheduledTaskMatrix(),
       },
     })
 
@@ -898,10 +898,10 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
           name: 'x',
         },
         id: 'task-retry',
-        matrix: createScheduledTaskMatrix(),
         inferenceExecutor: {
           id: 'openai:gpt-4.1-mini',
         },
+        matrix: createScheduledTaskMatrix(),
       },
     })
 
@@ -957,10 +957,10 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
             name: 'x',
           },
           id: 'task-retry-backoff',
-          matrix: createScheduledTaskMatrix(),
           inferenceExecutor: {
             id: 'openai:gpt-4.1-mini',
           },
+          matrix: createScheduledTaskMatrix(),
         },
       })
 
@@ -1041,10 +1041,10 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
             name: 'x',
           },
           id: 'task-custom-retry-delay',
-          matrix: createScheduledTaskMatrix(),
           inferenceExecutor: {
             id: 'openai:gpt-4.1-mini',
           },
+          matrix: createScheduledTaskMatrix(),
         },
       })
 
@@ -1116,10 +1116,10 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
           name: 'x',
         },
         id: 'task-auto-attempt',
-        matrix: createScheduledTaskMatrix(),
         inferenceExecutor: {
           id: 'openai:gpt-4.1-mini',
         },
+        matrix: createScheduledTaskMatrix(),
       },
     })
 
@@ -1179,10 +1179,10 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
           name: 'x',
         },
         id: 'task-auto-attempt-evidence',
-        matrix: createScheduledTaskMatrix(),
         inferenceExecutor: {
           id: 'openai:gpt-4.1-mini',
         },
+        matrix: createScheduledTaskMatrix(),
       },
     })
 
@@ -1225,10 +1225,10 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
           name: 'x',
         },
         id: 'task-auto-retry-before-auto-attempt',
-        matrix: createScheduledTaskMatrix(),
         inferenceExecutor: {
           id: 'openai:gpt-4.1-mini',
         },
+        matrix: createScheduledTaskMatrix(),
       },
     })
 
@@ -1268,10 +1268,10 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
           name: 'x',
         },
         id: 'task-abort',
-        matrix: createScheduledTaskMatrix(),
         inferenceExecutor: {
           id: 'openai:gpt-4.1-mini',
         },
+        matrix: createScheduledTaskMatrix(),
       },
     })
 
@@ -1299,10 +1299,10 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
           name: 'x',
         },
         id: 'x',
-        matrix: createScheduledTaskMatrix(),
         inferenceExecutor: {
           id: 'openai:gpt-4.1-mini',
         },
+        matrix: createScheduledTaskMatrix(),
       },
     })
 

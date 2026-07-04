@@ -8,42 +8,10 @@ import { generateText } from '@xsai/generate-text'
 import { createOpenAIFromEnv, normalizeOpenAITextOutput } from 'vieval/core/inference-executors'
 
 export interface XsaiLoCoMoAnswerGeneratorOptions {
-  apiKey?: string
   answerTimeoutMs?: number
+  apiKey?: string
   baseUrl?: string
   model?: string
-}
-
-function getCategoryInstruction(category: LoCoMoCategory): string {
-  if (category === 5) {
-    // Python parity:
-    // Category 5 uses a dedicated short-answer template in
-    // `snap-research/locomo/task_eval/gpt_utils.py:31-35`.
-    return 'Return only the selected option or option text with no extra explanation.'
-  }
-
-  // Python parity:
-  // Default QA path uses short-phrase answers in
-  // `snap-research/locomo/task_eval/gpt_utils.py:25-29`.
-  return 'Answer in a short phrase under 10 words. Answer with exact words from the context whenever possible.'
-}
-
-function hashRuntimeIdentity(value: string): string {
-  return createHash('sha256').update(value).digest('hex').slice(0, 8)
-}
-
-function getTokenLimitOptions(model: string): { max_completion_tokens: number } | { max_tokens: number } {
-  if (model.startsWith('gpt-5.5')) {
-    // NOTICE:
-    // The OpenAI-compatible endpoint rejects `max_tokens` for GPT-5.5 models.
-    // Root cause: the provider follows the newer Chat Completions parameter
-    // contract for these model IDs and requires `max_completion_tokens`.
-    // Removal condition: xsAI or the provider adapter normalizes this option
-    // across model families.
-    return { max_completion_tokens: 64 }
-  }
-
-  return { max_tokens: 64 }
 }
 
 /**
@@ -77,7 +45,6 @@ export function createXsaiLoCoMoAnswerGenerator(
   })
 
   return {
-    id: `xsai-openai-compatible-answer-generator:${model}:${hashRuntimeIdentity(baseUrl)}`,
     async generateAnswer(input) {
       const abortController = new AbortController()
       const timeout = setTimeout(() => abortController.abort(), answerTimeoutMs)
@@ -110,5 +77,38 @@ export function createXsaiLoCoMoAnswerGenerator(
         clearTimeout(timeout)
       }
     },
+    id: `xsai-openai-compatible-answer-generator:${model}:${hashRuntimeIdentity(baseUrl)}`,
   }
+}
+
+function getCategoryInstruction(category: LoCoMoCategory): string {
+  if (category === 5) {
+    // Python parity:
+    // Category 5 uses a dedicated short-answer template in
+    // `snap-research/locomo/task_eval/gpt_utils.py:31-35`.
+    return 'Return only the selected option or option text with no extra explanation.'
+  }
+
+  // Python parity:
+  // Default QA path uses short-phrase answers in
+  // `snap-research/locomo/task_eval/gpt_utils.py:25-29`.
+  return 'Answer in a short phrase under 10 words. Answer with exact words from the context whenever possible.'
+}
+
+function getTokenLimitOptions(model: string): { max_completion_tokens: number } | { max_tokens: number } {
+  if (model.startsWith('gpt-5.5')) {
+    // NOTICE:
+    // The OpenAI-compatible endpoint rejects `max_tokens` for GPT-5.5 models.
+    // Root cause: the provider follows the newer Chat Completions parameter
+    // contract for these model IDs and requires `max_completion_tokens`.
+    // Removal condition: xsAI or the provider adapter normalizes this option
+    // across model families.
+    return { max_completion_tokens: 64 }
+  }
+
+  return { max_tokens: 64 }
+}
+
+function hashRuntimeIdentity(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, 8)
 }

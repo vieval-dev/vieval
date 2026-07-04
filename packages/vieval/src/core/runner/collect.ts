@@ -7,10 +7,6 @@ import { fileURLToPath } from 'node:url'
 const evalFileSuffix = '.eval.ts'
 const absolutePathPattern = /^(?:[A-Z]:\/|\/|\\\\)/i
 
-function normalizePath(value: string): string {
-  return value.replaceAll('\\', '/')
-}
-
 /**
  * Converts a file path into a project-relative path when possible.
  *
@@ -54,17 +50,35 @@ export function asProjectRelativePath(filePath: string, context: RunnerRuntimeCo
   return normalizePath(filePath)
 }
 
-function resolveModuleFilePath(moduleHref: string): string | null {
-  if (!moduleHref.startsWith('file:')) {
-    return null
-  }
+/**
+ * Collects loaded vieval modules into sorted runner entries with stable ids.
+ *
+ * Call stack:
+ *
+ * `import.meta.glob(...)`
+ *   -> {@link collectEvalEntries}
+ *     -> {@link createCollectedEvalEntry}
+ *       -> {@link CollectedEvalEntry}[]
+ *
+ * Use when:
+ * - the runner has already loaded candidate eval modules
+ * - downstream scheduling needs stable entry ids and directory metadata
+ */
+export function collectEvalEntries(
+  modules: EvalModuleMap,
+  context: RunnerRuntimeContext,
+): CollectedEvalEntry[] {
+  return Object.entries(modules)
+    .flatMap(([moduleHref, moduleDefinition]) => {
+      const entry = createCollectedEvalEntry(moduleHref, moduleDefinition, context)
 
-  try {
-    return fileURLToPath(moduleHref)
-  }
-  catch {
-    return null
-  }
+      if (!entry) {
+        return []
+      }
+
+      return [entry]
+    })
+    .sort((left, right) => left.id.localeCompare(right.id))
 }
 
 function createCollectedEvalEntry(
@@ -102,33 +116,19 @@ function createCollectedEvalEntry(
   }
 }
 
-/**
- * Collects loaded vieval modules into sorted runner entries with stable ids.
- *
- * Call stack:
- *
- * `import.meta.glob(...)`
- *   -> {@link collectEvalEntries}
- *     -> {@link createCollectedEvalEntry}
- *       -> {@link CollectedEvalEntry}[]
- *
- * Use when:
- * - the runner has already loaded candidate eval modules
- * - downstream scheduling needs stable entry ids and directory metadata
- */
-export function collectEvalEntries(
-  modules: EvalModuleMap,
-  context: RunnerRuntimeContext,
-): CollectedEvalEntry[] {
-  return Object.entries(modules)
-    .flatMap(([moduleHref, moduleDefinition]) => {
-      const entry = createCollectedEvalEntry(moduleHref, moduleDefinition, context)
+function normalizePath(value: string): string {
+  return value.replaceAll('\\', '/')
+}
 
-      if (!entry) {
-        return []
-      }
+function resolveModuleFilePath(moduleHref: string): null | string {
+  if (!moduleHref.startsWith('file:')) {
+    return null
+  }
 
-      return [entry]
-    })
-    .sort((left, right) => left.id.localeCompare(right.id))
+  try {
+    return fileURLToPath(moduleHref)
+  }
+  catch {
+    return null
+  }
 }

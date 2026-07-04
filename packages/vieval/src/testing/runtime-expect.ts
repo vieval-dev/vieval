@@ -18,28 +18,31 @@ let isPluginInstalled = false
 let runtimeExpectInstance: ExpectStatic | undefined
 
 /**
- * Installs Vitest expect plugins once for process-local runtime assertions.
+ * Returns process-local runtime `expect` instance used by Vieval.
  *
  * Use when:
- * - running eval tasks outside Vitest worker runtime
- * - building an `expect` instance that does not rely on Vitest internal state
+ * - you need matcher assertions in eval files and CLI runtime
+ * - importing from `vitest` would crash outside Vitest worker contexts
  *
  * Expects:
- * - `@vitest/expect` is available in runtime dependencies
+ * - single-process usage (instance is memoized per process)
  *
  * Returns:
- * - nothing; side-effects are applied to `chai`
+ * - memoized runtime `expect` instance
  */
-function ensureRuntimeExpectPluginsInstalled(): void {
-  if (isPluginInstalled) {
-    return
+export function getRuntimeExpect(): ExpectStatic {
+  if (runtimeExpectInstance != null) {
+    return runtimeExpectInstance
   }
 
-  chai.use(JestExtend)
-  chai.use(JestChaiExpect)
-  chai.use(ChaiStyleAssertions)
-  chai.use(JestAsymmetricMatchers)
-  isPluginInstalled = true
+  runtimeExpectInstance = createRuntimeExpect()
+  Object.defineProperty(globalThis, GLOBAL_EXPECT, {
+    configurable: true,
+    value: runtimeExpectInstance,
+    writable: true,
+  })
+
+  return runtimeExpectInstance
 }
 
 /**
@@ -100,29 +103,26 @@ function createRuntimeExpect(): ExpectStatic {
 }
 
 /**
- * Returns process-local runtime `expect` instance used by Vieval.
+ * Installs Vitest expect plugins once for process-local runtime assertions.
  *
  * Use when:
- * - you need matcher assertions in eval files and CLI runtime
- * - importing from `vitest` would crash outside Vitest worker contexts
+ * - running eval tasks outside Vitest worker runtime
+ * - building an `expect` instance that does not rely on Vitest internal state
  *
  * Expects:
- * - single-process usage (instance is memoized per process)
+ * - `@vitest/expect` is available in runtime dependencies
  *
  * Returns:
- * - memoized runtime `expect` instance
+ * - nothing; side-effects are applied to `chai`
  */
-export function getRuntimeExpect(): ExpectStatic {
-  if (runtimeExpectInstance != null) {
-    return runtimeExpectInstance
+function ensureRuntimeExpectPluginsInstalled(): void {
+  if (isPluginInstalled) {
+    return
   }
 
-  runtimeExpectInstance = createRuntimeExpect()
-  Object.defineProperty(globalThis, GLOBAL_EXPECT, {
-    configurable: true,
-    value: runtimeExpectInstance,
-    writable: true,
-  })
-
-  return runtimeExpectInstance
+  chai.use(JestExtend)
+  chai.use(JestChaiExpect)
+  chai.use(ChaiStyleAssertions)
+  chai.use(JestAsymmetricMatchers)
+  isPluginInstalled = true
 }

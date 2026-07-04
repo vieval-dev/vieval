@@ -62,32 +62,6 @@ interface LobeHubAnswerResponse {
 }
 
 /**
- * Parses comma-separated header pairs.
- *
- * Before:
- * - "Authorization=Bearer token,X-Benchmark=locomo"
- *
- * After:
- * - { Authorization: "Bearer token", "X-Benchmark": "locomo" }
- */
-function parseHeaderPairs(value?: string): Record<string, string> {
-  return value
-    ?.split(',')
-    .filter(Boolean)
-    .reduce<Record<string, string>>((headers, pair) => {
-      const [key, ...valueParts] = pair.split('=')
-      const headerName = key?.trim()
-      const headerValue = valueParts.join('=').trim()
-
-      if (headerName && headerValue) {
-        headers[headerName] = headerValue
-      }
-
-      return headers
-    }, {}) ?? {}
-}
-
-/**
  * Creates a LobeHub answer-agent adapter mapped to the LoCoMo benchmark contract.
  *
  * Use when:
@@ -111,7 +85,6 @@ export function createLobeHubAnswerAgentAdapter(
   const maxSteps = options.maxSteps ?? Number(env.LOBEHUB_AGENT_MAX_STEPS ?? 10)
 
   return {
-    id: 'lobehub-answer-agent',
     async answerCase(input) {
       const response = await fetch(`${baseUrl}${path}`, {
         body: JSON.stringify(userId
@@ -153,5 +126,32 @@ export function createLobeHubAnswerAgentAdapter(
         prediction: payload.answer ?? '',
       }
     },
+    id: 'lobehub-answer-agent',
   }
+}
+
+/**
+ * Parses comma-separated header pairs.
+ *
+ * Before:
+ * - "Authorization=Bearer token,X-Benchmark=locomo"
+ *
+ * After:
+ * - { Authorization: "Bearer token", "X-Benchmark": "locomo" }
+ */
+function parseHeaderPairs(value?: string): Record<string, string> {
+  return value
+    ?.split(',')
+    .filter(Boolean)
+    .reduce<Record<string, string>>((headers, pair) => {
+      const [key, ...valueParts] = pair.split('=')
+      const headerName = key?.trim()
+      const headerValue = valueParts.join('=').trim()
+
+      if (headerName && headerValue) {
+        headers[headerName] = headerValue
+      }
+
+      return headers
+    }, {}) ?? {}
 }

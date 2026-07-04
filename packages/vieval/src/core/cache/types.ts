@@ -2,6 +2,35 @@ import type { Buffer } from 'node:buffer'
 import type { ReadStream, WriteStream } from 'node:fs'
 
 /**
+ * One cache file handle exposed to task code.
+ *
+ * Use when:
+ * - benchmark setup needs deterministic artifact storage
+ * - task runtime needs typed file helpers for text/json/binary payloads
+ *
+ * Expects:
+ * - `path` to be stable for the same namespace + key
+ * - read helpers to throw when the file does not exist or payload is invalid
+ *
+ * Returns:
+ * - read/write helpers over one deterministic cache artifact path
+ */
+export interface CacheFileHandle {
+  exists: () => Promise<boolean>
+  loadAsCasesInput: <T>() => Promise<T[]>
+  loadAsExpectFixture: <T>() => Promise<T>
+  openReadStream: () => ReadStream
+  openWriteStream: () => Promise<WriteStream>
+  path: string
+  readBuffer: () => Promise<Buffer>
+  readJson: <T>() => Promise<T>
+  readText: (encoding?: BufferEncoding) => Promise<string>
+  writeBuffer: (value: Buffer) => Promise<void>
+  writeJson: (value: unknown) => Promise<void>
+  writeText: (value: string, encoding?: BufferEncoding) => Promise<void>
+}
+
+/**
  * Cache entry options used to derive one deterministic cache file path.
  */
 export interface CacheFileOptions {
@@ -17,35 +46,6 @@ export interface CacheFileOptions {
    * Optional media type hint used by adapters when extension is omitted.
    */
   mediaType?: string
-}
-
-/**
- * One cache file handle exposed to task code.
- *
- * Use when:
- * - benchmark setup needs deterministic artifact storage
- * - task runtime needs typed file helpers for text/json/binary payloads
- *
- * Expects:
- * - `path` to be stable for the same namespace + key
- * - read helpers to throw when the file does not exist or payload is invalid
- *
- * Returns:
- * - read/write helpers over one deterministic cache artifact path
- */
-export interface CacheFileHandle {
-  path: string
-  exists: () => Promise<boolean>
-  openReadStream: () => ReadStream
-  openWriteStream: () => Promise<WriteStream>
-  readBuffer: () => Promise<Buffer>
-  writeBuffer: (value: Buffer) => Promise<void>
-  readText: (encoding?: BufferEncoding) => Promise<string>
-  writeText: (value: string, encoding?: BufferEncoding) => Promise<void>
-  readJson: <T>() => Promise<T>
-  writeJson: (value: unknown) => Promise<void>
-  loadAsCasesInput: <T>() => Promise<T[]>
-  loadAsExpectFixture: <T>() => Promise<T>
 }
 
 /**

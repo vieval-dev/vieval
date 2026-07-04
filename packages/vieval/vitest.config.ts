@@ -1,10 +1,10 @@
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
+  plugins: [],
   root: import.meta.dirname,
   test: {
-    include: ['src/**/*.test.ts'],
     environment: 'node',
+    include: ['src/**/*.test.ts'],
   },
-  plugins: [],
 })

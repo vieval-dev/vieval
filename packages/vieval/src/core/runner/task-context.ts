@@ -3,6 +3,15 @@ import type { TaskCacheRuntime } from '../cache'
 import type { ScheduledTask } from './schedule'
 
 /**
+ * Inputs used to build task execution context.
+ */
+export interface CreateTaskExecutionContextOptions {
+  cache?: TaskCacheRuntime
+  models: readonly ModelDefinition[]
+  task: ScheduledTask
+}
+
+/**
  * Task-scoped execution context exposed to runner executors.
  */
 export interface TaskExecutionContext {
@@ -14,28 +23,6 @@ export interface TaskExecutionContext {
    * Configured model registrations available to model plugins.
    */
   models: readonly ModelDefinition[]
-}
-
-/**
- * Inputs used to build task execution context.
- */
-export interface CreateTaskExecutionContextOptions {
-  cache?: TaskCacheRuntime
-  models: readonly ModelDefinition[]
-  task: ScheduledTask
-}
-
-function createNoopTaskCacheRuntime(): TaskCacheRuntime {
-  return {
-    namespace(name) {
-      return {
-        file(options) {
-          const key = options.key.join('/')
-          throw new Error(`Task cache runtime is not configured. Requested namespace "${name}" and key "${key}".`)
-        },
-      }
-    },
-  }
 }
 
 /**
@@ -51,5 +38,18 @@ export function createTaskExecutionContext(options: CreateTaskExecutionContextOp
   return {
     cache: options.cache ?? createNoopTaskCacheRuntime(),
     models: options.models,
+  }
+}
+
+function createNoopTaskCacheRuntime(): TaskCacheRuntime {
+  return {
+    namespace(name) {
+      return {
+        file(options) {
+          const key = options.key.join('/')
+          throw new Error(`Task cache runtime is not configured. Requested namespace "${name}" and key "${key}".`)
+        },
+      }
+    },
   }
 }

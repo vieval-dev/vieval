@@ -7,22 +7,22 @@ export default defineConfig({
       models: [
         chatModelFrom({
           aliases: ['judge-mini'],
-          model: 'gpt-4.1-mini',
           inferenceExecutor: 'openai',
+          model: 'gpt-4.1-mini',
         }),
       ],
     }),
   ],
   projects: [
     {
+      evalMatrix: {
+        rubric: ['default'],
+      },
       include: ['evals/*/*.eval.ts'],
       name: 'example-api-load-datasource-as-cases',
       root: '.',
       runMatrix: {
         scenario: ['baseline', 'stress'],
-      },
-      evalMatrix: {
-        rubric: ['default'],
       },
     },
   ],

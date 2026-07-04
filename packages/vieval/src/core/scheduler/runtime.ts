@@ -17,6 +17,35 @@ const schedulerScopeOrder: SchedulerScope[] = [
   'case',
 ]
 
+interface SchedulerEnvelopeResult<T> {
+  outcome: SchedulerExecutionOutcome<T>
+  releaseStack: SchedulerMiddleware[]
+}
+
+interface SchedulerExecutionFailure {
+  error: unknown
+  status: 'failed'
+}
+
+type SchedulerExecutionOutcome<T>
+  = | SchedulerExecutionFailure
+    | SchedulerExecutionSkipped
+    | SchedulerExecutionSuccess<T>
+
+interface SchedulerExecutionSkipped {
+  status: 'skipped'
+}
+
+interface SchedulerExecutionSuccess<T> {
+  status: 'succeeded'
+  value: T
+}
+
+interface SchedulerScopeQueueRegistry {
+  concurrency: number
+  instances: Map<string, ReturnType<typeof createSchedulerQueue>>
+}
+
 /**
  * Creates the core scheduler runtime used to serialize work by scope.
  *
@@ -102,56 +131,78 @@ function createRuntimeQueues(concurrency: SchedulerConcurrencyConfig) {
   return queues
 }
 
-async function runWithQueues<T>(
-  scopes: SchedulerScope[],
-  context: SchedulerScopeContext,
-  queues: Map<SchedulerScope, SchedulerScopeQueueRegistry>,
+async function createSchedulerExecutionResult<T>(
+  releaseStack: SchedulerMiddleware[],
   execute: () => Promise<T>,
-  index = 0,
-): Promise<T> {
-  const scope = scopes[index]
-
-  if (scope === undefined) {
-    return execute()
+): Promise<SchedulerEnvelopeResult<T>> {
+  try {
+    return {
+      outcome: {
+        status: 'succeeded',
+        value: await execute(),
+      },
+      releaseStack,
+    }
   }
-
-  const queue = getScopeQueue(scope, context, queues)
-
-  if (queue === undefined) {
-    return runWithQueues(scopes, context, queues, execute, index + 1)
+  catch (error) {
+    return {
+      outcome: {
+        error,
+        status: 'failed',
+      },
+      releaseStack,
+    }
   }
-
-  return queue.run(() => runWithQueues(scopes, context, queues, execute, index + 1))
 }
 
-interface SchedulerScopeQueueRegistry {
-  concurrency: number
-  instances: Map<string, ReturnType<typeof createSchedulerQueue>>
+function createSchedulerFailureResult<T>(
+  releaseStack: SchedulerMiddleware[],
+  error: unknown,
+): SchedulerEnvelopeResult<T> {
+  return {
+    outcome: {
+      error,
+      status: 'failed',
+    },
+    releaseStack,
+  }
 }
 
-interface SchedulerEnvelopeResult<T> {
-  releaseStack: SchedulerMiddleware[]
-  outcome: SchedulerExecutionOutcome<T>
+function createSchedulerShortCircuitError(): Error {
+  return new Error('Scheduler middleware short-circuited execution.')
 }
 
-interface SchedulerExecutionFailure {
-  error: unknown
-  status: 'failed'
+function createSchedulerShortCircuitResult<T>(): SchedulerEnvelopeResult<T> {
+  return {
+    outcome: {
+      status: 'skipped',
+    },
+    releaseStack: [],
+  }
 }
 
-interface SchedulerExecutionSkipped {
-  status: 'skipped'
-}
+function getSchedulerScopeInstanceKey(
+  scope: SchedulerScope,
+  context: SchedulerScopeContext,
+): string {
+  const workspaceKey = `workspace:${context.workspaceId}`
+  const projectKey = `${workspaceKey}:project:${context.projectName ?? '(missing-project)'}`
+  const taskKey = `${projectKey}:task:${context.taskId ?? '(missing-task)'}`
+  const attemptKey = `${taskKey}:attempt:${context.attemptIndex ?? '(missing-attempt)'}`
 
-interface SchedulerExecutionSuccess<T> {
-  status: 'succeeded'
-  value: T
+  switch (scope) {
+    case 'attempt':
+      return attemptKey
+    case 'case':
+      return attemptKey
+    case 'project':
+      return projectKey
+    case 'task':
+      return taskKey
+    case 'workspace':
+      return workspaceKey
+  }
 }
-
-type SchedulerExecutionOutcome<T>
-  = | SchedulerExecutionFailure
-    | SchedulerExecutionSkipped
-    | SchedulerExecutionSuccess<T>
 
 function getScopeQueue(
   scope: SchedulerScope,
@@ -174,51 +225,6 @@ function getScopeQueue(
   const queue = createSchedulerQueue(queueRegistry.concurrency)
   queueRegistry.instances.set(scopeKey, queue)
   return queue
-}
-
-function getSchedulerScopeInstanceKey(
-  scope: SchedulerScope,
-  context: SchedulerScopeContext,
-): string {
-  const workspaceKey = `workspace:${context.workspaceId}`
-  const projectKey = `${workspaceKey}:project:${context.projectName ?? '(missing-project)'}`
-  const taskKey = `${projectKey}:task:${context.taskId ?? '(missing-task)'}`
-  const attemptKey = `${taskKey}:attempt:${context.attemptIndex ?? '(missing-attempt)'}`
-
-  switch (scope) {
-    case 'workspace':
-      return workspaceKey
-    case 'project':
-      return projectKey
-    case 'task':
-      return taskKey
-    case 'attempt':
-      return attemptKey
-    case 'case':
-      return attemptKey
-  }
-}
-
-async function runWithMiddlewareEnvelope<T>(
-  middleware: SchedulerMiddleware[],
-  context: SchedulerScopeContext,
-  execute: () => Promise<T>,
-): Promise<T> {
-  const result = await runAcquireMiddleware(middleware, context, execute, 0)
-
-  try {
-    switch (result.outcome.status) {
-      case 'succeeded':
-        return result.outcome.value
-      case 'failed':
-        throw result.outcome.error
-      case 'skipped':
-        throw createSchedulerShortCircuitError()
-    }
-  }
-  finally {
-    await runReleaseMiddleware(result.releaseStack, context, result.releaseStack.length - 1)
-  }
 }
 
 async function runAcquireMiddleware<T>(
@@ -261,8 +267,8 @@ async function runAcquireMiddleware<T>(
   }
 
   return {
-    releaseStack: [currentMiddleware, ...nextResult.releaseStack],
     outcome: nextResult.outcome,
+    releaseStack: [currentMiddleware, ...nextResult.releaseStack],
   }
 }
 
@@ -287,58 +293,52 @@ async function runReleaseMiddleware(
   })
 }
 
-async function createSchedulerExecutionResult<T>(
-  releaseStack: SchedulerMiddleware[],
+async function runWithMiddlewareEnvelope<T>(
+  middleware: SchedulerMiddleware[],
+  context: SchedulerScopeContext,
   execute: () => Promise<T>,
-): Promise<SchedulerEnvelopeResult<T>> {
+): Promise<T> {
+  const result = await runAcquireMiddleware(middleware, context, execute, 0)
+
   try {
-    return {
-      releaseStack,
-      outcome: {
-        status: 'succeeded',
-        value: await execute(),
-      },
+    switch (result.outcome.status) {
+      case 'succeeded':
+        return result.outcome.value
+      case 'failed':
+        throw result.outcome.error
+      case 'skipped':
+        throw createSchedulerShortCircuitError()
     }
   }
-  catch (error) {
-    return {
-      releaseStack,
-      outcome: {
-        status: 'failed',
-        error,
-      },
-    }
+  finally {
+    await runReleaseMiddleware(result.releaseStack, context, result.releaseStack.length - 1)
   }
 }
 
-function createSchedulerFailureResult<T>(
-  releaseStack: SchedulerMiddleware[],
-  error: unknown,
-): SchedulerEnvelopeResult<T> {
-  return {
-    releaseStack,
-    outcome: {
-      status: 'failed',
-      error,
-    },
-  }
-}
+async function runWithQueues<T>(
+  scopes: SchedulerScope[],
+  context: SchedulerScopeContext,
+  queues: Map<SchedulerScope, SchedulerScopeQueueRegistry>,
+  execute: () => Promise<T>,
+  index = 0,
+): Promise<T> {
+  const scope = scopes[index]
 
-function createSchedulerShortCircuitResult<T>(): SchedulerEnvelopeResult<T> {
-  return {
-    releaseStack: [],
-    outcome: {
-      status: 'skipped',
-    },
+  if (scope === undefined) {
+    return execute()
   }
+
+  const queue = getScopeQueue(scope, context, queues)
+
+  if (queue === undefined) {
+    return runWithQueues(scopes, context, queues, execute, index + 1)
+  }
+
+  return queue.run(() => runWithQueues(scopes, context, queues, execute, index + 1))
 }
 
 function validateSchedulerConcurrency(scope: SchedulerScope, concurrency: number): void {
   if (!Number.isFinite(concurrency) || !Number.isInteger(concurrency) || concurrency <= 0) {
     throw new Error(`Invalid scheduler concurrency for "${scope}": ${String(concurrency)}`)
   }
-}
-
-function createSchedulerShortCircuitError(): Error {
-  return new Error('Scheduler middleware short-circuited execution.')
 }

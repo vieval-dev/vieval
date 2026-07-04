@@ -78,13 +78,13 @@ describe('collectEvalEntries', () => {
 
     const entries = collectEvalEntries(
       {
-        [tacticsHref]: createModule({
-          description: 'Fixture eval for tactical behavior.',
-          name: 'tactics',
-        }),
         [commentaryHref]: createModule({
           description: 'Fixture eval for commentary behavior.',
           name: 'commentary',
+        }),
+        [tacticsHref]: createModule({
+          description: 'Fixture eval for tactical behavior.',
+          name: 'tactics',
         }),
       },
       runtimeContext,

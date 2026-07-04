@@ -59,8 +59,8 @@ describe('createLobeHubAnswerAgentAdapter', () => {
       }),
       headers: {
         'Authorization': 'Bearer token',
-        'X-Benchmark': 'locomo',
         'content-type': 'application/json',
+        'X-Benchmark': 'locomo',
       },
       method: 'POST',
     })
@@ -70,6 +70,7 @@ describe('createLobeHubAnswerAgentAdapter', () => {
     expect(body).not.toHaveProperty('model')
     expect(body).not.toHaveProperty('provider')
     expect(result).toEqual({
+      contextIds: ['D1:3', 'mem-1'],
       diagnostics: {
         finalMessageId: 'message-1',
         memorySearches: [
@@ -87,7 +88,6 @@ describe('createLobeHubAnswerAgentAdapter', () => {
         steps: 3,
         toolCallCount: 1,
       },
-      contextIds: ['D1:3', 'mem-1'],
       prediction: 'a',
     })
   })

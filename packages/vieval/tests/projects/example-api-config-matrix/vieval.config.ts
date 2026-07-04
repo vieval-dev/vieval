@@ -7,24 +7,30 @@ export default defineConfig({
       models: [
         chatModelFrom({
           aliases: ['agent-mini', 'judge-mini'],
-          model: 'gpt-4.1-mini',
           inferenceExecutor: 'openai',
+          model: 'gpt-4.1-mini',
         }),
         chatModelFrom({
           aliases: ['agent-large', 'judge-large'],
-          model: 'gpt-4.1',
           inferenceExecutor: 'openai',
+          model: 'gpt-4.1',
         }),
         chatModelFrom({
           aliases: ['agent-openrouter-mini'],
-          model: 'openai/gpt-4.1-mini',
           inferenceExecutor: 'openrouter',
+          model: 'openai/gpt-4.1-mini',
         }),
       ],
     }),
   ],
   projects: [
     {
+      evalMatrix: {
+        extend: {
+          rubric: ['strict', 'lenient'],
+          rubricModel: ['judge-mini', 'judge-large'],
+        },
+      },
       include: ['evals/*.eval.ts'],
       name: 'example-api-config-matrix',
       root: '.',
@@ -33,12 +39,6 @@ export default defineConfig({
           model: ['gpt-4.1-mini', 'gpt-4.1'],
           promptLanguage: ['en', 'zh'],
           scenario: ['baseline', 'stress'],
-        },
-      },
-      evalMatrix: {
-        extend: {
-          rubric: ['strict', 'lenient'],
-          rubricModel: ['judge-mini', 'judge-large'],
         },
       },
     },

@@ -15,11 +15,11 @@ import type { TelemetryRuntime } from './types'
  */
 export function createNoopTelemetryRuntime(): TelemetryRuntime {
   return {
+    addEvent() {},
+    recordException() {},
+    setAttributes() {},
     async withSpan(_name, _attributes, callback) {
       return await callback()
     },
-    addEvent() {},
-    setAttributes() {},
-    recordException() {},
   }
 }

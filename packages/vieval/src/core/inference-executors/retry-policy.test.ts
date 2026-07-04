@@ -8,17 +8,17 @@ type RetryableError = Error & {
   statusCode?: number
 }
 
-function createRetryableError(statusCode: number, message: string): RetryableError {
-  const error = new Error(message) as RetryableError
-  error.name = 'APICallError'
-  error.statusCode = statusCode
-  return error
-}
-
 function createResponseStatusError(statusCode: number, message: string): RetryableError {
   const error = new Error(message) as RetryableError
   error.name = 'APICallError'
   error.response = { status: statusCode }
+  return error
+}
+
+function createRetryableError(statusCode: number, message: string): RetryableError {
+  const error = new Error(message) as RetryableError
+  error.name = 'APICallError'
+  error.statusCode = statusCode
   return error
 }
 
@@ -61,8 +61,8 @@ describe('retry policy', () => {
     const policy = createRetryPolicy({
       delayMs: () => 10,
       maxAttempts: 3,
-      sleep,
       shouldRetry: () => false,
+      sleep,
     })
 
     let attempts = 0

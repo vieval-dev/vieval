@@ -10,6 +10,16 @@ import { createNoopTelemetryRuntime } from '../core/telemetry'
 import { registerEvalDefinition } from './registry'
 
 /**
+ * Per-case registration options for `caseOf`.
+ */
+export interface CaseRegistrationOptions<TInput> extends TaskExecutionPolicy {
+  /**
+   * Optional case input payload.
+   */
+  input: TInput
+}
+
+/**
  * Runtime context provided to a task case callback.
  */
 export interface CaseRunContext<TInput> extends TaskRunContext {
@@ -17,16 +27,6 @@ export interface CaseRunContext<TInput> extends TaskRunContext {
    * Case-scoped matrix payload.
    */
   matrix: TaskRunContext['task']['matrix'] & { inputs: TInput }
-  /**
-   * Overrides one case score family with a custom normalized value.
-   *
-   * Use when:
-   * - one case computes a benchmark-native score that should flow into run aggregation
-   *
-   * Expects:
-   * - `score` to stay in the `0..1` range
-   */
-  score: (score: number, kind?: RunScoreKind) => void
   /**
    * Emits one custom case metric into report events.
    *
@@ -39,6 +39,16 @@ export interface CaseRunContext<TInput> extends TaskRunContext {
    */
   metric: (name: string, value: TelemetryAttributeValue) => void
   /**
+   * Overrides one case score family with a custom normalized value.
+   *
+   * Use when:
+   * - one case computes a benchmark-native score that should flow into run aggregation
+   *
+   * Expects:
+   * - `score` to stay in the `0..1` range
+   */
+  score: (score: number, kind?: RunScoreKind) => void
+  /**
    * Cooperative abort signal for the current case execution.
    */
   signal: AbortSignal
@@ -48,15 +58,6 @@ export interface CaseRunContext<TInput> extends TaskRunContext {
  * Callback for one task case.
  */
 export type CaseRunner<TInput> = (context: CaseRunContext<TInput>) => Promise<unknown> | unknown
-
-interface RegisteredCase<TInput> {
-  concurrency?: number
-  executionPolicy?: TaskExecutionPolicy
-  input: TInput
-  name: string
-  queueKey?: object
-  run: CaseRunner<TInput>
-}
 
 /**
  * Per-group options for `casesFromInputs`.
@@ -79,13 +80,48 @@ export interface CasesFromInputsOptions extends TaskExecutionPolicy {
 }
 
 /**
- * Per-case registration options for `caseOf`.
+ * Builder callbacks passed into `describeTask`.
  */
-export interface CaseRegistrationOptions<TInput> extends TaskExecutionPolicy {
+export interface DescribeTaskBuilder {
   /**
-   * Optional case input payload.
+   * Registers one explicit case.
    */
-  input: TInput
+  caseOf: {
+    (name: string, run: CaseRunner<undefined>): void
+    <TInput>(name: string, run: CaseRunner<TInput>, options: CaseRegistrationOptions<TInput>): void
+  }
+  /**
+   * Registers multiple cases from input list.
+   */
+  casesFromInputs: <TInput>(
+    namePrefix: string,
+    inputs: readonly TInput[],
+    run: CaseRunner<TInput>,
+    options?: CasesFromInputsOptions,
+  ) => void
+}
+
+/**
+ * Options for `describeTask`.
+ */
+export interface DescribeTaskOptions extends TaskExecutionPolicy {
+  /**
+   * Optional task-local concurrency overrides.
+   *
+   * Use when:
+   * - one task should cap attempt fan-out independently from the surrounding project
+   * - one task should cap case fan-out without changing global scheduling defaults
+   *
+   * Expects:
+   * - each provided value to be a positive integer
+   *
+   * @default inherited from project or CLI concurrency settings
+   */
+  concurrency?: TaskConcurrencyConfig
+  /**
+   * Optional description override.
+   */
+  description?: string
 }
 
 interface CaseExecutionOutcome {
@@ -95,44 +131,13 @@ interface CaseExecutionOutcome {
   state: 'failed' | 'passed' | 'timeout'
 }
 
-function cloneCaseMatrix(matrix: TaskRunContext['task']['matrix']): TaskRunContext['task']['matrix'] {
-  return {
-    eval: {
-      ...matrix.eval,
-    },
-    meta: {
-      ...matrix.meta,
-    },
-    run: {
-      ...matrix.run,
-    },
-  }
-}
-
-function createTaskCaseReporterId(index: number, name: string): string {
-  return `${index}:${encodeURIComponent(name)}`
-}
-
-function isTelemetryAttributeScalar(value: unknown): value is boolean | number | string {
-  return typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string'
-}
-
-function isTelemetryAttributeArray(value: readonly TelemetryAttributeValue[]): value is readonly boolean[] | readonly number[] | readonly string[] {
-  return value.every(isTelemetryAttributeScalar)
-}
-
-function canAttachMetricAsAttribute(value: TelemetryAttributeValue): value is boolean | number | string | readonly boolean[] | readonly number[] | readonly string[] {
-  if (isTelemetryAttributeScalar(value)) {
-    return true
-  }
-
-  return Array.isArray(value) && isTelemetryAttributeArray(value)
-}
-
-function assertValidScore(score: number): void {
-  if (!Number.isFinite(score) || score < 0 || score > 1) {
-    throw new Error(`Case score must be a finite number in range 0..1, got "${score}".`)
-  }
+interface RegisteredCase<TInput> {
+  concurrency?: number
+  executionPolicy?: TaskExecutionPolicy
+  input: TInput
+  name: string
+  queueKey?: object
+  run: CaseRunner<TInput>
 }
 
 function assertNonNegativeInteger(value: number, label: string): void {
@@ -153,19 +158,139 @@ function assertPositiveInteger(value: number, label: string): void {
   }
 }
 
+function assertValidScore(score: number): void {
+  if (!Number.isFinite(score) || score < 0 || score > 1) {
+    throw new Error(`Case score must be a finite number in range 0..1, got "${score}".`)
+  }
+}
+
 function autoRetryDelayMs(retryIndex: number): number {
   // Retry index 1 is the first retry after the initial case failure.
   return 500 * 2 ** (retryIndex - 1)
 }
 
-function resolveAutoRetryDelay(policy: TaskExecutionPolicy, retryIndex: number): number {
-  const delay = policy.autoRetryDelay
-
-  if (delay == null) {
-    return autoRetryDelayMs(retryIndex)
+function canAttachMetricAsAttribute(value: TelemetryAttributeValue): value is boolean | number | readonly boolean[] | readonly number[] | readonly string[] | string {
+  if (isTelemetryAttributeScalar(value)) {
+    return true
   }
 
-  return typeof delay === 'number' ? delay : delay(retryIndex)
+  return Array.isArray(value) && isTelemetryAttributeArray(value)
+}
+
+function cloneCaseMatrix(matrix: TaskRunContext['task']['matrix']): TaskRunContext['task']['matrix'] {
+  return {
+    eval: {
+      ...matrix.eval,
+    },
+    meta: {
+      ...matrix.meta,
+    },
+    run: {
+      ...matrix.run,
+    },
+  }
+}
+
+function collectCaseOutcomeScores(
+  outcome: CaseExecutionOutcome,
+  scoreBucketsByKind: Record<RunScoreKind, number[]>,
+): void {
+  if (outcome.state !== 'passed') {
+    scoreBucketsByKind.exact.push(0)
+    return
+  }
+
+  if (outcome.scoresByKind.size === 0) {
+    scoreBucketsByKind.exact.push(1)
+    return
+  }
+
+  scoreBucketsByKind.exact.push(outcome.scoresByKind.get('exact') ?? 1)
+  const judgeScore = outcome.scoresByKind.get('judge')
+  if (judgeScore != null) {
+    scoreBucketsByKind.judge.push(judgeScore)
+  }
+}
+
+function createCaseBuilder(registeredCases: RegisteredCase<unknown>[]): DescribeTaskBuilder {
+  function registerCase(name: string, run: CaseRunner<undefined>): void
+  function registerCase<TInput>(name: string, run: CaseRunner<TInput>, options: CaseRegistrationOptions<TInput>): void
+  function registerCase<TInput>(
+    name: string,
+    run: CaseRunner<TInput> | CaseRunner<undefined>,
+    options?: CaseRegistrationOptions<TInput>,
+  ): void {
+    registeredCases.push({
+      executionPolicy: normalizeExecutionPolicy(options, 'task case'),
+      input: options?.input,
+      name,
+      run: run as CaseRunner<unknown>,
+    })
+  }
+
+  return {
+    caseOf: registerCase,
+    casesFromInputs(namePrefix, inputs, run, options) {
+      const queueKey = options?.concurrency == null ? undefined : {}
+
+      inputs.forEach((input, index) => {
+        registeredCases.push({
+          concurrency: options?.concurrency,
+          executionPolicy: normalizeExecutionPolicy(options, 'casesFromInputs'),
+          input,
+          name: `${namePrefix} #${index + 1}`,
+          queueKey,
+          run: run as CaseRunner<unknown>,
+        })
+      })
+    },
+  }
+}
+
+function createCaseTimeoutError(timeout: number): Error {
+  const error = new Error(`Case timed out after ${timeout}ms.`)
+  error.name = 'TimeoutError'
+  return error
+}
+
+function createTaskCaseReporterId(index: number, name: string): string {
+  return `${index}:${encodeURIComponent(name)}`
+}
+
+function emitCaseEnd(
+  hooks: TaskRunContext['reporterHooks'] | undefined,
+  payload: {
+    errorMessage?: string
+    index: number
+    name: string
+    output?: unknown
+    state: 'failed' | 'passed' | 'timeout'
+    total: number
+  },
+): void {
+  try {
+    hooks?.onCaseEnd?.(payload)
+  }
+  catch {
+    // Reporter hooks must never affect task scoring.
+  }
+}
+
+function emitCaseOutcome(
+  context: TaskRunContext,
+  taskCase: RegisteredCase<unknown>,
+  outcome: CaseExecutionOutcome,
+  index: number,
+  totalCases: number,
+): void {
+  emitCaseEnd(context.reporterHooks, {
+    ...(outcome.errorMessage == null ? {} : { errorMessage: outcome.errorMessage }),
+    index,
+    ...(outcome.output === undefined ? {} : { output: outcome.output }),
+    name: taskCase.name,
+    state: outcome.state,
+    total: totalCases,
+  })
 }
 
 function emitCaseStart(
@@ -187,25 +312,6 @@ function emitCaseStart(
   }
 }
 
-function emitCaseEnd(
-  hooks: TaskRunContext['reporterHooks'] | undefined,
-  payload: {
-    index: number
-    output?: unknown
-    state: 'passed' | 'failed' | 'timeout'
-    name: string
-    total: number
-    errorMessage?: string
-  },
-): void {
-  try {
-    hooks?.onCaseEnd?.(payload)
-  }
-  catch {
-    // Reporter hooks must never affect task scoring.
-  }
-}
-
 function emitReporterEvent(
   hooks: TaskRunContext['reporterHooks'] | undefined,
   payload: TaskReporterEventPayload,
@@ -218,10 +324,57 @@ function emitReporterEvent(
   }
 }
 
-function createCaseTimeoutError(timeout: number): Error {
-  const error = new Error(`Case timed out after ${timeout}ms.`)
-  error.name = 'TimeoutError'
-  return error
+async function executeRegisteredCase(
+  context: TaskRunContext,
+  taskCase: RegisteredCase<unknown>,
+  index: number,
+  totalCases: number,
+  taskExecutionPolicy: TaskExecutionPolicy | undefined,
+): Promise<CaseExecutionOutcome> {
+  const resolvedPolicy = resolveCaseExecutionPolicy(taskCase, taskExecutionPolicy)
+  let lastOutcome: CaseExecutionOutcome | undefined
+
+  for (let retryIndex = 0; retryIndex <= resolvedPolicy.autoRetry; retryIndex += 1) {
+    if (retryIndex > 0) {
+      const retryDelayMs = resolveAutoRetryDelay(resolvedPolicy, retryIndex)
+      assertNonNegativeNumber(retryDelayMs, 'autoRetryDelay result')
+
+      if (retryDelayMs > 0) {
+        await sleep(retryDelayMs)
+      }
+    }
+
+    emitCaseStart(context.reporterHooks, {
+      ...(resolvedPolicy.autoRetry > 0
+        ? {
+            autoRetry: resolvedPolicy.autoRetry,
+            retryIndex,
+          }
+        : {}),
+      index,
+      ...(taskCase.input === undefined ? {} : { input: taskCase.input }),
+      name: taskCase.name,
+      total: totalCases,
+    })
+    lastOutcome = await runCaseOnce(context, taskCase, index, resolvedPolicy.timeout)
+    if (lastOutcome.state === 'passed') {
+      return lastOutcome
+    }
+  }
+
+  return lastOutcome ?? {
+    errorMessage: 'Unknown case failure.',
+    scoresByKind: new Map(),
+    state: 'failed',
+  }
+}
+
+function isTelemetryAttributeArray(value: readonly TelemetryAttributeValue[]): value is readonly boolean[] | readonly number[] | readonly string[] {
+  return value.every(isTelemetryAttributeScalar)
+}
+
+function isTelemetryAttributeScalar(value: unknown): value is boolean | number | string {
+  return typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string'
 }
 
 function normalizeExecutionPolicy(policy: TaskExecutionPolicy | undefined, label: string): TaskExecutionPolicy | undefined {
@@ -257,10 +410,20 @@ function normalizeExecutionPolicy(policy: TaskExecutionPolicy | undefined, label
     : undefined
 }
 
+function resolveAutoRetryDelay(policy: TaskExecutionPolicy, retryIndex: number): number {
+  const delay = policy.autoRetryDelay
+
+  if (delay == null) {
+    return autoRetryDelayMs(retryIndex)
+  }
+
+  return typeof delay === 'number' ? delay : delay(retryIndex)
+}
+
 function resolveCaseExecutionPolicy(
   taskCase: RegisteredCase<unknown>,
   taskExecutionPolicy: TaskExecutionPolicy | undefined,
-): Required<Pick<TaskExecutionPolicy, 'autoAttempt' | 'autoRetry'>> & Pick<TaskExecutionPolicy, 'autoRetryDelay' | 'timeout'> {
+): Pick<TaskExecutionPolicy, 'autoRetryDelay' | 'timeout'> & Required<Pick<TaskExecutionPolicy, 'autoAttempt' | 'autoRetry'>> {
   return {
     autoAttempt: taskCase.executionPolicy?.autoAttempt ?? taskExecutionPolicy?.autoAttempt ?? 0,
     autoRetry: taskCase.executionPolicy?.autoRetry ?? taskExecutionPolicy?.autoRetry ?? 0,
@@ -376,190 +539,7 @@ async function runCaseOnce(
   }
 }
 
-async function executeRegisteredCase(
-  context: TaskRunContext,
-  taskCase: RegisteredCase<unknown>,
-  index: number,
-  totalCases: number,
-  taskExecutionPolicy: TaskExecutionPolicy | undefined,
-): Promise<CaseExecutionOutcome> {
-  const resolvedPolicy = resolveCaseExecutionPolicy(taskCase, taskExecutionPolicy)
-  let lastOutcome: CaseExecutionOutcome | undefined
-
-  for (let retryIndex = 0; retryIndex <= resolvedPolicy.autoRetry; retryIndex += 1) {
-    if (retryIndex > 0) {
-      const retryDelayMs = resolveAutoRetryDelay(resolvedPolicy, retryIndex)
-      assertNonNegativeNumber(retryDelayMs, 'autoRetryDelay result')
-
-      if (retryDelayMs > 0) {
-        await sleep(retryDelayMs)
-      }
-    }
-
-    emitCaseStart(context.reporterHooks, {
-      ...(resolvedPolicy.autoRetry > 0
-        ? {
-            autoRetry: resolvedPolicy.autoRetry,
-            retryIndex,
-          }
-        : {}),
-      index,
-      ...(taskCase.input === undefined ? {} : { input: taskCase.input }),
-      name: taskCase.name,
-      total: totalCases,
-    })
-    lastOutcome = await runCaseOnce(context, taskCase, index, resolvedPolicy.timeout)
-    if (lastOutcome.state === 'passed') {
-      return lastOutcome
-    }
-  }
-
-  return lastOutcome ?? {
-    errorMessage: 'Unknown case failure.',
-    scoresByKind: new Map(),
-    state: 'failed',
-  }
-}
-
-function collectCaseOutcomeScores(
-  outcome: CaseExecutionOutcome,
-  scoreBucketsByKind: Record<RunScoreKind, number[]>,
-): void {
-  if (outcome.state !== 'passed') {
-    scoreBucketsByKind.exact.push(0)
-    return
-  }
-
-  if (outcome.scoresByKind.size === 0) {
-    scoreBucketsByKind.exact.push(1)
-    return
-  }
-
-  scoreBucketsByKind.exact.push(outcome.scoresByKind.get('exact') ?? 1)
-  const judgeScore = outcome.scoresByKind.get('judge')
-  if (judgeScore != null) {
-    scoreBucketsByKind.judge.push(judgeScore)
-  }
-}
-
-function emitCaseOutcome(
-  context: TaskRunContext,
-  taskCase: RegisteredCase<unknown>,
-  outcome: CaseExecutionOutcome,
-  index: number,
-  totalCases: number,
-): void {
-  emitCaseEnd(context.reporterHooks, {
-    ...(outcome.errorMessage == null ? {} : { errorMessage: outcome.errorMessage }),
-    index,
-    ...(outcome.output === undefined ? {} : { output: outcome.output }),
-    state: outcome.state,
-    name: taskCase.name,
-    total: totalCases,
-  })
-}
-
-/**
- * Builder callbacks passed into `describeTask`.
- */
-export interface DescribeTaskBuilder {
-  /**
-   * Registers one explicit case.
-   */
-  caseOf: {
-    (name: string, run: CaseRunner<undefined>): void
-    <TInput>(name: string, run: CaseRunner<TInput>, options: CaseRegistrationOptions<TInput>): void
-  }
-  /**
-   * Registers multiple cases from input list.
-   */
-  casesFromInputs: <TInput>(
-    namePrefix: string,
-    inputs: readonly TInput[],
-    run: CaseRunner<TInput>,
-    options?: CasesFromInputsOptions,
-  ) => void
-}
-
-/**
- * Options for `describeTask`.
- */
-export interface DescribeTaskOptions extends TaskExecutionPolicy {
-  /**
-   * Optional description override.
-   */
-  description?: string
-  /**
-   * Optional task-local concurrency overrides.
-   *
-   * Use when:
-   * - one task should cap attempt fan-out independently from the surrounding project
-   * - one task should cap case fan-out without changing global scheduling defaults
-   *
-   * Expects:
-   * - each provided value to be a positive integer
-   *
-   * @default inherited from project or CLI concurrency settings
-   */
-  concurrency?: TaskConcurrencyConfig
-}
-
-function createCaseBuilder(registeredCases: RegisteredCase<unknown>[]): DescribeTaskBuilder {
-  function registerCase(name: string, run: CaseRunner<undefined>): void
-  function registerCase<TInput>(name: string, run: CaseRunner<TInput>, options: CaseRegistrationOptions<TInput>): void
-  function registerCase<TInput>(
-    name: string,
-    run: CaseRunner<TInput> | CaseRunner<undefined>,
-    options?: CaseRegistrationOptions<TInput>,
-  ): void {
-    registeredCases.push({
-      executionPolicy: normalizeExecutionPolicy(options, 'task case'),
-      input: options?.input,
-      name,
-      run: run as CaseRunner<unknown>,
-    })
-  }
-
-  return {
-    caseOf: registerCase,
-    casesFromInputs(namePrefix, inputs, run, options) {
-      const queueKey = options?.concurrency == null ? undefined : {}
-
-      inputs.forEach((input, index) => {
-        registeredCases.push({
-          concurrency: options?.concurrency,
-          executionPolicy: normalizeExecutionPolicy(options, 'casesFromInputs'),
-          input,
-          name: `${namePrefix} #${index + 1}`,
-          queueKey,
-          run: run as CaseRunner<unknown>,
-        })
-      })
-    },
-  }
-}
-
 let activeCasesStack: RegisteredCase<unknown>[][] = []
-
-function withActiveCases<T>(cases: RegisteredCase<unknown>[], callback: () => T): T {
-  activeCasesStack = [...activeCasesStack, cases]
-
-  try {
-    return callback()
-  }
-  finally {
-    activeCasesStack = activeCasesStack.slice(0, -1)
-  }
-}
-
-function getActiveCases(): RegisteredCase<unknown>[] {
-  const active = activeCasesStack.at(-1)
-  if (active == null) {
-    throw new Error('caseOf/casesFromInputs must be called inside describeTask/describeEval.')
-  }
-
-  return active
-}
 
 /**
  * Registers one case in the currently active task scope.
@@ -568,13 +548,11 @@ export function caseOf(
   name: string,
   run: CaseRunner<undefined>,
 ): void
-
 export function caseOf<TInput>(
   name: string,
   run: CaseRunner<TInput>,
   options: CaseRegistrationOptions<TInput>,
 ): void
-
 export function caseOf<TInput>(
   name: string,
   run: CaseRunner<TInput> | CaseRunner<undefined>,
@@ -612,38 +590,6 @@ export function casesFromInputs<TInput>(
 }
 
 /**
- * Resolves the effective case concurrency for one registered task case.
- *
- * Before:
- * - registered case override `2`, task default `4`
- * - registered case override `undefined`, task default `3`
- *
- * After:
- * - `2`
- * - `3`
- */
-function resolveCaseConcurrency(
-  taskCase: RegisteredCase<unknown>,
-  taskConcurrency: TaskConcurrencyConfig | undefined,
-  runtimeConcurrency: TaskConcurrencyConfig | undefined,
-): number | undefined {
-  const concurrency = runtimeConcurrency?.case ?? taskCase.concurrency ?? taskConcurrency?.case
-  if (concurrency == null) {
-    return undefined
-  }
-
-  if (!Number.isFinite(concurrency) || !Number.isInteger(concurrency) || concurrency <= 0) {
-    throw new Error(`Invalid task case concurrency: ${String(concurrency)}`)
-  }
-
-  return concurrency
-}
-
-function resolveCaseQueueKey(taskCase: RegisteredCase<unknown>, defaultQueueKey: object): object {
-  return taskCase.queueKey ?? defaultQueueKey
-}
-
-/**
  * Defines one eval task with task/case semantics similar to Vitest.
  *
  * Use when:
@@ -652,7 +598,7 @@ function resolveCaseQueueKey(taskCase: RegisteredCase<unknown>, defaultQueueKey:
  */
 export function describeTask(
   name: string,
-  build: ((builder: DescribeTaskBuilder) => void) | (() => void),
+  build: (() => void) | ((builder: DescribeTaskBuilder) => void),
   options: DescribeTaskOptions = {},
 ) {
   const registeredCases: RegisteredCase<unknown>[] = []
@@ -786,6 +732,58 @@ export function describeTask(
   registerEvalDefinition(definition)
 
   return definition
+}
+
+function getActiveCases(): RegisteredCase<unknown>[] {
+  const active = activeCasesStack.at(-1)
+  if (active == null) {
+    throw new Error('caseOf/casesFromInputs must be called inside describeTask/describeEval.')
+  }
+
+  return active
+}
+
+/**
+ * Resolves the effective case concurrency for one registered task case.
+ *
+ * Before:
+ * - registered case override `2`, task default `4`
+ * - registered case override `undefined`, task default `3`
+ *
+ * After:
+ * - `2`
+ * - `3`
+ */
+function resolveCaseConcurrency(
+  taskCase: RegisteredCase<unknown>,
+  taskConcurrency: TaskConcurrencyConfig | undefined,
+  runtimeConcurrency: TaskConcurrencyConfig | undefined,
+): number | undefined {
+  const concurrency = runtimeConcurrency?.case ?? taskCase.concurrency ?? taskConcurrency?.case
+  if (concurrency == null) {
+    return undefined
+  }
+
+  if (!Number.isFinite(concurrency) || !Number.isInteger(concurrency) || concurrency <= 0) {
+    throw new Error(`Invalid task case concurrency: ${String(concurrency)}`)
+  }
+
+  return concurrency
+}
+
+function resolveCaseQueueKey(taskCase: RegisteredCase<unknown>, defaultQueueKey: object): object {
+  return taskCase.queueKey ?? defaultQueueKey
+}
+
+function withActiveCases<T>(cases: RegisteredCase<unknown>[], callback: () => T): T {
+  activeCasesStack = [...activeCasesStack, cases]
+
+  try {
+    return callback()
+  }
+  finally {
+    activeCasesStack = activeCasesStack.slice(0, -1)
+  }
 }
 
 /**

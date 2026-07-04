@@ -11,48 +11,99 @@ import type { TelemetryRuntime } from '../core/telemetry'
 export type Awaitable<T> = Promise<T> | T
 
 /**
- * Primitive value allowed in one matrix cell.
- *
- * Use when:
- * - defining axis values for canonical layered matrix config
- * - preserving JSON-safe primitive values through config normalization
- *
- * Expects:
- * - values remain serializable and comparable with stringified task ids
- *
- * Returns:
- * - one JSON-friendly primitive matrix value
+ * OpenTelemetry reporting configuration managed by user config setup.
  */
-export type MatrixPrimitive = string | number | boolean
+export interface CliOpenTelemetryReportingConfig {
+  /**
+   * Enables Vieval active span wrapping through `@opentelemetry/api`.
+   *
+   * @default false
+   */
+  enabled?: boolean
+  /**
+   * Called after all telemetry events and local report artifacts have been emitted.
+   */
+  onRunEnd?: () => Awaitable<void>
+}
 
 /**
- * Canonical matrix value type.
- *
- * Use when:
- * - declaring matrix axis values at the config boundary
- *
- * Expects:
- * - values are normalized from config input without extra wrapping
- *
- * Returns:
- * - a primitive cell value suitable for matrix expansion
+ * Reporting configuration for local artifacts and optional OpenTelemetry integration.
  */
-export type MatrixValue = MatrixPrimitive
+export interface CliReportingConfig {
+  /**
+   * Optional OpenTelemetry API integration.
+   */
+  openTelemetry?: CliOpenTelemetryReportingConfig
+}
 
 /**
- * Canonical row payload for one matrix combination.
- *
- * Use when:
- * - storing the selected values for a resolved matrix row
- * - passing task-level matrix context between layers
- *
- * Expects:
- * - keys are axis names and values are resolved axis selections
- *
- * Returns:
- * - one resolved row object
+ * Represents a normalized evaluation entry collected by the runner.
  */
-export type MatrixRow = Record<string, MatrixValue>
+export type CollectedEvalEntry<TDefinition extends EvalDefinition = EvalDefinition> = TDefinition & {
+  directory: string
+  filePath: string
+  id: string
+}
+
+/**
+ * Declares the metadata required for a single vieval evaluation module.
+ */
+export interface EvalDefinition {
+  description: string
+  /**
+   * Optional matrix layering for this eval definition.
+   *
+   * Use when:
+   * - one eval file needs control-group variants that differ from project defaults
+   *
+   * @example
+   * ```ts
+   * matrix: {
+   *   runMatrix: {
+   *     extend: {
+   *       promptStyle: ['concise'],
+   *     },
+   *     override: {
+   *       scenario: ['eval-scenario'],
+   *     },
+   *   },
+   *   evalMatrix: {
+   *     override: {
+   *       rubric: ['strict'],
+   *     },
+   *   },
+   * }
+   * ```
+   *
+   * Context impact:
+   *
+   * ```txt
+   * project.runMatrix + eval.matrix.runMatrix + task.matrix.runMatrix
+   *   => context.task.matrix.run
+   *
+   * project.evalMatrix + eval.matrix.evalMatrix + task.matrix.evalMatrix
+   *   => context.task.matrix.eval
+   * ```
+   */
+  matrix?: ScopedMatrices
+  name: string
+  /**
+   * Optional task implementation executed by runner.
+   */
+  task?: TaskDefinition
+}
+
+/**
+ * Describes the shape of an imported vieval evaluation module.
+ */
+export interface EvalModule<TDefinition extends EvalDefinition = EvalDefinition> {
+  default: TDefinition
+}
+
+/**
+ * Maps module URLs to their loaded vieval evaluation modules.
+ */
+export type EvalModuleMap = Record<string, EvalModule>
 
 /**
  * Canonical axis value list for one matrix definition.
@@ -118,6 +169,15 @@ export type MatrixDefinition = Record<string, MatrixAxisValues>
  */
 export interface MatrixLayer {
   /**
+   * Matrix axes disabled at this layer.
+   *
+   * @example
+   * ```ts
+   * disable: ['temperatureProfile']
+   * ```
+   */
+  disable?: readonly string[]
+  /**
    * Matrix axes inherited or appended at this layer.
    *
    * @example
@@ -140,16 +200,51 @@ export interface MatrixLayer {
    * ```
    */
   override?: MatrixDefinition
-  /**
-   * Matrix axes disabled at this layer.
-   *
-   * @example
-   * ```ts
-   * disable: ['temperatureProfile']
-   * ```
-   */
-  disable?: readonly string[]
 }
+
+/**
+ * Primitive value allowed in one matrix cell.
+ *
+ * Use when:
+ * - defining axis values for canonical layered matrix config
+ * - preserving JSON-safe primitive values through config normalization
+ *
+ * Expects:
+ * - values remain serializable and comparable with stringified task ids
+ *
+ * Returns:
+ * - one JSON-friendly primitive matrix value
+ */
+export type MatrixPrimitive = boolean | number | string
+
+/**
+ * Canonical row payload for one matrix combination.
+ *
+ * Use when:
+ * - storing the selected values for a resolved matrix row
+ * - passing task-level matrix context between layers
+ *
+ * Expects:
+ * - keys are axis names and values are resolved axis selections
+ *
+ * Returns:
+ * - one resolved row object
+ */
+export type MatrixRow = Record<string, MatrixValue>
+
+/**
+ * Canonical matrix value type.
+ *
+ * Use when:
+ * - declaring matrix axis values at the config boundary
+ *
+ * Expects:
+ * - values are normalized from config input without extra wrapping
+ *
+ * Returns:
+ * - a primitive cell value suitable for matrix expansion
+ */
+export type MatrixValue = MatrixPrimitive
 
 /**
  * Canonical run/eval matrix grouping.
@@ -196,19 +291,6 @@ export interface MatrixLayer {
  */
 export interface ScopedMatrices {
   /**
-   * Runtime matrix scope.
-   *
-   * @example
-   * ```ts
-   * runMatrix: {
-   *   extend: {
-   *     promptLanguage: ['en', 'zh'],
-   *   },
-   * }
-   * ```
-   */
-  runMatrix?: MatrixLayer
-  /**
    * Eval-time matrix scope.
    *
    * @example
@@ -221,16 +303,19 @@ export interface ScopedMatrices {
    * ```
    */
   evalMatrix?: MatrixLayer
-}
-
-/**
- * Output of one eval task execution.
- */
-export interface TaskRunOutput {
   /**
-   * Scores emitted by this task run.
+   * Runtime matrix scope.
+   *
+   * @example
+   * ```ts
+   * runMatrix: {
+   *   extend: {
+   *     promptLanguage: ['en', 'zh'],
+   *   },
+   * }
+   * ```
    */
-  scores: readonly RunScore[]
+  runMatrix?: MatrixLayer
 }
 
 /**
@@ -238,49 +323,83 @@ export interface TaskRunOutput {
  *
  * @param retryIndex Retry number where `1` is the first retry after the initial failure.
  */
-export type TaskAutoRetryDelay = number | ((retryIndex: number) => number)
+export type TaskAutoRetryDelay = ((retryIndex: number) => number) | number
 
 /**
- * Execution policy applied to task and case callbacks.
+ * Payload emitted when a task case ends.
  *
  * Use when:
- * - one task or case should time out after a bounded duration
- * - failures should retry within the current attempt or trigger a later full task attempt
+ * - reporter hooks need the case position plus terminal state
  *
  * Expects:
- * - `timeout` to be a positive integer when provided
- * - `autoRetry` and `autoAttempt` to be non-negative integers when provided
- *
- * Returns:
- * - one partial execution policy descriptor
+ * - `name` is the declared DSL case label
+ * - `index` is the zero-based case position within the task
+ * - `total` is the total number of registered cases
+ * - `state` describes the final case result
  */
-export interface TaskExecutionPolicy {
+export interface TaskCaseReporterEndPayload extends TaskCaseReporterPayload {
   /**
-   * Additional retries allowed within the current attempt.
-   *
-   * @default 0
+   * Optional failure message when `state` is `failed`.
+   */
+  errorMessage?: string
+  /**
+   * Optional case output returned by the task case callback.
+   */
+  output?: unknown
+  /**
+   * Final case state.
+   */
+  state: TaskCaseState
+}
+
+/**
+ * Payload emitted when a task case starts.
+ *
+ * Use when:
+ * - reporter hooks need a stable position for one case within the task
+ *
+ * Expects:
+ * - `name` is the declared DSL case label
+ * - `index` is the zero-based case position within the task
+ * - `total` is the total number of registered cases
+ */
+export interface TaskCaseReporterPayload {
+  /**
+   * Maximum retry count configured for this case.
    */
   autoRetry?: number
   /**
-   * Delay in milliseconds before a case auto retry starts.
-   *
-   * A number applies the same delay to every retry. A function receives the
-   * retry index where `1` is the first retry after the initial failure.
-   *
-   * @default retryIndex => 500 * 2 ** (retryIndex - 1)
+   * Zero-based case position within the task.
    */
-  autoRetryDelay?: TaskAutoRetryDelay
+  index: number
   /**
-   * Additional full task attempts allowed after the current attempt settles.
-   *
-   * @default 0
+   * Optional case input payload registered by the task DSL.
    */
-  autoAttempt?: number
+  input?: unknown
   /**
-   * Timeout in milliseconds for one case execution.
+   * Declared case label.
    */
-  timeout?: number
+  name: string
+  /**
+   * Current retry attempt index, where `0` is the first try.
+   */
+  retryIndex?: number
+  /**
+   * Total number of registered cases.
+   */
+  total: number
 }
+
+/**
+ * Allowed terminal outcomes for one task case.
+ *
+ * Use when:
+ * - emitting case lifecycle events from the task DSL
+ *
+ * Expects:
+ * - consumers treat the value as the final state for the case
+ */
+export type TaskCaseState = 'failed' | 'passed' | 'timeout'
 
 /**
  * Task-local concurrency metadata.
@@ -307,29 +426,155 @@ export interface TaskConcurrencyConfig {
 }
 
 /**
- * Reporting configuration for local artifacts and optional OpenTelemetry integration.
+ * Eval task definition used by `defineTask`.
  */
-export interface CliReportingConfig {
+export interface TaskDefinition {
   /**
-   * Optional OpenTelemetry API integration.
+   * Optional task-local concurrency metadata.
+   *
+   * Use when:
+   * - task declarations need to preserve task-scoped attempt/case caps for later scheduler wiring
+   * - higher-level orchestration wants to inspect task-local concurrency without executing the task
+   *
+   * Expects:
+   * - each provided value to be a positive integer chosen by the caller
+   *
+   * Returns:
+   * - one partial task-local concurrency descriptor
    */
-  openTelemetry?: CliOpenTelemetryReportingConfig
+  concurrency?: TaskConcurrencyConfig
+  /**
+   * Optional task-local execution policy.
+   */
+  executionPolicy?: TaskExecutionPolicy
+  /**
+   * Stable task id for diagnostics.
+   */
+  id: string
+  /**
+   * Optional matrix layering for this task definition.
+   *
+   * Use when:
+   * - task-local experiments should refine project/eval defaults
+   *
+   * @example
+   * ```ts
+   * matrix: {
+   *   runMatrix: {
+   *     override: {
+   *       model: ['gpt-4.1-mini'],
+   *     },
+   *   },
+   *   evalMatrix: {
+   *     extend: {
+   *       evaluator: ['default-judge'],
+   *     },
+   *   },
+   * }
+   * ```
+   */
+  matrix?: ScopedMatrices
+  /**
+   * Executes one scheduled eval task.
+   */
+  run: (context: TaskRunContext) => Promise<TaskRunOutput> | TaskRunOutput
 }
 
 /**
- * OpenTelemetry reporting configuration managed by user config setup.
+ * Execution policy applied to task and case callbacks.
+ *
+ * Use when:
+ * - one task or case should time out after a bounded duration
+ * - failures should retry within the current attempt or trigger a later full task attempt
+ *
+ * Expects:
+ * - `timeout` to be a positive integer when provided
+ * - `autoRetry` and `autoAttempt` to be non-negative integers when provided
+ *
+ * Returns:
+ * - one partial execution policy descriptor
  */
-export interface CliOpenTelemetryReportingConfig {
+export interface TaskExecutionPolicy {
   /**
-   * Enables Vieval active span wrapping through `@opentelemetry/api`.
+   * Additional full task attempts allowed after the current attempt settles.
    *
-   * @default false
+   * @default 0
    */
-  enabled?: boolean
+  autoAttempt?: number
   /**
-   * Called after all telemetry events and local report artifacts have been emitted.
+   * Additional retries allowed within the current attempt.
+   *
+   * @default 0
    */
-  onRunEnd?: () => Awaitable<void>
+  autoRetry?: number
+  /**
+   * Delay in milliseconds before a case auto retry starts.
+   *
+   * A number applies the same delay to every retry. A function receives the
+   * retry index where `1` is the first retry after the initial failure.
+   *
+   * @default retryIndex => 500 * 2 ** (retryIndex - 1)
+   */
+  autoRetryDelay?: TaskAutoRetryDelay
+  /**
+   * Timeout in milliseconds for one case execution.
+   */
+  timeout?: number
+}
+
+/**
+ * Payload emitted by task code for custom report events.
+ *
+ * Use when:
+ * - reporting runtime telemetry such as inference requests, responses, or tool calls
+ * - attaching modality-specific metrics without coupling task logic to CLI internals
+ *
+ * Expects:
+ * - `event` to be a stable event name
+ * - `data` to be JSON-serializable for report artifact persistence
+ */
+export interface TaskReporterEventPayload {
+  /**
+   * Optional stable case id when the event maps to one case lifecycle.
+   */
+  caseId?: string
+  /**
+   * Optional custom payload persisted under event `data`.
+   */
+  data?: unknown
+  /**
+   * Event name written into report event envelopes.
+   */
+  event: string
+}
+
+/**
+ * Reporter hooks invoked around each task case execution.
+ *
+ * Use when:
+ * - a caller needs case-level lifecycle visibility from the DSL runner
+ * - downstream reporters should stay decoupled from the task execution path
+ *
+ * Expects:
+ * - hooks observe case start/end events but do not influence scoring
+ */
+export interface TaskReporterHooks {
+  /**
+   * Runs after a case settles.
+   */
+  onCaseEnd?: (payload: TaskCaseReporterEndPayload) => void
+  /**
+   * Runs when a case is about to execute.
+   */
+  onCaseStart?: (payload: TaskCaseReporterPayload) => void
+  /**
+   * Runs when task code emits a custom telemetry/reporting event.
+   *
+   * Use when:
+   * - eval implementations need report artifacts beyond case lifecycle counters
+   * - model/runtime integrations emit inference, metering, or tool-call events
+   */
+  onEvent?: (payload: TaskReporterEventPayload) => void
 }
 
 /**
@@ -344,6 +589,41 @@ export interface TaskRunContext {
    * - case-level logic needs typed text/json/binary cache loaders
    */
   cache: TaskExecutionContext['cache']
+  /**
+   * Configured model registrations available to model plugins.
+   *
+   * Use when:
+   * - a plugin owns model selection semantics and needs access to registered models
+   * - eval code resolves matrix-selected model axes through plugin helpers
+   */
+  models: TaskExecutionContext['models']
+  /**
+   * Optional reporter lifecycle hooks for task-local case events.
+   *
+   * Use when:
+   * - a caller wants visibility into each case without coupling to the CLI reporter layer
+   *
+   * Expects:
+   * - hooks are best-effort observers and should not affect task scoring
+   */
+  reporterHooks?: TaskReporterHooks
+  /**
+   * Optional runtime scheduling overrides supplied by CLI or host execution.
+   *
+   * Use when:
+   * - run operators need to override task/case concurrency without editing eval code
+   * - DSL task runners need to distinguish runtime flags from code defaults
+   *
+   * Expects:
+   * - values are positive integers when provided
+   *
+   * @default undefined
+   */
+  runtimeConcurrency?: TaskConcurrencyConfig
+  /**
+   * Cooperative abort signal for the current execution.
+   */
+  signal?: AbortSignal
   /**
    * Scheduled runner task metadata.
    *
@@ -379,24 +659,6 @@ export interface TaskRunContext {
    */
   task: ScheduledTask
   /**
-   * Configured model registrations available to model plugins.
-   *
-   * Use when:
-   * - a plugin owns model selection semantics and needs access to registered models
-   * - eval code resolves matrix-selected model axes through plugin helpers
-   */
-  models: TaskExecutionContext['models']
-  /**
-   * Optional reporter lifecycle hooks for task-local case events.
-   *
-   * Use when:
-   * - a caller wants visibility into each case without coupling to the CLI reporter layer
-   *
-   * Expects:
-   * - hooks are best-effort observers and should not affect task scoring
-   */
-  reporterHooks?: TaskReporterHooks
-  /**
    * Optional telemetry runtime shared by runner, DSL, and reporter integrations.
    *
    * Use when:
@@ -407,276 +669,14 @@ export interface TaskRunContext {
    * - callers inject a no-op runtime when telemetry is disabled
    */
   telemetry?: TelemetryRuntime
-  /**
-   * Optional runtime scheduling overrides supplied by CLI or host execution.
-   *
-   * Use when:
-   * - run operators need to override task/case concurrency without editing eval code
-   * - DSL task runners need to distinguish runtime flags from code defaults
-   *
-   * Expects:
-   * - values are positive integers when provided
-   *
-   * @default undefined
-   */
-  runtimeConcurrency?: TaskConcurrencyConfig
-  /**
-   * Cooperative abort signal for the current execution.
-   */
-  signal?: AbortSignal
 }
 
 /**
- * Allowed terminal outcomes for one task case.
- *
- * Use when:
- * - emitting case lifecycle events from the task DSL
- *
- * Expects:
- * - consumers treat the value as the final state for the case
+ * Output of one eval task execution.
  */
-export type TaskCaseState = 'passed' | 'failed' | 'timeout'
-
-/**
- * Payload emitted when a task case starts.
- *
- * Use when:
- * - reporter hooks need a stable position for one case within the task
- *
- * Expects:
- * - `name` is the declared DSL case label
- * - `index` is the zero-based case position within the task
- * - `total` is the total number of registered cases
- */
-export interface TaskCaseReporterPayload {
+export interface TaskRunOutput {
   /**
-   * Maximum retry count configured for this case.
+   * Scores emitted by this task run.
    */
-  autoRetry?: number
-  /**
-   * Optional case input payload registered by the task DSL.
-   */
-  input?: unknown
-  /**
-   * Declared case label.
-   */
-  name: string
-  /**
-   * Current retry attempt index, where `0` is the first try.
-   */
-  retryIndex?: number
-  /**
-   * Zero-based case position within the task.
-   */
-  index: number
-  /**
-   * Total number of registered cases.
-   */
-  total: number
-}
-
-/**
- * Payload emitted when a task case ends.
- *
- * Use when:
- * - reporter hooks need the case position plus terminal state
- *
- * Expects:
- * - `name` is the declared DSL case label
- * - `index` is the zero-based case position within the task
- * - `total` is the total number of registered cases
- * - `state` describes the final case result
- */
-export interface TaskCaseReporterEndPayload extends TaskCaseReporterPayload {
-  /**
-   * Optional case output returned by the task case callback.
-   */
-  output?: unknown
-  /**
-   * Final case state.
-   */
-  state: TaskCaseState
-  /**
-   * Optional failure message when `state` is `failed`.
-   */
-  errorMessage?: string
-}
-
-/**
- * Reporter hooks invoked around each task case execution.
- *
- * Use when:
- * - a caller needs case-level lifecycle visibility from the DSL runner
- * - downstream reporters should stay decoupled from the task execution path
- *
- * Expects:
- * - hooks observe case start/end events but do not influence scoring
- */
-export interface TaskReporterHooks {
-  /**
-   * Runs when a case is about to execute.
-   */
-  onCaseStart?: (payload: TaskCaseReporterPayload) => void
-  /**
-   * Runs after a case settles.
-   */
-  onCaseEnd?: (payload: TaskCaseReporterEndPayload) => void
-  /**
-   * Runs when task code emits a custom telemetry/reporting event.
-   *
-   * Use when:
-   * - eval implementations need report artifacts beyond case lifecycle counters
-   * - model/runtime integrations emit inference, metering, or tool-call events
-   */
-  onEvent?: (payload: TaskReporterEventPayload) => void
-}
-
-/**
- * Payload emitted by task code for custom report events.
- *
- * Use when:
- * - reporting runtime telemetry such as inference requests, responses, or tool calls
- * - attaching modality-specific metrics without coupling task logic to CLI internals
- *
- * Expects:
- * - `event` to be a stable event name
- * - `data` to be JSON-serializable for report artifact persistence
- */
-export interface TaskReporterEventPayload {
-  /**
-   * Event name written into report event envelopes.
-   */
-  event: string
-  /**
-   * Optional custom payload persisted under event `data`.
-   */
-  data?: unknown
-  /**
-   * Optional stable case id when the event maps to one case lifecycle.
-   */
-  caseId?: string
-}
-
-/**
- * Eval task definition used by `defineTask`.
- */
-export interface TaskDefinition {
-  /**
-   * Stable task id for diagnostics.
-   */
-  id: string
-  /**
-   * Optional task-local concurrency metadata.
-   *
-   * Use when:
-   * - task declarations need to preserve task-scoped attempt/case caps for later scheduler wiring
-   * - higher-level orchestration wants to inspect task-local concurrency without executing the task
-   *
-   * Expects:
-   * - each provided value to be a positive integer chosen by the caller
-   *
-   * Returns:
-   * - one partial task-local concurrency descriptor
-   */
-  concurrency?: TaskConcurrencyConfig
-  /**
-   * Optional task-local execution policy.
-   */
-  executionPolicy?: TaskExecutionPolicy
-  /**
-   * Optional matrix layering for this task definition.
-   *
-   * Use when:
-   * - task-local experiments should refine project/eval defaults
-   *
-   * @example
-   * ```ts
-   * matrix: {
-   *   runMatrix: {
-   *     override: {
-   *       model: ['gpt-4.1-mini'],
-   *     },
-   *   },
-   *   evalMatrix: {
-   *     extend: {
-   *       evaluator: ['default-judge'],
-   *     },
-   *   },
-   * }
-   * ```
-   */
-  matrix?: ScopedMatrices
-  /**
-   * Executes one scheduled eval task.
-   */
-  run: (context: TaskRunContext) => Promise<TaskRunOutput> | TaskRunOutput
-}
-
-/**
- * Declares the metadata required for a single vieval evaluation module.
- */
-export interface EvalDefinition {
-  description: string
-  name: string
-  /**
-   * Optional matrix layering for this eval definition.
-   *
-   * Use when:
-   * - one eval file needs control-group variants that differ from project defaults
-   *
-   * @example
-   * ```ts
-   * matrix: {
-   *   runMatrix: {
-   *     extend: {
-   *       promptStyle: ['concise'],
-   *     },
-   *     override: {
-   *       scenario: ['eval-scenario'],
-   *     },
-   *   },
-   *   evalMatrix: {
-   *     override: {
-   *       rubric: ['strict'],
-   *     },
-   *   },
-   * }
-   * ```
-   *
-   * Context impact:
-   *
-   * ```txt
-   * project.runMatrix + eval.matrix.runMatrix + task.matrix.runMatrix
-   *   => context.task.matrix.run
-   *
-   * project.evalMatrix + eval.matrix.evalMatrix + task.matrix.evalMatrix
-   *   => context.task.matrix.eval
-   * ```
-   */
-  matrix?: ScopedMatrices
-  /**
-   * Optional task implementation executed by runner.
-   */
-  task?: TaskDefinition
-}
-
-/**
- * Describes the shape of an imported vieval evaluation module.
- */
-export interface EvalModule<TDefinition extends EvalDefinition = EvalDefinition> {
-  default: TDefinition
-}
-
-/**
- * Maps module URLs to their loaded vieval evaluation modules.
- */
-export type EvalModuleMap = Record<string, EvalModule>
-
-/**
- * Represents a normalized evaluation entry collected by the runner.
- */
-export type CollectedEvalEntry<TDefinition extends EvalDefinition = EvalDefinition> = TDefinition & {
-  directory: string
-  filePath: string
-  id: string
+  scores: readonly RunScore[]
 }

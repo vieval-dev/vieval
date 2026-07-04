@@ -1,5 +1,23 @@
 import { createHash } from 'node:crypto'
 
+/**
+ * Flattened, per-question LoCoMo case shape used by Vieval runners.
+ *
+ * Python parity:
+ * - `sampleId`, `question`, `category`, `goldAnswer` map to QA entries processed in
+ *   `snap-research/locomo/task_eval/evaluate_qa.py:98-103`
+ *   and scored by category in `snap-research/locomo/task_eval/evaluation.py:203-221`.
+ * - `caseId` is a deterministic local identifier for scheduling/caching.
+ */
+export interface LoCoMoCase {
+  caseId: string
+  category: LoCoMoCategory
+  evidence: string[]
+  goldAnswer: string
+  question: string
+  sampleId: string
+}
+
 export type LoCoMoCategory = 1 | 2 | 3 | 4 | 5
 
 /**
@@ -13,7 +31,7 @@ export type LoCoMoCategory = 1 | 2 | 3 | 4 | 5
  *   does not read this field directly.
  */
 export interface LoCoMoQuestionAnswer {
-  adversarialAnswer: string | null
+  adversarialAnswer: null | string
   answer: number | string
   category: LoCoMoCategory
   evidence: string[]
@@ -30,24 +48,6 @@ export interface LoCoMoQuestionAnswer {
  */
 export interface LoCoMoSample {
   qa: LoCoMoQuestionAnswer[]
-  sampleId: string
-}
-
-/**
- * Flattened, per-question LoCoMo case shape used by Vieval runners.
- *
- * Python parity:
- * - `sampleId`, `question`, `category`, `goldAnswer` map to QA entries processed in
- *   `snap-research/locomo/task_eval/evaluate_qa.py:98-103`
- *   and scored by category in `snap-research/locomo/task_eval/evaluation.py:203-221`.
- * - `caseId` is a deterministic local identifier for scheduling/caching.
- */
-export interface LoCoMoCase {
-  caseId: string
-  category: LoCoMoCategory
-  evidence: string[]
-  goldAnswer: string
-  question: string
   sampleId: string
 }
 

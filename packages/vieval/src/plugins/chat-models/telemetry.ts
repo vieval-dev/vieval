@@ -3,31 +3,6 @@ import type { TaskRunContext } from '../../config/types'
 import { errorMessageFrom } from '@moeru/std'
 
 /**
- * Represents one normalized chat-model tool call.
- *
- * Use when:
- * - report events need tool-call level payloads that remain provider-neutral
- *
- * Expects:
- * - `name` to be stable enough for aggregation and assertion checks
- * - `args` to be JSON-serializable
- */
-export interface ChatModelToolCall {
-  /**
-   * Optional provider-assigned tool-call identifier.
-   */
-  id?: string
-  /**
-   * Tool name.
-   */
-  name: string
-  /**
-   * Parsed tool arguments object/value.
-   */
-  args: unknown
-}
-
-/**
  * Provider identity attached to chat-model telemetry events.
  */
 export interface ChatModelTelemetryProvider {
@@ -39,6 +14,67 @@ export interface ChatModelTelemetryProvider {
    * Optional concrete model id/name.
    */
   model?: string
+}
+
+/**
+ * Represents one normalized chat-model tool call.
+ *
+ * Use when:
+ * - report events need tool-call level payloads that remain provider-neutral
+ *
+ * Expects:
+ * - `name` to be stable enough for aggregation and assertion checks
+ * - `args` to be JSON-serializable
+ */
+export interface ChatModelToolCall {
+  /**
+   * Parsed tool arguments object/value.
+   */
+  args: unknown
+  /**
+   * Optional provider-assigned tool-call identifier.
+   */
+  id?: string
+  /**
+   * Tool name.
+   */
+  name: string
+}
+
+/**
+ * Input options for error telemetry emission.
+ */
+export interface EmitChatModelErrorTelemetryOptions {
+  /**
+   * Optional case id for case-scoped telemetry events.
+   */
+  caseId?: string
+  /**
+   * Error payload emitted by the inference client/runtime.
+   */
+  error: unknown
+  /**
+   * Optional provider identity payload.
+   */
+  provider?: ChatModelTelemetryProvider
+}
+
+/**
+ * Input options for request telemetry emission.
+ */
+export interface EmitChatModelRequestTelemetryOptions {
+  /**
+   * Optional case id for case-scoped telemetry events.
+   */
+  caseId?: string
+  /**
+   * Optional request payload metadata.
+   */
+  data?: unknown
+  /**
+   * Optional provider identity payload.
+   */
+  provider?: ChatModelTelemetryProvider
 }
 
 /**
@@ -64,59 +100,115 @@ export interface EmitChatModelResponseTelemetryOptions {
 }
 
 /**
- * Input options for request telemetry emission.
+ * Emits chat-model failure telemetry as a reportable task event.
+ *
+ * Use when:
+ * - one inference call fails and report artifacts should include normalized error context
+ *
+ * Expects:
+ * - `context.reporterHooks?.onEvent` to be available in CLI execution paths
  */
-export interface EmitChatModelRequestTelemetryOptions {
-  /**
-   * Optional case id for case-scoped telemetry events.
-   */
-  caseId?: string
-  /**
-   * Optional request payload metadata.
-   */
-  data?: unknown
-  /**
-   * Optional provider identity payload.
-   */
-  provider?: ChatModelTelemetryProvider
+export function emitChatModelErrorTelemetry(
+  context: TaskRunContext,
+  options: EmitChatModelErrorTelemetryOptions,
+): void {
+  context.reporterHooks?.onEvent?.({
+    caseId: options.caseId,
+    data: {
+      error: errorMessageFrom(options.error) ?? 'Unknown inference error.',
+      modality: 'chat',
+      provider: options.provider,
+    },
+    event: 'InferenceError',
+  })
 }
 
 /**
- * Input options for error telemetry emission.
+ * Emits chat-model request telemetry as a reportable task event.
+ *
+ * Use when:
+ * - task code submits one model request and wants request-side traceability
+ *
+ * Expects:
+ * - `context.reporterHooks?.onEvent` to be available in CLI execution paths
  */
-export interface EmitChatModelErrorTelemetryOptions {
-  /**
-   * Optional case id for case-scoped telemetry events.
-   */
-  caseId?: string
-  /**
-   * Error payload emitted by the inference client/runtime.
-   */
-  error: unknown
-  /**
-   * Optional provider identity payload.
-   */
-  provider?: ChatModelTelemetryProvider
+export function emitChatModelRequestTelemetry(
+  context: TaskRunContext,
+  options: EmitChatModelRequestTelemetryOptions,
+): void {
+  context.reporterHooks?.onEvent?.({
+    caseId: options.caseId,
+    data: {
+      data: options.data,
+      modality: 'chat',
+      provider: options.provider,
+    },
+    event: 'InferenceRequest',
+  })
 }
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  if (value == null || typeof value !== 'object') {
-    return undefined
+/**
+ * Emits chat-model response telemetry as reportable task events.
+ *
+ * Use when:
+ * - task code receives one chat-model response and wants standardized report events
+ * - `ToolCall*` and metering metrics should be persisted in `events.jsonl`
+ *
+ * Expects:
+ * - `context.reporterHooks?.onEvent` to be available in CLI execution paths
+ *
+ * Returns:
+ * - no return value; this is a best-effort reporting helper
+ */
+export function emitChatModelResponseTelemetry(
+  context: TaskRunContext,
+  options: EmitChatModelResponseTelemetryOptions,
+): void {
+  const toolCalls = extractChatModelToolCalls(options.response)
+  const meteringDimensions = extractMeteringDimensions(options.response)
+
+  if (toolCalls.length > 0) {
+    meteringDimensions.tool_call_count = toolCalls.length
   }
 
-  return value as Record<string, unknown>
-}
-
-function parseMaybeJson(value: unknown): unknown {
-  if (typeof value !== 'string') {
-    return value
+  const data = {
+    metering: {
+      dimensions: meteringDimensions,
+      latency_ms: options.latencyMs,
+    },
+    metrics: {
+      'vieval.chat.tool_call_count': toolCalls.length,
+    },
+    modality: 'chat',
+    provider: options.provider,
+    toolCalls,
   }
 
-  try {
-    return JSON.parse(value)
-  }
-  catch {
-    return value
+  context.reporterHooks?.onEvent?.({
+    caseId: options.caseId,
+    data,
+    event: 'InferenceResponse',
+  })
+
+  for (const toolCall of toolCalls) {
+    context.reporterHooks?.onEvent?.({
+      caseId: options.caseId,
+      data: {
+        modality: 'chat',
+        provider: options.provider,
+        toolCall,
+      },
+      event: 'ToolCallStarted',
+    })
+    context.reporterHooks?.onEvent?.({
+      caseId: options.caseId,
+      data: {
+        modality: 'chat',
+        provider: options.provider,
+        toolCall,
+      },
+      event: 'ToolCallEnded',
+    })
   }
 }
 
@@ -204,115 +296,23 @@ export function extractMeteringDimensions(response: unknown): Record<string, num
   return dimensions
 }
 
-/**
- * Emits chat-model response telemetry as reportable task events.
- *
- * Use when:
- * - task code receives one chat-model response and wants standardized report events
- * - `ToolCall*` and metering metrics should be persisted in `events.jsonl`
- *
- * Expects:
- * - `context.reporterHooks?.onEvent` to be available in CLI execution paths
- *
- * Returns:
- * - no return value; this is a best-effort reporting helper
- */
-export function emitChatModelResponseTelemetry(
-  context: TaskRunContext,
-  options: EmitChatModelResponseTelemetryOptions,
-): void {
-  const toolCalls = extractChatModelToolCalls(options.response)
-  const meteringDimensions = extractMeteringDimensions(options.response)
-
-  if (toolCalls.length > 0) {
-    meteringDimensions.tool_call_count = toolCalls.length
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (value == null || typeof value !== 'object') {
+    return undefined
   }
 
-  const data = {
-    metering: {
-      dimensions: meteringDimensions,
-      latency_ms: options.latencyMs,
-    },
-    metrics: {
-      'vieval.chat.tool_call_count': toolCalls.length,
-    },
-    modality: 'chat',
-    provider: options.provider,
-    toolCalls,
-  }
-
-  context.reporterHooks?.onEvent?.({
-    caseId: options.caseId,
-    data,
-    event: 'InferenceResponse',
-  })
-
-  for (const toolCall of toolCalls) {
-    context.reporterHooks?.onEvent?.({
-      caseId: options.caseId,
-      data: {
-        modality: 'chat',
-        provider: options.provider,
-        toolCall,
-      },
-      event: 'ToolCallStarted',
-    })
-    context.reporterHooks?.onEvent?.({
-      caseId: options.caseId,
-      data: {
-        modality: 'chat',
-        provider: options.provider,
-        toolCall,
-      },
-      event: 'ToolCallEnded',
-    })
-  }
+  return value as Record<string, unknown>
 }
 
-/**
- * Emits chat-model request telemetry as a reportable task event.
- *
- * Use when:
- * - task code submits one model request and wants request-side traceability
- *
- * Expects:
- * - `context.reporterHooks?.onEvent` to be available in CLI execution paths
- */
-export function emitChatModelRequestTelemetry(
-  context: TaskRunContext,
-  options: EmitChatModelRequestTelemetryOptions,
-): void {
-  context.reporterHooks?.onEvent?.({
-    caseId: options.caseId,
-    data: {
-      data: options.data,
-      modality: 'chat',
-      provider: options.provider,
-    },
-    event: 'InferenceRequest',
-  })
-}
+function parseMaybeJson(value: unknown): unknown {
+  if (typeof value !== 'string') {
+    return value
+  }
 
-/**
- * Emits chat-model failure telemetry as a reportable task event.
- *
- * Use when:
- * - one inference call fails and report artifacts should include normalized error context
- *
- * Expects:
- * - `context.reporterHooks?.onEvent` to be available in CLI execution paths
- */
-export function emitChatModelErrorTelemetry(
-  context: TaskRunContext,
-  options: EmitChatModelErrorTelemetryOptions,
-): void {
-  context.reporterHooks?.onEvent?.({
-    caseId: options.caseId,
-    data: {
-      error: errorMessageFrom(options.error) ?? 'Unknown inference error.',
-      modality: 'chat',
-      provider: options.provider,
-    },
-    event: 'InferenceError',
-  })
+  try {
+    return JSON.parse(value)
+  }
+  catch {
+    return value
+  }
 }

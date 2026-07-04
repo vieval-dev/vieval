@@ -1,19 +1,56 @@
 import type { LoCoMoCategory } from './types'
 
-export interface LoCoMoRetrieverAdapter {
+/**
+ * Adapter for agents that answer the final formatted LoCoMo question themselves.
+ */
+export interface LoCoMoAnswerAgentAdapter {
+  answerCase: (input: {
+    caseId: string
+    category: LoCoMoCategory
+    question: string
+    rawQuestion: string
+    sampleId: string
+  }) => Promise<LoCoMoAnswerAgentResult>
   id: string
-  retrieveContext: (input: {
+}
+
+/**
+ * Diagnostics returned by an agent that answers a LoCoMo case directly.
+ */
+export interface LoCoMoAnswerAgentDiagnostics {
+  finalMessageId?: string
+  memorySearches?: Array<{
+    apiName?: string
+    arguments?: unknown
+    contextIdCount?: number
+    contextIds?: string[]
+    layerCounts?: Record<string, number>
+  }>
+  memoryToolCallCount?: number
+  operationId?: string
+  status?: string
+  steps?: number
+  toolCallCount?: number
+}
+
+/**
+ * Direct answer-agent output for one LoCoMo case.
+ */
+export interface LoCoMoAnswerAgentResult {
+  contextIds?: string[]
+  diagnostics?: LoCoMoAnswerAgentDiagnostics
+  prediction: string
+}
+
+export interface LoCoMoAnswerGeneratorAdapter {
+  generateAnswer: (input: {
+    caseId: string
+    category: LoCoMoCategory
+    contextText: string
     question: string
     sampleId: string
-    topK: number
-  }) => Promise<{
-    contextIds?: string[]
-    contextText: string
-    /**
-     * Optional backend retrieval diagnostics for report analysis.
-     */
-    diagnostics?: LoCoMoRetrievalDiagnostics
-  }>
+  }) => Promise<string>
+  id: string
 }
 
 /**
@@ -45,62 +82,20 @@ export interface LoCoMoRetrievalDiagnostics {
   searchedLayerCounts?: Record<string, number>
 }
 
-export interface LoCoMoAnswerGeneratorAdapter {
+export interface LoCoMoRetrieverAdapter {
   id: string
-  generateAnswer: (input: {
-    caseId: string
-    category: LoCoMoCategory
-    contextText: string
+  retrieveContext: (input: {
     question: string
     sampleId: string
-  }) => Promise<string>
-}
-
-/**
- * Diagnostics returned by an agent that answers a LoCoMo case directly.
- */
-export interface LoCoMoAnswerAgentDiagnostics {
-  finalMessageId?: string
-  memorySearches?: Array<{
-    apiName?: string
-    arguments?: unknown
-    contextIdCount?: number
+    topK: number
+  }) => Promise<{
     contextIds?: string[]
-    layerCounts?: Record<string, number>
+    contextText: string
+    /**
+     * Optional backend retrieval diagnostics for report analysis.
+     */
+    diagnostics?: LoCoMoRetrievalDiagnostics
   }>
-  memoryToolCallCount?: number
-  operationId?: string
-  status?: string
-  steps?: number
-  toolCallCount?: number
-}
-
-/**
- * Direct answer-agent output for one LoCoMo case.
- */
-export interface LoCoMoAnswerAgentResult {
-  contextIds?: string[]
-  diagnostics?: LoCoMoAnswerAgentDiagnostics
-  prediction: string
-}
-
-/**
- * Adapter for agents that answer the final formatted LoCoMo question themselves.
- */
-export interface LoCoMoAnswerAgentAdapter {
-  id: string
-  answerCase: (input: {
-    caseId: string
-    category: LoCoMoCategory
-    question: string
-    rawQuestion: string
-    sampleId: string
-  }) => Promise<LoCoMoAnswerAgentResult>
-}
-
-export interface LoCoMoScorerResult {
-  reasoning?: string
-  score: number
 }
 
 export interface LoCoMoScorerAdapter {
@@ -114,4 +109,9 @@ export interface LoCoMoScorerAdapter {
     question: string
     sampleId: string
   }) => Promise<LoCoMoScorerResult>
+}
+
+export interface LoCoMoScorerResult {
+  reasoning?: string
+  score: number
 }

@@ -20,7 +20,19 @@ const MOVE_CURSOR_ONE_ROW_UP = `${ESC}1A`
 const SYNC_START = `${ESC}?2026h`
 const SYNC_END = `${ESC}?2026l`
 
-type DefaultWindowRendererTimer = ReturnType<typeof globalThis.setInterval>
+/**
+ * Dependency contract for the TTY window renderer.
+ *
+ * Use when:
+ * - rendering the live reporter window into injected output sinks
+ * - testing redraw behavior without touching process streams
+ *
+ * Expects:
+ * - `getWindow()` returns the current bottom-window rows in render order
+ * - `getColumns()` returns a positive terminal width
+ * - custom timer injection supplies matching `createInterval` and `clearInterval`
+ */
+export type WindowRendererOptions<TTimer extends WindowRendererTimer = DefaultWindowRendererTimer> = WindowRendererConstructorOptions<TTimer>
 
 /**
  * Timer handle used by the renderer's periodic refresh loop.
@@ -36,18 +48,25 @@ type DefaultWindowRendererTimer = ReturnType<typeof globalThis.setInterval>
  * - the same handle or `void`
  */
 export interface WindowRendererTimer {
-  unref?: () => WindowRendererTimer | void
+  unref?: () => void | WindowRendererTimer
 }
 
-type WindowRendererTimerHooks<TTimer extends WindowRendererTimer>
-  = {
-    clearInterval?: undefined
-    createInterval?: undefined
-  }
-  | {
-    clearInterval: (timer: TTimer) => void
-    createInterval: (callback: () => void, intervalMs: number) => TTimer
-  }
+type DefaultWindowRendererTimer = ReturnType<typeof globalThis.setInterval>
+
+interface ManagedWindowRendererTimer {
+  clear: () => void
+  unref?: () => void | WindowRendererTimer
+}
+
+interface ResolvedWindowRendererOptions {
+  createInterval: (callback: () => void, intervalMs: number) => ManagedWindowRendererTimer
+  getColumns: () => number
+  getWindow: () => string[]
+  intervalMs: number
+  queueRenderReset: (callback: () => void) => void
+  supportsAnsiWindowing: boolean
+  writeOutput: (value: string) => void
+}
 
 interface WindowRendererBaseOptions {
   getColumns: () => number
@@ -60,34 +79,15 @@ interface WindowRendererBaseOptions {
 
 type WindowRendererConstructorOptions<TTimer extends WindowRendererTimer> = WindowRendererBaseOptions & WindowRendererTimerHooks<TTimer>
 
-/**
- * Dependency contract for the TTY window renderer.
- *
- * Use when:
- * - rendering the live reporter window into injected output sinks
- * - testing redraw behavior without touching process streams
- *
- * Expects:
- * - `getWindow()` returns the current bottom-window rows in render order
- * - `getColumns()` returns a positive terminal width
- * - custom timer injection supplies matching `createInterval` and `clearInterval`
- */
-export type WindowRendererOptions<TTimer extends WindowRendererTimer = DefaultWindowRendererTimer> = WindowRendererConstructorOptions<TTimer>
-
-interface ManagedWindowRendererTimer {
-  clear: () => void
-  unref?: () => WindowRendererTimer | void
-}
-
-interface ResolvedWindowRendererOptions {
-  createInterval: (callback: () => void, intervalMs: number) => ManagedWindowRendererTimer
-  getColumns: () => number
-  getWindow: () => string[]
-  intervalMs: number
-  queueRenderReset: (callback: () => void) => void
-  supportsAnsiWindowing: boolean
-  writeOutput: (value: string) => void
-}
+type WindowRendererTimerHooks<TTimer extends WindowRendererTimer>
+  = {
+    clearInterval: (timer: TTimer) => void
+    createInterval: (callback: () => void, intervalMs: number) => TTimer
+  }
+  | {
+    clearInterval?: undefined
+    createInterval?: undefined
+  }
 
 /**
  * Renders a dynamic window at the bottom of the terminal.
@@ -111,14 +111,14 @@ interface ResolvedWindowRendererOptions {
  *       -> {@link WindowRenderer.renderWindow}
  */
 export class WindowRenderer<TTimer extends WindowRendererTimer = DefaultWindowRendererTimer> {
+  private bufferedOutput = ''
+  private finished = false
   private readonly options: ResolvedWindowRendererOptions
   private renderInterval: ManagedWindowRendererTimer | undefined
   private renderScheduled = false
   private renderScheduleVersion = 0
-  private windowHeight = 0
   private started = false
-  private finished = false
-  private bufferedOutput = ''
+  private windowHeight = 0
 
   constructor(options: WindowRendererOptions<TTimer>) {
     if (options.createInterval && options.clearInterval) {
@@ -152,30 +152,45 @@ export class WindowRenderer<TTimer extends WindowRendererTimer = DefaultWindowRe
   }
 
   /**
-   * Starts the periodic refresh loop.
+   * Stops the renderer and clears any visible window state.
    *
    * Use when:
-   * - the live reporter is about to emit in-place updates
+   * - cleanup needs to happen from a `finally` block or interrupted run
    *
    * Expects:
-   * - repeated calls are harmless and keep the existing timer
+   * - callers may invoke it more than once
    *
    * Returns:
    * - no direct value
    */
-  start(): void {
-    if (this.started && !this.finished) {
+  dispose(): void {
+    this.finish()
+  }
+
+  /**
+   * Clears the rendered window and stops the refresh loop.
+   *
+   * Use when:
+   * - the live reporter is transitioning to final static output
+   *
+   * Expects:
+   * - repeated calls are safe
+   *
+   * Returns:
+   * - no direct value
+   */
+  finish(): void {
+    if (this.finished) {
       return
     }
 
-    this.started = true
-    this.finished = false
+    this.finished = true
+    this.started = false
     this.renderScheduleVersion += 1
-
-    if (!this.renderInterval) {
-      this.renderInterval = this.options.createInterval(() => this.schedule(), this.options.intervalMs)
-      this.renderInterval.unref?.()
-    }
+    this.renderScheduled = false
+    this.stopInterval()
+    this.clearWindow()
+    this.flushBufferedOutput()
   }
 
   /**
@@ -208,45 +223,30 @@ export class WindowRenderer<TTimer extends WindowRendererTimer = DefaultWindowRe
   }
 
   /**
-   * Clears the rendered window and stops the refresh loop.
+   * Starts the periodic refresh loop.
    *
    * Use when:
-   * - the live reporter is transitioning to final static output
+   * - the live reporter is about to emit in-place updates
    *
    * Expects:
-   * - repeated calls are safe
+   * - repeated calls are harmless and keep the existing timer
    *
    * Returns:
    * - no direct value
    */
-  finish(): void {
-    if (this.finished) {
+  start(): void {
+    if (this.started && !this.finished) {
       return
     }
 
-    this.finished = true
-    this.started = false
+    this.started = true
+    this.finished = false
     this.renderScheduleVersion += 1
-    this.renderScheduled = false
-    this.stopInterval()
-    this.clearWindow()
-    this.flushBufferedOutput()
-  }
 
-  /**
-   * Stops the renderer and clears any visible window state.
-   *
-   * Use when:
-   * - cleanup needs to happen from a `finally` block or interrupted run
-   *
-   * Expects:
-   * - callers may invoke it more than once
-   *
-   * Returns:
-   * - no direct value
-   */
-  dispose(): void {
-    this.finish()
+    if (!this.renderInterval) {
+      this.renderInterval = this.options.createInterval(() => this.schedule(), this.options.intervalMs)
+      this.renderInterval.unref?.()
+    }
   }
 
   /**
@@ -288,6 +288,33 @@ export class WindowRenderer<TTimer extends WindowRendererTimer = DefaultWindowRe
     this.bufferedOutput += message
   }
 
+  private clearWindow(): void {
+    if (!this.options.supportsAnsiWindowing || this.windowHeight === 0) {
+      return
+    }
+
+    this.writeOutput(`${CARRIAGE_RETURN}${CLEAR_LINE}`)
+
+    for (let rowIndex = 1; rowIndex < this.windowHeight; rowIndex += 1) {
+      this.writeOutput(`${CARRIAGE_RETURN}${MOVE_CURSOR_ONE_ROW_UP}${CLEAR_LINE}`)
+    }
+
+    this.windowHeight = 0
+  }
+
+  private flushBufferedOutput(): void {
+    if (this.bufferedOutput.length === 0) {
+      return
+    }
+
+    this.writeOutput(this.bufferedOutput)
+    this.bufferedOutput = ''
+  }
+
+  private isActiveWindowMode(): boolean {
+    return this.started && !this.finished && this.options.supportsAnsiWindowing
+  }
+
   private renderWindow(): void {
     const windowContent = this.options.getWindow()
     const rowCount = getRenderedRowCount(windowContent, this.options.getColumns())
@@ -310,20 +337,6 @@ export class WindowRenderer<TTimer extends WindowRendererTimer = DefaultWindowRe
     this.windowHeight = 0
   }
 
-  private clearWindow(): void {
-    if (!this.options.supportsAnsiWindowing || this.windowHeight === 0) {
-      return
-    }
-
-    this.writeOutput(`${CARRIAGE_RETURN}${CLEAR_LINE}`)
-
-    for (let rowIndex = 1; rowIndex < this.windowHeight; rowIndex += 1) {
-      this.writeOutput(`${CARRIAGE_RETURN}${MOVE_CURSOR_ONE_ROW_UP}${CLEAR_LINE}`)
-    }
-
-    this.windowHeight = 0
-  }
-
   private stopInterval(): void {
     if (!this.renderInterval) {
       return
@@ -335,19 +348,6 @@ export class WindowRenderer<TTimer extends WindowRendererTimer = DefaultWindowRe
 
   private writeOutput(message: string): void {
     this.options.writeOutput(message)
-  }
-
-  private flushBufferedOutput(): void {
-    if (this.bufferedOutput.length === 0) {
-      return
-    }
-
-    this.writeOutput(this.bufferedOutput)
-    this.bufferedOutput = ''
-  }
-
-  private isActiveWindowMode(): boolean {
-    return this.started && !this.finished && this.options.supportsAnsiWindowing
   }
 }
 

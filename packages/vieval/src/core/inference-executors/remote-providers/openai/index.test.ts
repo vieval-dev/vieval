@@ -33,8 +33,8 @@ describe('createOpenAIFromEnv', () => {
       },
       {
         apiKey: 'sk-default',
-        model: 'gpt-4.1-nano',
         baseURL: 'https://example.com/v1',
+        model: 'gpt-4.1-nano',
       },
     )
 
@@ -46,12 +46,12 @@ describe('createOpenAIFromEnv', () => {
   it('supports custom key names', () => {
     const runtime = createOpenAIFromEnv({
       apiKey: 'CUSTOM_API_KEY',
+      baseURL: 'CUSTOM_BASE_URL',
       env: {
         CUSTOM_API_KEY: 'sk-custom',
         CUSTOM_BASE_URL: 'https://custom.local/v1',
         CUSTOM_MODEL: 'o4-mini',
       },
-      baseURL: 'CUSTOM_BASE_URL',
       model: 'CUSTOM_MODEL',
     })
 

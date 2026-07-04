@@ -9,25 +9,9 @@ import { createProviderAdapter } from '../../adapters'
 import { envFrom, requiredEnvFrom } from '../../env'
 
 /**
- * Represents the OpenAI provider instance returned by xsai.
- */
-export type OpenAIProvider = ReturnType<typeof createOpenAI>
-
-/**
- * Represents the OpenAI adapter used by vieval.
- */
-export type OpenAIProviderAdapter = ProviderAdapter<OpenAIProvider>
-
-/**
  * Configures env key names and source for OpenAI provider setup.
  */
 export interface OpenAIEnvSourceOptions {
-  /**
-   * Environment object used for variable lookup.
-   *
-   * @default process.env
-   */
-  env?: NodeJS.ProcessEnv
   /**
    * Env key name for API key.
    *
@@ -40,6 +24,12 @@ export interface OpenAIEnvSourceOptions {
    * @default 'OPENAI_BASE_URL'
    */
   baseURL?: string
+  /**
+   * Environment object used for variable lookup.
+   *
+   * @default process.env
+   */
+  env?: NodeJS.ProcessEnv
   /**
    * Env key name for model.
    *
@@ -81,6 +71,16 @@ export interface OpenAIFromEnvResult {
 }
 
 /**
+ * Represents the OpenAI provider instance returned by xsai.
+ */
+export type OpenAIProvider = ReturnType<typeof createOpenAI>
+
+/**
+ * Represents the OpenAI adapter used by vieval.
+ */
+export type OpenAIProviderAdapter = ProviderAdapter<OpenAIProvider>
+
+/**
  * Minimal response shape returned by text-generation calls.
  */
 export interface OpenAITextGenerationResult {
@@ -89,20 +89,7 @@ export interface OpenAITextGenerationResult {
    *
    * Some OpenAI-compatible implementations may return `null`.
    */
-  text?: string | null
-}
-
-/**
- * Normalizes provider text output to a safe string.
- *
- * Before: `{ text: null }`
- * After: `''`
- *
- * Before: `{ text: 'hello' }`
- * After: `'hello'`
- */
-export function normalizeOpenAITextOutput(result: OpenAITextGenerationResult): string {
-  return typeof result.text === 'string' ? result.text : ''
+  text?: null | string
 }
 
 /**
@@ -161,4 +148,17 @@ export function createOpenAIFromEnv(
  */
 export function createOpenAIProviderAdapter(apiKey: string, baseURL?: string, retryOptions: RetryPolicyOptions = {}): OpenAIProviderAdapter {
   return createProviderAdapter(createOpenAI(apiKey, baseURL), retryOptions)
+}
+
+/**
+ * Normalizes provider text output to a safe string.
+ *
+ * Before: `{ text: null }`
+ * After: `''`
+ *
+ * Before: `{ text: 'hello' }`
+ * After: `'hello'`
+ */
+export function normalizeOpenAITextOutput(result: OpenAITextGenerationResult): string {
+  return typeof result.text === 'string' ? result.text : ''
 }

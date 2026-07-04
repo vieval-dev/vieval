@@ -9,9 +9,21 @@ import { glob } from 'tinyglobby'
 import { buildLocalOtlpProjection } from './report-otlp'
 import { buildCaseRecords, buildMetricsSummary, encodeJsonl } from './report-records'
 
+/** Identity segments used to place report artifacts on disk. */
+export interface ReportArtifactIdentity {
+  /** Attempt id path segment and default case record identity. */
+  attemptId: string
+  /** Experiment id path segment and default case record identity. */
+  experimentId: string
+  /** Run id path segment and default case record identity. */
+  runId: string
+  /** Workspace id path segment and default case record identity. */
+  workspaceId: string
+}
+
 export interface ReportRunArtifact {
-  eventsCount: number
   events: ReportRunEvent[]
+  eventsCount: number
   reportDirectory: string
   summary: CliRunOutput
   summaryFilePath: string
@@ -34,59 +46,29 @@ export interface ReportRunEvent {
   workspaceId?: string
 }
 
-/** Identity segments used to place report artifacts on disk. */
-export interface ReportArtifactIdentity {
-  /** Attempt id path segment and default case record identity. */
-  attemptId: string
-  /** Experiment id path segment and default case record identity. */
-  experimentId: string
-  /** Run id path segment and default case record identity. */
-  runId: string
-  /** Workspace id path segment and default case record identity. */
-  workspaceId: string
-}
-
 export interface ReportRunSummaryRow {
-  attemptId: string | null
+  attemptId: null | string
   eventsCount: number
   executedProjects: number
-  experimentId: string | null
+  experimentId: null | string
   failedProjects: number
   projectNames: string[]
   reportDirectory: string
-  runId: string | null
+  runId: null | string
   totalProjects: number
   totalTasks: number
-  workspaceId: string | null
+  workspaceId: null | string
 }
 
 /**
- * Resolves one or more `run-summary.json` paths from a report location.
+ * Reads all run artifacts found under `reportPath`.
  *
  * Use when:
- * - callers may pass a run directory, summary file path, or a report root
- *
- * Returns:
- * - sorted absolute summary file paths
+ * - callers need multi-run analysis from a directory root
  */
-export async function resolveRunSummaryPaths(reportPath: string): Promise<string[]> {
-  const absoluteReportPath = resolve(reportPath)
-  const directSummaryPath = resolve(absoluteReportPath, 'run-summary.json')
-
-  if (existsSync(absoluteReportPath) && absoluteReportPath.endsWith('.json')) {
-    return [absoluteReportPath]
-  }
-
-  if (existsSync(directSummaryPath)) {
-    return [directSummaryPath]
-  }
-
-  const discovered = await glob('**/run-summary.json', {
-    absolute: true,
-    cwd: absoluteReportPath,
-  })
-
-  return discovered.sort((left, right) => left.localeCompare(right))
+export async function readReportArtifacts(reportPath: string): Promise<ReportRunArtifact[]> {
+  const summaryFilePaths = await resolveRunSummaryPaths(reportPath)
+  return summaryFilePaths.map(summaryFilePath => readReportRunArtifact(summaryFilePath))
 }
 
 /**
@@ -131,14 +113,32 @@ export function readReportRunArtifact(summaryFilePath: string): ReportRunArtifac
 }
 
 /**
- * Reads all run artifacts found under `reportPath`.
+ * Resolves one or more `run-summary.json` paths from a report location.
  *
  * Use when:
- * - callers need multi-run analysis from a directory root
+ * - callers may pass a run directory, summary file path, or a report root
+ *
+ * Returns:
+ * - sorted absolute summary file paths
  */
-export async function readReportArtifacts(reportPath: string): Promise<ReportRunArtifact[]> {
-  const summaryFilePaths = await resolveRunSummaryPaths(reportPath)
-  return summaryFilePaths.map(summaryFilePath => readReportRunArtifact(summaryFilePath))
+export async function resolveRunSummaryPaths(reportPath: string): Promise<string[]> {
+  const absoluteReportPath = resolve(reportPath)
+  const directSummaryPath = resolve(absoluteReportPath, 'run-summary.json')
+
+  if (existsSync(absoluteReportPath) && absoluteReportPath.endsWith('.json')) {
+    return [absoluteReportPath]
+  }
+
+  if (existsSync(directSummaryPath)) {
+    return [directSummaryPath]
+  }
+
+  const discovered = await glob('**/run-summary.json', {
+    absolute: true,
+    cwd: absoluteReportPath,
+  })
+
+  return discovered.sort((left, right) => left.localeCompare(right))
 }
 
 /**

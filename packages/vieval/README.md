@@ -31,6 +31,7 @@ import { defineConfig, loadEnv, requiredEnvFrom } from 'vieval'
 import { chatModelFrom, ChatModels } from 'vieval/plugins/chat-models'
 
 export default defineConfig({
+  env: loadEnv('test', cwd(), ''),
   plugins: [
     ChatModels({
       models: [
@@ -46,21 +47,20 @@ export default defineConfig({
       ],
     }),
   ],
-  env: loadEnv('test', cwd(), ''),
   projects: [
     {
+      evalMatrix: {
+        extend: {
+          rubric: ['default'],
+        },
+      },
+      include: ['evals/*.eval.ts'],
       name: 'default',
       root: '.',
-      include: ['evals/*.eval.ts'],
       runMatrix: {
         extend: {
           model: ['agent-mini'],
           scenario: ['baseline'],
-        },
-      },
-      evalMatrix: {
-        extend: {
-          rubric: ['default'],
         },
       },
     },
@@ -129,8 +129,8 @@ Use builder style when loading a batch of inputs:
 import { describeTask, expect } from 'vieval'
 
 const arithmeticCases = [
-  { name: 'addition-small', input: { a: 1, b: 2, expected: 3 } },
-  { name: 'addition-large', input: { a: 20, b: 22, expected: 42 } },
+  { input: { a: 1, b: 2, expected: 3 }, name: 'addition-small' },
+  { input: { a: 20, b: 22, expected: 42 }, name: 'addition-large' },
 ]
 
 describeTask('arithmetic-quality', ({ casesFromInputs }) => {
@@ -191,6 +191,7 @@ import { defineConfig, loadEnv, requiredEnvFrom } from 'vieval'
 import { chatModelFrom, ChatModels } from 'vieval/plugins/chat-models'
 
 export default defineConfig({
+  env: loadEnv('test', cwd(), ''),
   plugins: [
     ChatModels({
       models: [
@@ -224,23 +225,22 @@ export default defineConfig({
       ],
     }),
   ],
-  env: loadEnv('test', cwd(), ''),
   projects: [
     {
+      evalMatrix: {
+        extend: {
+          rubric: ['strict', 'lenient'],
+          rubricModel: ['judge-mini', 'judge-large'],
+        },
+      },
+      include: ['evals/*.eval.ts'],
       name: 'chat-evals',
       root: '.',
-      include: ['evals/*.eval.ts'],
       runMatrix: {
         extend: {
           model: ['agent-mini', 'agent-large'],
           promptLanguage: ['en', 'zh'],
           scenario: ['baseline', 'stress'],
-        },
-      },
-      evalMatrix: {
-        extend: {
-          rubric: ['strict', 'lenient'],
-          rubricModel: ['judge-mini', 'judge-large'],
         },
       },
     },
@@ -258,19 +258,6 @@ import { defineConfig } from 'vieval'
 export default defineConfig({
   projects: [
     {
-      name: 'motion-evals',
-      root: '.',
-      include: ['evals/*.eval.ts'],
-      inferenceExecutors: [{ id: 'motion-engine' }],
-      models: [
-        {
-          id: 'motion-engine:v2',
-          aliases: ['motion-default'],
-          inferenceExecutor: 'motion-engine',
-          inferenceExecutorId: 'motion-engine',
-          model: 'v2',
-        },
-      ],
       async executor(task, context) {
         const model = context.models.find(model =>
           model.id === 'motion-default'
@@ -285,13 +272,26 @@ export default defineConfig({
         const success = model.model === 'v2' && task.matrix.run.scenario === 'baseline'
 
         return {
-          id: task.id,
           entryId: task.entry.id,
+          id: task.id,
           inferenceExecutorId: task.inferenceExecutor.id,
           matrix: task.matrix,
           scores: [{ kind: 'exact', score: success ? 1 : 0 }],
         }
       },
+      include: ['evals/*.eval.ts'],
+      inferenceExecutors: [{ id: 'motion-engine' }],
+      models: [
+        {
+          aliases: ['motion-default'],
+          id: 'motion-engine:v2',
+          inferenceExecutor: 'motion-engine',
+          inferenceExecutorId: 'motion-engine',
+          model: 'v2',
+        },
+      ],
+      name: 'motion-evals',
+      root: '.',
     },
   ],
 })

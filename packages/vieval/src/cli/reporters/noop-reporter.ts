@@ -24,13 +24,13 @@ import type {
  */
 export function createNoopReporter(): CliReporter {
   return {
+    dispose() {},
+    onCaseEnd(_payload: CliReporterCaseEndPayload) {},
+    onCaseStart(_payload: CliReporterCaseStartPayload) {},
+    onRunEnd(_payload: CliReporterRunEndPayload) {},
     onRunStart(_payload: CliReporterRunStartPayload) {},
+    onTaskEnd(_payload: CliReporterTaskEndPayload) {},
     onTaskQueued(_payload: CliReporterTaskQueuedPayload) {},
     onTaskStart(_payload: CliReporterTaskStartPayload) {},
-    onCaseStart(_payload: CliReporterCaseStartPayload) {},
-    onCaseEnd(_payload: CliReporterCaseEndPayload) {},
-    onTaskEnd(_payload: CliReporterTaskEndPayload) {},
-    onRunEnd(_payload: CliReporterRunEndPayload) {},
-    dispose() {},
   }
 }

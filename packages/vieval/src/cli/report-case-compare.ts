@@ -11,15 +11,6 @@ import { errorMessageFrom } from '@moeru/std'
 import { readCaseRecordsFromReport } from './report-cases'
 import { getCaseSelectorValue, stableStringify } from './report-selectors'
 
-export interface CaseComparisonOptions {
-  /** Optional key used to match cases. Defaults to `benchmark.case.id`, then `caseId`. */
-  caseKey?: string
-  /** Optional key used to group matched case deltas. */
-  groupBy?: string
-  /** Score kind used for averages and deltas. */
-  scoreKind?: string
-}
-
 export interface BuildCaseComparisonArgs extends CaseComparisonOptions {
   /** Left/base run case records. */
   left: readonly CaseRecord[]
@@ -27,32 +18,13 @@ export interface BuildCaseComparisonArgs extends CaseComparisonOptions {
   right: readonly CaseRecord[]
 }
 
-/** One matched case diff between two report runs. */
-export interface CaseComparisonRow {
-  /** Stable comparison key used to match the case. */
-  caseKey: string
-  /** Direct left and right scores plus right-minus-left delta. */
-  delta: {
-    left: number
-    right: number
-    score: number
-  }
-  /** Left/base case record. */
-  left: CaseRecord
-  /** Right/candidate case record. */
-  right: CaseRecord
-  /** Metric values that differ between the two matched records. */
-  metricsChanged: Record<string, { left: CaseMetricValue | undefined, right: CaseMetricValue | undefined }>
-}
-
-/** Score summary for all compared cases or one group of compared cases. */
-export interface CaseComparisonSummary {
-  /** Difference between right and left average. */
-  delta: number
-  /** Average score in the left/base records. */
-  leftAverage: number
-  /** Average score in the right/candidate records. */
-  rightAverage: number
+export interface CaseComparisonOptions {
+  /** Optional key used to match cases. Defaults to `benchmark.case.id`, then `caseId`. */
+  caseKey?: string
+  /** Optional key used to group matched case deltas. */
+  groupBy?: string
+  /** Score kind used for averages and deltas. */
+  scoreKind?: string
 }
 
 /** Full case comparison output for local report artifacts. */
@@ -71,6 +43,34 @@ export interface CaseComparisonOutput {
   topImprovements: CaseComparisonRow[]
   /** Matched cases sorted from largest regression to largest improvement. */
   topRegressions: CaseComparisonRow[]
+}
+
+/** One matched case diff between two report runs. */
+export interface CaseComparisonRow {
+  /** Stable comparison key used to match the case. */
+  caseKey: string
+  /** Direct left and right scores plus right-minus-left delta. */
+  delta: {
+    left: number
+    right: number
+    score: number
+  }
+  /** Left/base case record. */
+  left: CaseRecord
+  /** Metric values that differ between the two matched records. */
+  metricsChanged: Record<string, { left: CaseMetricValue | undefined, right: CaseMetricValue | undefined }>
+  /** Right/candidate case record. */
+  right: CaseRecord
+}
+
+/** Score summary for all compared cases or one group of compared cases. */
+export interface CaseComparisonSummary {
+  /** Difference between right and left average. */
+  delta: number
+  /** Average score in the left/base records. */
+  leftAverage: number
+  /** Average score in the right/candidate records. */
+  rightAverage: number
 }
 
 interface ParsedReportCompareCliArguments extends CaseComparisonOptions {
@@ -165,218 +165,6 @@ export function buildCaseComparison(args: BuildCaseComparisonArgs): CaseComparis
 }
 
 /**
- * Runs the `vieval report compare` command.
- *
- * Call stack:
- *
- * published executable (`../bin/vieval`)
- *   -> {@link import('./index').runTopLevelCli}
- *     -> {@link runReportCompareCli}
- *       -> {@link readCaseRecordsFromReport}
- *       -> {@link buildCaseComparison}
- *
- * Use when:
- * - two local report artifact directories should be compared case-by-case
- *
- * Expects:
- * - argv is either `compare <left> <right> ...` or `<left> <right> ...`
- *
- * Returns:
- * - resolves after writing the requested output to stdout
- */
-export async function runReportCompareCli(argv: readonly string[]): Promise<void> {
-  try {
-    const parsed = parseReportCompareCliArguments(argv)
-    const [left, right] = await Promise.all([
-      readCaseRecordsFromReport(parsed.leftReportPath),
-      readCaseRecordsFromReport(parsed.rightReportPath),
-    ])
-    const output = buildCaseComparison({
-      caseKey: parsed.caseKey,
-      groupBy: parsed.groupBy,
-      left,
-      right,
-      scoreKind: parsed.scoreKind,
-    })
-
-    if (parsed.format === 'json') {
-      process.stdout.write(`${JSON.stringify(output, null, 2)}\n`)
-      return
-    }
-
-    process.stdout.write(`${formatCaseComparisonTable(output)}\n`)
-  }
-  catch (error) {
-    const errorMessage = errorMessageFrom(error) ?? 'Unknown report compare failure.'
-    process.stderr.write(`[vieval report compare] ${errorMessage}\n`)
-    process.exitCode = 1
-  }
-}
-
-function normalizeCliArgv(argv: readonly string[]): string[] {
-  const normalizedArgv = argv[0] === '--'
-    ? argv.slice(1)
-    : [...argv]
-
-  if (normalizedArgv[0] === 'report' && normalizedArgv[1] === 'compare') {
-    return normalizedArgv.slice(2)
-  }
-
-  if (normalizedArgv[0] === 'compare') {
-    return normalizedArgv.slice(1)
-  }
-
-  return normalizedArgv
-}
-
-function parseReportCompareCliArguments(argv: readonly string[]): ParsedReportCompareCliArguments {
-  const cli = meow(reportCompareHelpText, {
-    argv: normalizeCliArgv(argv),
-    flags: {
-      caseKey: {
-        type: 'string',
-      },
-      format: {
-        default: 'table',
-        type: 'string',
-      },
-      groupBy: {
-        type: 'string',
-      },
-      scoreKind: {
-        default: 'exact',
-        type: 'string',
-      },
-    },
-    importMeta: import.meta,
-  })
-
-  const leftReportPath = cli.input[0]
-  const rightReportPath = cli.input[1]
-  if (leftReportPath == null || leftReportPath.length === 0 || rightReportPath == null || rightReportPath.length === 0) {
-    throw new Error('Missing required <leftReportPath> and <rightReportPath> arguments.')
-  }
-
-  return {
-    caseKey: cli.flags.caseKey,
-    format: cli.flags.format === 'json' ? 'json' : 'table',
-    groupBy: cli.flags.groupBy,
-    leftReportPath,
-    rightReportPath,
-    scoreKind: cli.flags.scoreKind,
-  }
-}
-
-function indexRecordsByCaseKey(records: readonly CaseRecord[], caseKey: string | undefined, side: 'left' | 'right'): Map<string, CaseRecord> {
-  const indexed = new Map<string, CaseRecord>()
-
-  for (const record of records) {
-    const resolved = resolveCaseKey(record, caseKey)
-    if (indexed.has(resolved)) {
-      throw new Error(`Duplicate case key "${resolved}" in ${side} report.`)
-    }
-
-    indexed.set(resolved, record)
-  }
-
-  return indexed
-}
-
-function resolveCaseKey(record: CaseRecord, caseKey: string | undefined): string {
-  if (caseKey != null) {
-    const resolved = getCaseSelectorValue(record, caseKey)
-    if (resolved.exists) {
-      return String(resolved.value)
-    }
-
-    throw new Error(`Missing explicit case key "${caseKey}" for case "${record.caseId}".`)
-  }
-
-  const benchmarkCaseId = getCaseSelectorValue(record, 'benchmark.case.id')
-  if (benchmarkCaseId.exists) {
-    return String(benchmarkCaseId.value)
-  }
-
-  const vievalCaseId = getCaseSelectorValue(record, 'vieval.case.id')
-  return vievalCaseId.exists
-    ? String(vievalCaseId.value)
-    : record.caseId
-}
-
-function getScore(record: CaseRecord, scoreKind: string): number {
-  return record.scores[scoreKind] ?? 0
-}
-
-function averageScore(records: readonly CaseRecord[], scoreKind: string): number {
-  const values = records
-    .map(record => record.scores[scoreKind])
-    .filter((value): value is number => typeof value === 'number')
-
-  if (values.length === 0) {
-    return 0
-  }
-
-  return values.reduce((sum, value) => sum + value, 0) / values.length
-}
-
-function diffMetrics(
-  left: Record<string, CaseMetricValue>,
-  right: Record<string, CaseMetricValue>,
-): Record<string, { left: CaseMetricValue | undefined, right: CaseMetricValue | undefined }> {
-  const changed: Record<string, { left: CaseMetricValue | undefined, right: CaseMetricValue | undefined }> = {}
-  const metricKeys = [...new Set([...Object.keys(left), ...Object.keys(right)])].sort((leftKey, rightKey) => leftKey.localeCompare(rightKey))
-
-  for (const metricKey of metricKeys) {
-    if (stableStringify(left[metricKey]) !== stableStringify(right[metricKey])) {
-      changed[metricKey] = {
-        left: left[metricKey],
-        right: right[metricKey],
-      }
-    }
-  }
-
-  return changed
-}
-
-function buildComparisonGroups(
-  cases: readonly CaseComparisonRow[],
-  groupBy: string,
-): Record<string, CaseComparisonSummary & { count: number }> {
-  const groupedRows: Record<string, CaseComparisonRow[]> = {}
-
-  for (const row of cases) {
-    const resolved = getCaseSelectorValue(row.right, groupBy)
-    if (!resolved.exists) {
-      continue
-    }
-
-    const groupKey = `${groupBy}=${String(resolved.value)}`
-    groupedRows[groupKey] ??= []
-    groupedRows[groupKey].push(row)
-  }
-
-  return Object.fromEntries(
-    Object.entries(groupedRows)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([groupKey, rows]) => {
-        const leftAverage = rows.reduce((sum, row) => sum + row.delta.left, 0) / rows.length
-        const rightAverage = rows.reduce((sum, row) => sum + row.delta.right, 0) / rows.length
-
-        return [groupKey, {
-          count: rows.length,
-          delta: rightAverage - leftAverage,
-          leftAverage,
-          rightAverage,
-        }]
-      }),
-  )
-}
-
-function compareCaseRecords(left: CaseRecord, right: CaseRecord): number {
-  return left.caseId.localeCompare(right.caseId)
-}
-
-/**
  * Formats a case comparison as a compact human-readable table.
  *
  * Use when:
@@ -436,4 +224,216 @@ export function formatCaseComparisonTable(output: CaseComparisonOutput): string 
   }
 
   return lines.join('\n')
+}
+
+/**
+ * Runs the `vieval report compare` command.
+ *
+ * Call stack:
+ *
+ * published executable (`../bin/vieval`)
+ *   -> {@link import('./index').runTopLevelCli}
+ *     -> {@link runReportCompareCli}
+ *       -> {@link readCaseRecordsFromReport}
+ *       -> {@link buildCaseComparison}
+ *
+ * Use when:
+ * - two local report artifact directories should be compared case-by-case
+ *
+ * Expects:
+ * - argv is either `compare <left> <right> ...` or `<left> <right> ...`
+ *
+ * Returns:
+ * - resolves after writing the requested output to stdout
+ */
+export async function runReportCompareCli(argv: readonly string[]): Promise<void> {
+  try {
+    const parsed = parseReportCompareCliArguments(argv)
+    const [left, right] = await Promise.all([
+      readCaseRecordsFromReport(parsed.leftReportPath),
+      readCaseRecordsFromReport(parsed.rightReportPath),
+    ])
+    const output = buildCaseComparison({
+      caseKey: parsed.caseKey,
+      groupBy: parsed.groupBy,
+      left,
+      right,
+      scoreKind: parsed.scoreKind,
+    })
+
+    if (parsed.format === 'json') {
+      process.stdout.write(`${JSON.stringify(output, null, 2)}\n`)
+      return
+    }
+
+    process.stdout.write(`${formatCaseComparisonTable(output)}\n`)
+  }
+  catch (error) {
+    const errorMessage = errorMessageFrom(error) ?? 'Unknown report compare failure.'
+    process.stderr.write(`[vieval report compare] ${errorMessage}\n`)
+    process.exitCode = 1
+  }
+}
+
+function averageScore(records: readonly CaseRecord[], scoreKind: string): number {
+  const values = records
+    .map(record => record.scores[scoreKind])
+    .filter((value): value is number => typeof value === 'number')
+
+  if (values.length === 0) {
+    return 0
+  }
+
+  return values.reduce((sum, value) => sum + value, 0) / values.length
+}
+
+function buildComparisonGroups(
+  cases: readonly CaseComparisonRow[],
+  groupBy: string,
+): Record<string, CaseComparisonSummary & { count: number }> {
+  const groupedRows: Record<string, CaseComparisonRow[]> = {}
+
+  for (const row of cases) {
+    const resolved = getCaseSelectorValue(row.right, groupBy)
+    if (!resolved.exists) {
+      continue
+    }
+
+    const groupKey = `${groupBy}=${String(resolved.value)}`
+    groupedRows[groupKey] ??= []
+    groupedRows[groupKey].push(row)
+  }
+
+  return Object.fromEntries(
+    Object.entries(groupedRows)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([groupKey, rows]) => {
+        const leftAverage = rows.reduce((sum, row) => sum + row.delta.left, 0) / rows.length
+        const rightAverage = rows.reduce((sum, row) => sum + row.delta.right, 0) / rows.length
+
+        return [groupKey, {
+          count: rows.length,
+          delta: rightAverage - leftAverage,
+          leftAverage,
+          rightAverage,
+        }]
+      }),
+  )
+}
+
+function compareCaseRecords(left: CaseRecord, right: CaseRecord): number {
+  return left.caseId.localeCompare(right.caseId)
+}
+
+function diffMetrics(
+  left: Record<string, CaseMetricValue>,
+  right: Record<string, CaseMetricValue>,
+): Record<string, { left: CaseMetricValue | undefined, right: CaseMetricValue | undefined }> {
+  const changed: Record<string, { left: CaseMetricValue | undefined, right: CaseMetricValue | undefined }> = {}
+  const metricKeys = [...new Set([...Object.keys(left), ...Object.keys(right)])].sort((leftKey, rightKey) => leftKey.localeCompare(rightKey))
+
+  for (const metricKey of metricKeys) {
+    if (stableStringify(left[metricKey]) !== stableStringify(right[metricKey])) {
+      changed[metricKey] = {
+        left: left[metricKey],
+        right: right[metricKey],
+      }
+    }
+  }
+
+  return changed
+}
+
+function getScore(record: CaseRecord, scoreKind: string): number {
+  return record.scores[scoreKind] ?? 0
+}
+
+function indexRecordsByCaseKey(records: readonly CaseRecord[], caseKey: string | undefined, side: 'left' | 'right'): Map<string, CaseRecord> {
+  const indexed = new Map<string, CaseRecord>()
+
+  for (const record of records) {
+    const resolved = resolveCaseKey(record, caseKey)
+    if (indexed.has(resolved)) {
+      throw new Error(`Duplicate case key "${resolved}" in ${side} report.`)
+    }
+
+    indexed.set(resolved, record)
+  }
+
+  return indexed
+}
+
+function normalizeCliArgv(argv: readonly string[]): string[] {
+  const normalizedArgv = argv[0] === '--'
+    ? argv.slice(1)
+    : [...argv]
+
+  if (normalizedArgv[0] === 'report' && normalizedArgv[1] === 'compare') {
+    return normalizedArgv.slice(2)
+  }
+
+  if (normalizedArgv[0] === 'compare') {
+    return normalizedArgv.slice(1)
+  }
+
+  return normalizedArgv
+}
+
+function parseReportCompareCliArguments(argv: readonly string[]): ParsedReportCompareCliArguments {
+  const cli = meow(reportCompareHelpText, {
+    argv: normalizeCliArgv(argv),
+    flags: {
+      caseKey: {
+        type: 'string',
+      },
+      format: {
+        default: 'table',
+        type: 'string',
+      },
+      groupBy: {
+        type: 'string',
+      },
+      scoreKind: {
+        default: 'exact',
+        type: 'string',
+      },
+    },
+    importMeta: import.meta,
+  })
+
+  const leftReportPath = cli.input[0]
+  const rightReportPath = cli.input[1]
+  if (leftReportPath == null || leftReportPath.length === 0 || rightReportPath == null || rightReportPath.length === 0) {
+    throw new Error('Missing required <leftReportPath> and <rightReportPath> arguments.')
+  }
+
+  return {
+    caseKey: cli.flags.caseKey,
+    format: cli.flags.format === 'json' ? 'json' : 'table',
+    groupBy: cli.flags.groupBy,
+    leftReportPath,
+    rightReportPath,
+    scoreKind: cli.flags.scoreKind,
+  }
+}
+
+function resolveCaseKey(record: CaseRecord, caseKey: string | undefined): string {
+  if (caseKey != null) {
+    const resolved = getCaseSelectorValue(record, caseKey)
+    if (resolved.exists) {
+      return String(resolved.value)
+    }
+
+    throw new Error(`Missing explicit case key "${caseKey}" for case "${record.caseId}".`)
+  }
+
+  const benchmarkCaseId = getCaseSelectorValue(record, 'benchmark.case.id')
+  if (benchmarkCaseId.exists) {
+    return String(benchmarkCaseId.value)
+  }
+
+  const vievalCaseId = getCaseSelectorValue(record, 'vieval.case.id')
+  return vievalCaseId.exists
+    ? String(vievalCaseId.value)
+    : record.caseId
 }

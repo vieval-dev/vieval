@@ -27,13 +27,13 @@ const caseConcurrencyRunStateKey = '__VIEVAL_CASE_CONCURRENCY_RUN_STATE__'
 const telemetryRunEndStateKey = '__VIEVAL_TELEMETRY_RUN_END_STATE__'
 const openTelemetrySpanCalls: Array<{ attributes?: Record<string, unknown>, name: string }> = []
 const openTelemetryEventCalls: Array<{ attributes?: Record<string, unknown>, name: string }> = []
-let activeOpenTelemetrySpan: {
+let activeOpenTelemetrySpan: undefined | {
   addEvent: (name: string, attributes?: Record<string, unknown>) => void
   end: () => void
   recordException: (error: unknown) => void
   setAttributes: (attributes: Record<string, unknown>) => void
   setStatus: (status: { code: number, message?: string }) => void
-} | undefined
+}
 const openTelemetryApiMock = {
   SpanStatusCode: {
     ERROR: 2,
@@ -70,6 +70,12 @@ const openTelemetryApiMock = {
 
 vi.mock('@opentelemetry/api', () => openTelemetryApiMock)
 
+interface BlockingProjectFixtureOptions {
+  concurrencySource?: string
+  evalNames: string[]
+  name: string
+}
+
 interface BlockingRunState {
   active: number
   peak: number
@@ -79,12 +85,6 @@ interface BlockingRunState {
   started: string[]
 }
 
-interface BlockingProjectFixtureOptions {
-  concurrencySource?: string
-  evalNames: string[]
-  name: string
-}
-
 interface CaseConcurrencyRunState {
   active: number
   peak: number
@@ -92,42 +92,10 @@ interface CaseConcurrencyRunState {
   started: number[]
 }
 
-function createBlockingRunState(): BlockingRunState {
-  return {
-    active: 0,
-    peak: 0,
-    projectActive: {},
-    projectPeak: {},
-    releases: [],
-    started: [],
-  }
-}
-
-function setBlockingRunState(state: BlockingRunState): void {
-  ;(globalThis as typeof globalThis & {
-    [blockingRunStateKey]?: BlockingRunState
-  })[blockingRunStateKey] = state
-}
-
 function clearBlockingRunState(): void {
   delete (globalThis as typeof globalThis & {
     [blockingRunStateKey]?: BlockingRunState
   })[blockingRunStateKey]
-}
-
-function createCaseConcurrencyRunState(): CaseConcurrencyRunState {
-  return {
-    active: 0,
-    peak: 0,
-    releases: [],
-    started: [],
-  }
-}
-
-function setCaseConcurrencyRunState(state: CaseConcurrencyRunState): void {
-  ;(globalThis as typeof globalThis & {
-    [caseConcurrencyRunStateKey]?: CaseConcurrencyRunState
-  })[caseConcurrencyRunStateKey] = state
 }
 
 function clearCaseConcurrencyRunState(): void {
@@ -145,80 +113,105 @@ function clearTelemetryRunEndState(): void {
   })[telemetryRunEndStateKey]
 }
 
-function stripAnsi(value: string): string {
-  return stripVTControlCharacters(value)
-}
-
-async function waitForExpectation(assertion: () => void, attempts = 30): Promise<void> {
-  let lastError: unknown
-
-  for (let index = 0; index < attempts; index += 1) {
-    try {
-      assertion()
-      return
-    }
-    catch (error) {
-      lastError = error
-      await new Promise(resolve => setTimeout(resolve, 10))
-    }
-  }
-
-  throw lastError
-}
-
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await stat(path)
-    return true
-  }
-  catch {
-    return false
-  }
-}
-
-async function createDslTaskProject(): Promise<string> {
-  const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-live-reporter-'))
+async function createBlockingExecutorProject(options: {
+  concurrencySource?: string
+  projects: BlockingProjectFixtureOptions[]
+  topLevelConcurrencySource?: string
+}): Promise<string> {
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-blocking-run-'))
   temporaryDirectories.push(temporaryDirectory)
 
-  const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
+  const cliConfigImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
+  const evalConfigImportPath = join(packageDirectory, 'src', 'config', 'index.ts').replaceAll('\\', '/')
 
-  await mkdir(join(temporaryDirectory, 'evals'), { recursive: true })
-  await writeFile(
-    join(temporaryDirectory, 'evals', 'live-task.eval.ts'),
-    `
-import { caseOf, describeTask } from '${vievalImportPath}'
+  await Promise.all(options.projects.map(async (project) => {
+    const projectDirectory = join(temporaryDirectory, project.name, 'evals')
+    await mkdir(projectDirectory, { recursive: true })
 
-describeTask('live-task', () => {
-  caseOf('live-case', () => {}, {
-    input: {
-      source: 'live-case',
+    await Promise.all(project.evalNames.map(async (evalName) => {
+      await writeFile(
+        join(projectDirectory, `${evalName}.eval.ts`),
+        `
+import { defineEval, defineTask } from '${evalConfigImportPath}'
+
+export default defineEval({
+  description: '${project.name} ${evalName}',
+  name: '${evalName}',
+  task: defineTask({
+    id: '${evalName}',
+    run() {
+      return {
+        scores: [
+          {
+            kind: 'exact',
+            score: 1,
+          },
+        ],
+      }
     },
-  }, { concurrency: 4 })
+  }),
 })
 `,
-    'utf-8',
-  )
+        'utf-8',
+      )
+    }))
+  }))
+
+  const projectEntries = options.projects.map(project => `
+    {
+      name: '${project.name}',
+      root: './${project.name}',
+      include: ['evals/*.eval.ts'],
+      ${project.concurrencySource == null ? '' : `concurrency: ${project.concurrencySource},`}
+      executor: async (task) => {
+        const state = globalThis.${blockingRunStateKey}
+
+        if (state == null) {
+          throw new Error('Missing blocking run state.')
+        }
+
+        state.active += 1
+        state.peak = Math.max(state.peak, state.active)
+        state.started.push('${project.name}:' + task.entry.name)
+        state.projectActive['${project.name}'] = (state.projectActive['${project.name}'] ?? 0) + 1
+        state.projectPeak['${project.name}'] = Math.max(
+          state.projectPeak['${project.name}'] ?? 0,
+          state.projectActive['${project.name}'],
+        )
+
+        await new Promise<void>((resolve) => {
+          state.releases.push(() => {
+            state.active -= 1
+            state.projectActive['${project.name}'] -= 1
+            resolve()
+          })
+        })
+
+        return {
+          entryId: task.entry.id,
+          id: task.id,
+          inferenceExecutorId: task.inferenceExecutor.id,
+          matrix: task.matrix,
+          scores: [
+            {
+              kind: 'exact',
+              score: 1,
+            },
+          ],
+        }
+      },
+    }
+  `).join(',\n')
+
   await writeFile(
     join(temporaryDirectory, 'vieval.config.ts'),
     `
-import { defineConfig } from '${vievalImportPath}'
+import { defineConfig } from '${cliConfigImportPath}'
 
 export default defineConfig({
-  models: [
-    {
-      aliases: [],
-      id: 'openai:gpt-4.1-mini',
-      model: 'gpt-4.1-mini',
-      inferenceExecutor: 'openai',
-      inferenceExecutorId: 'openai:gpt-4.1-mini',
-    },
-  ],
+  ${options.topLevelConcurrencySource == null ? '' : `concurrency: ${options.topLevelConcurrencySource},`}
   projects: [
-    {
-      include: ['evals/*.eval.ts'],
-      name: 'live-project',
-      root: '.',
-    },
+${projectEntries}
   ],
 })
 `,
@@ -226,6 +219,26 @@ export default defineConfig({
   )
 
   return temporaryDirectory
+}
+
+function createBlockingRunState(): BlockingRunState {
+  return {
+    active: 0,
+    peak: 0,
+    projectActive: {},
+    projectPeak: {},
+    releases: [],
+    started: [],
+  }
+}
+
+function createCaseConcurrencyRunState(): CaseConcurrencyRunState {
+  return {
+    active: 0,
+    peak: 0,
+    releases: [],
+    started: [],
+  }
 }
 
 async function createDslProject(options: {
@@ -270,6 +283,58 @@ export default defineConfig({
       name: '${options.projectName}',
       root: '.',
       ${executorBlock}
+    },
+  ],
+})
+`,
+    'utf-8',
+  )
+
+  return temporaryDirectory
+}
+
+async function createDslTaskProject(): Promise<string> {
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-live-reporter-'))
+  temporaryDirectories.push(temporaryDirectory)
+
+  const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
+
+  await mkdir(join(temporaryDirectory, 'evals'), { recursive: true })
+  await writeFile(
+    join(temporaryDirectory, 'evals', 'live-task.eval.ts'),
+    `
+import { caseOf, describeTask } from '${vievalImportPath}'
+
+describeTask('live-task', () => {
+  caseOf('live-case', () => {}, {
+    input: {
+      source: 'live-case',
+    },
+  }, { concurrency: 4 })
+})
+`,
+    'utf-8',
+  )
+  await writeFile(
+    join(temporaryDirectory, 'vieval.config.ts'),
+    `
+import { defineConfig } from '${vievalImportPath}'
+
+export default defineConfig({
+  models: [
+    {
+      aliases: [],
+      id: 'openai:gpt-4.1-mini',
+      model: 'gpt-4.1-mini',
+      inferenceExecutor: 'openai',
+      inferenceExecutorId: 'openai:gpt-4.1-mini',
+    },
+  ],
+  projects: [
+    {
+      include: ['evals/*.eval.ts'],
+      name: 'live-project',
+      root: '.',
     },
   ],
 })
@@ -379,112 +444,47 @@ export default defineConfig({
   return temporaryDirectory
 }
 
-async function createBlockingExecutorProject(options: {
-  concurrencySource?: string
-  projects: BlockingProjectFixtureOptions[]
-  topLevelConcurrencySource?: string
-}): Promise<string> {
-  const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-blocking-run-'))
-  temporaryDirectories.push(temporaryDirectory)
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path)
+    return true
+  }
+  catch {
+    return false
+  }
+}
 
-  const cliConfigImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
-  const evalConfigImportPath = join(packageDirectory, 'src', 'config', 'index.ts').replaceAll('\\', '/')
+function setBlockingRunState(state: BlockingRunState): void {
+  ;(globalThis as typeof globalThis & {
+    [blockingRunStateKey]?: BlockingRunState
+  })[blockingRunStateKey] = state
+}
 
-  await Promise.all(options.projects.map(async (project) => {
-    const projectDirectory = join(temporaryDirectory, project.name, 'evals')
-    await mkdir(projectDirectory, { recursive: true })
+function setCaseConcurrencyRunState(state: CaseConcurrencyRunState): void {
+  ;(globalThis as typeof globalThis & {
+    [caseConcurrencyRunStateKey]?: CaseConcurrencyRunState
+  })[caseConcurrencyRunStateKey] = state
+}
 
-    await Promise.all(project.evalNames.map(async (evalName) => {
-      await writeFile(
-        join(projectDirectory, `${evalName}.eval.ts`),
-        `
-import { defineEval, defineTask } from '${evalConfigImportPath}'
+function stripAnsi(value: string): string {
+  return stripVTControlCharacters(value)
+}
 
-export default defineEval({
-  description: '${project.name} ${evalName}',
-  name: '${evalName}',
-  task: defineTask({
-    id: '${evalName}',
-    run() {
-      return {
-        scores: [
-          {
-            kind: 'exact',
-            score: 1,
-          },
-        ],
-      }
-    },
-  }),
-})
-`,
-        'utf-8',
-      )
-    }))
-  }))
+async function waitForExpectation(assertion: () => void, attempts = 30): Promise<void> {
+  let lastError: unknown
 
-  const projectEntries = options.projects.map(project => `
-    {
-      name: '${project.name}',
-      root: './${project.name}',
-      include: ['evals/*.eval.ts'],
-      ${project.concurrencySource == null ? '' : `concurrency: ${project.concurrencySource},`}
-      executor: async (task) => {
-        const state = globalThis.${blockingRunStateKey}
-
-        if (state == null) {
-          throw new Error('Missing blocking run state.')
-        }
-
-        state.active += 1
-        state.peak = Math.max(state.peak, state.active)
-        state.started.push('${project.name}:' + task.entry.name)
-        state.projectActive['${project.name}'] = (state.projectActive['${project.name}'] ?? 0) + 1
-        state.projectPeak['${project.name}'] = Math.max(
-          state.projectPeak['${project.name}'] ?? 0,
-          state.projectActive['${project.name}'],
-        )
-
-        await new Promise<void>((resolve) => {
-          state.releases.push(() => {
-            state.active -= 1
-            state.projectActive['${project.name}'] -= 1
-            resolve()
-          })
-        })
-
-        return {
-          entryId: task.entry.id,
-          id: task.id,
-          inferenceExecutorId: task.inferenceExecutor.id,
-          matrix: task.matrix,
-          scores: [
-            {
-              kind: 'exact',
-              score: 1,
-            },
-          ],
-        }
-      },
+  for (let index = 0; index < attempts; index += 1) {
+    try {
+      assertion()
+      return
     }
-  `).join(',\n')
+    catch (error) {
+      lastError = error
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+  }
 
-  await writeFile(
-    join(temporaryDirectory, 'vieval.config.ts'),
-    `
-import { defineConfig } from '${cliConfigImportPath}'
-
-export default defineConfig({
-  ${options.topLevelConcurrencySource == null ? '' : `concurrency: ${options.topLevelConcurrencySource},`}
-  projects: [
-${projectEntries}
-  ],
-})
-`,
-    'utf-8',
-  )
-
-  return temporaryDirectory
+  throw lastError
 }
 
 describe('runVievalCli', () => {
@@ -1195,13 +1195,13 @@ export default defineConfig({
           matrixSummary: null,
           name: 'locomo-lobehub',
           result: {
+            inferenceExecutors: [],
             overall: {
               exactAverage: 0.3851948392189298,
               hybridAverage: 0.3851948392189298,
               judgeAverage: null,
               runCount: 1,
             },
-            inferenceExecutors: [],
             runs: [],
           },
           taskCount: 1,
@@ -1225,13 +1225,13 @@ export default defineConfig({
           matrixSummary: null,
           name: 'passed-project',
           result: {
+            inferenceExecutors: [],
             overall: {
               exactAverage: 1,
               hybridAverage: 1,
               judgeAverage: null,
               runCount: 1,
             },
-            inferenceExecutors: [],
             runs: [],
           },
           taskCount: 1,
@@ -1740,13 +1740,13 @@ describeTask('failed-case-task', () => {
           },
           name: 'example-api-config-matrix',
           result: {
+            inferenceExecutors: [],
             overall: {
               exactAverage: 1,
               hybridAverage: 1,
               judgeAverage: null,
               runCount: 288,
             },
-            inferenceExecutors: [],
             runs: [],
           },
           taskCount: 288,

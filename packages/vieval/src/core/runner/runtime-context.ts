@@ -5,20 +5,6 @@ import { fileURLToPath } from 'node:url'
 const require = createRequire(import.meta.url)
 
 /**
- * Shared runtime context used by the vieval runner.
- *
- * Use when:
- * - runner services need stable path resolution without module-level side effects
- * - call sites want deterministic control over workspace root detection
- */
-export interface RunnerRuntimeContext {
-  /**
-   * Absolute project root directory used for path normalization.
-   */
-  projectRootDirectory: string
-}
-
-/**
  * Options used to construct the runner runtime context.
  */
 export interface CreateVievalRunnerRuntimeContextOptions {
@@ -34,6 +20,20 @@ export interface CreateVievalRunnerRuntimeContextOptions {
    * @default package root directory (`packages/vieval`)
    */
   fallbackProjectRootDirectory?: string
+}
+
+/**
+ * Shared runtime context used by the vieval runner.
+ *
+ * Use when:
+ * - runner services need stable path resolution without module-level side effects
+ * - call sites want deterministic control over workspace root detection
+ */
+export interface RunnerRuntimeContext {
+  /**
+   * Absolute project root directory used for path normalization.
+   */
+  projectRootDirectory: string
 }
 
 /**

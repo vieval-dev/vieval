@@ -1,9 +1,4 @@
 /**
- * Supported env value coercion types.
- */
-export type EnvValueType = 'string'
-
-/**
  * Common options for env readers.
  */
 export interface EnvFromOptions {
@@ -12,16 +7,21 @@ export interface EnvFromOptions {
    */
   name: string
   /**
-   * Expected env value type.
-   */
-  type: EnvValueType
-  /**
    * Whether an empty or missing value should throw.
    *
    * @default false
    */
   required?: boolean
+  /**
+   * Expected env value type.
+   */
+  type: EnvValueType
 }
+
+/**
+ * Supported env value coercion types.
+ */
+export type EnvValueType = 'string'
 
 /**
  * Env options used by the required helper.
@@ -31,18 +31,6 @@ export interface EnvFromOptions {
 export type RequiredEnvFromOptions = Omit<EnvFromOptions, 'required'>
 
 type EnvSource = Record<string, string | undefined>
-
-function assertNonEmptyString(value: string | undefined, options: EnvFromOptions): string | undefined {
-  if (value == null || value.trim().length === 0) {
-    if (options.required === true) {
-      throw new Error(`Missing required ${options.name}.`)
-    }
-
-    return undefined
-  }
-
-  return value
-}
 
 /**
  * Parses one env value with optional required behavior.
@@ -81,4 +69,16 @@ export function requiredEnvFrom<TEnv extends EnvSource>(
   }
 
   return parsed
+}
+
+function assertNonEmptyString(value: string | undefined, options: EnvFromOptions): string | undefined {
+  if (value == null || value.trim().length === 0) {
+    if (options.required === true) {
+      throw new Error(`Missing required ${options.name}.`)
+    }
+
+    return undefined
+  }
+
+  return value
 }

@@ -22,7 +22,7 @@ if (cases.length === 0) {
   throw new Error('Missing LoCoMo cases for evaluation.')
 }
 
-function calculateEvidenceRecall(evidence: readonly string[], contextIds: readonly string[]): number | null {
+function calculateEvidenceRecall(evidence: readonly string[], contextIds: readonly string[]): null | number {
   if (evidence.length === 0) {
     return null
   }

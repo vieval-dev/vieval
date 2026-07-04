@@ -19,14 +19,14 @@ describe('window renderer', () => {
     const clearInterval = vi.fn()
 
     const renderer = new WindowRenderer({
-      writeOutput: value => writes.push(value),
-      getWindow: () => ['line-a', 'line-b'],
-      getColumns: () => 120,
-      createInterval,
       clearInterval,
+      createInterval,
+      getColumns: () => 120,
+      getWindow: () => ['line-a', 'line-b'],
       queueRenderReset: (callback) => {
         resetCallbacks.push(callback)
       },
+      writeOutput: value => writes.push(value),
     })
 
     renderer.start()
@@ -47,14 +47,14 @@ describe('window renderer', () => {
     let resetRenderSchedule: (() => void) | undefined
 
     const renderer = new WindowRenderer({
-      writeOutput: value => writes.push(value),
-      getWindow: () => ['line-a'],
-      getColumns: () => 120,
-      createInterval: () => ({ unref() { return this } }),
       clearInterval: vi.fn(),
+      createInterval: () => ({ unref() { return this } }),
+      getColumns: () => 120,
+      getWindow: () => ['line-a'],
       queueRenderReset: (callback) => {
         resetRenderSchedule = callback
       },
+      writeOutput: value => writes.push(value),
     })
 
     renderer.start()
@@ -82,15 +82,15 @@ describe('window renderer', () => {
     let currentWindow = 'line-a'
 
     const renderer = new WindowRenderer({
-      writeOutput: value => writes.push(value),
-      getWindow: () => [currentWindow],
-      getColumns: () => 120,
-      supportsAnsiWindowing: false,
-      createInterval: () => ({ unref() { return this } }),
       clearInterval: vi.fn(),
+      createInterval: () => ({ unref() { return this } }),
+      getColumns: () => 120,
+      getWindow: () => [currentWindow],
       queueRenderReset: (callback) => {
         resetCallbacks.push(callback)
       },
+      supportsAnsiWindowing: false,
+      writeOutput: value => writes.push(value),
     })
 
     renderer.start()
@@ -134,13 +134,13 @@ describe('window renderer', () => {
     const writes: string[] = []
 
     const renderer = new WindowRenderer({
-      writeOutput: value => writes.push(value),
-      getWindow: () => ['line-a', 'line-b'],
-      getColumns: () => 120,
-      supportsAnsiWindowing: false,
-      createInterval: () => ({ unref() { return this } }),
       clearInterval: vi.fn(),
+      createInterval: () => ({ unref() { return this } }),
+      getColumns: () => 120,
+      getWindow: () => ['line-a', 'line-b'],
       queueRenderReset: () => {},
+      supportsAnsiWindowing: false,
+      writeOutput: value => writes.push(value),
     })
 
     renderer.start()
@@ -160,15 +160,15 @@ describe('window renderer', () => {
     let currentWindow = ['line-a']
 
     const renderer = new WindowRenderer({
-      writeOutput: value => writes.push(value),
-      getWindow: () => currentWindow,
-      getColumns: () => 120,
-      supportsAnsiWindowing: false,
-      createInterval: () => ({ unref() { return this } }),
       clearInterval: vi.fn(),
+      createInterval: () => ({ unref() { return this } }),
+      getColumns: () => 120,
+      getWindow: () => currentWindow,
       queueRenderReset: (callback) => {
         resetCallbacks.push(callback)
       },
+      supportsAnsiWindowing: false,
+      writeOutput: value => writes.push(value),
     })
 
     renderer.start()
@@ -194,14 +194,14 @@ describe('window renderer', () => {
     const resetCallbacks: Array<() => void> = []
 
     const renderer = new WindowRenderer({
-      writeOutput: value => writes.push(value),
-      getWindow: () => ['line-a'],
-      getColumns: () => 120,
-      createInterval: () => ({ unref() { return this } }),
       clearInterval: vi.fn(),
+      createInterval: () => ({ unref() { return this } }),
+      getColumns: () => 120,
+      getWindow: () => ['line-a'],
       queueRenderReset: (callback) => {
         resetCallbacks.push(callback)
       },
+      writeOutput: value => writes.push(value),
     })
 
     renderer.start()
@@ -231,12 +231,12 @@ describe('window renderer', () => {
     const writes: string[] = []
 
     const renderer = new WindowRenderer({
-      writeOutput: value => writes.push(value),
-      getWindow: () => ['line-a'],
-      getColumns: () => 120,
-      createInterval: () => ({ unref() { return this } }),
       clearInterval: vi.fn(),
+      createInterval: () => ({ unref() { return this } }),
+      getColumns: () => 120,
+      getWindow: () => ['line-a'],
       queueRenderReset: () => {},
+      writeOutput: value => writes.push(value),
     })
 
     renderer.write('before start\n')
@@ -280,16 +280,16 @@ describe('window renderer', () => {
       },
     ] as const
 
-    for (const { line, expected } of cases) {
+    for (const { expected, line } of cases) {
       const writes: string[] = []
 
       const renderer = new WindowRenderer({
-        writeOutput: value => writes.push(value),
-        getWindow: () => [line],
-        getColumns: () => 1,
-        createInterval: () => ({ unref() { return this } }),
         clearInterval: vi.fn(),
+        createInterval: () => ({ unref() { return this } }),
+        getColumns: () => 1,
+        getWindow: () => [line],
         queueRenderReset: () => {},
+        writeOutput: value => writes.push(value),
       })
 
       renderer.start()
@@ -310,12 +310,12 @@ describe('window renderer', () => {
     const clearInterval = vi.fn<(timer: typeof intervalHandle) => void>()
 
     const renderer = new WindowRenderer({
-      writeOutput: value => writes.push(value),
-      getWindow: () => ['12345', '67890'],
-      getColumns: () => 5,
-      createInterval: () => intervalHandle,
       clearInterval,
+      createInterval: () => intervalHandle,
+      getColumns: () => 5,
+      getWindow: () => ['12345', '67890'],
       queueRenderReset: () => {},
+      writeOutput: value => writes.push(value),
     })
 
     renderer.start()
@@ -341,14 +341,14 @@ describe('window renderer', () => {
     let currentWindow = ['wide-line']
 
     const renderer = new WindowRenderer({
-      writeOutput: value => writes.push(value),
-      getWindow: () => currentWindow,
-      getColumns: () => 120,
-      createInterval: () => ({ unref() { return this } }),
       clearInterval: vi.fn(),
+      createInterval: () => ({ unref() { return this } }),
+      getColumns: () => 120,
+      getWindow: () => currentWindow,
       queueRenderReset: (callback) => {
         resetCallbacks.push(callback)
       },
+      writeOutput: value => writes.push(value),
     })
 
     renderer.start()

@@ -1,20 +1,20 @@
 module.exports = {
   projects: [
     {
-      name: 'example-pattern-byoa-bring-your-own-agent-exec',
-      root: '.',
-      include: ['evals/*.eval.ts'],
       exclude: [],
-      providers: [{ id: 'fixture-provider' }],
       async executor(task) {
         return {
-          id: task.id,
           entryId: task.entry.id,
-          providerId: task.inferenceExecutor.id,
+          id: task.id,
           matrix: task.matrix,
+          providerId: task.inferenceExecutor.id,
           scores: [{ kind: 'exact', score: 1 }],
         }
       },
+      include: ['evals/*.eval.ts'],
+      name: 'example-pattern-byoa-bring-your-own-agent-exec',
+      providers: [{ id: 'fixture-provider' }],
+      root: '.',
     },
   ],
 }

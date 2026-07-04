@@ -12,14 +12,14 @@ import { DEFAULT_LOCOMO_DATA_FILE, deriveLoCoMoCases, loadLoCoMoSamplesFromSnapD
 
 const DEFAULT_STANDALONE_CONCURRENCY = 4
 
+interface LoCoMoConversationRecord extends Record<string, unknown> {
+  session_1?: LoCoMoConversationTurn[]
+}
+
 interface LoCoMoConversationTurn {
   blip_caption?: string
   speaker: string
   text: string
-}
-
-interface LoCoMoConversationRecord extends Record<string, unknown> {
-  session_1?: LoCoMoConversationTurn[]
 }
 
 interface LoCoMoSampleWithConversation {

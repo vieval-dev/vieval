@@ -4,21 +4,17 @@ import type { ChatModelHeaders } from './index'
 import { envFrom, requiredEnvFrom } from '../../core/inference-executors/env'
 
 /**
- * Runtime config consumed by OpenAI-compatible provider constructors.
+ * Union of normalized runtime configs for supported chat-model executors.
  */
-export interface OpenAIChatModelRuntimeConfig {
-  /**
-   * Resolved inference executor kind.
-   */
-  inferenceExecutor: 'openai'
-  /**
-   * Concrete model name.
-   */
-  model: string
-  /**
-   * Required API key.
-   */
-  apiKey: string
+export type ChatModelRuntimeConfig
+  = OllamaChatModelRuntimeConfig
+    | OpenAIChatModelRuntimeConfig
+    | OpenRouterChatModelRuntimeConfig
+
+/**
+ * Runtime config consumed by Ollama provider constructors.
+ */
+export interface OllamaChatModelRuntimeConfig {
   /**
    * Optional base URL override.
    */
@@ -27,12 +23,6 @@ export interface OpenAIChatModelRuntimeConfig {
    * Optional request headers.
    */
   headers?: ChatModelHeaders
-}
-
-/**
- * Runtime config consumed by Ollama provider constructors.
- */
-export interface OllamaChatModelRuntimeConfig {
   /**
    * Resolved inference executor kind.
    */
@@ -41,28 +31,12 @@ export interface OllamaChatModelRuntimeConfig {
    * Concrete model name.
    */
   model: string
-  /**
-   * Optional base URL override.
-   */
-  baseURL?: string
-  /**
-   * Optional request headers.
-   */
-  headers?: ChatModelHeaders
 }
 
 /**
- * Runtime config consumed by OpenRouter provider constructors.
+ * Runtime config consumed by OpenAI-compatible provider constructors.
  */
-export interface OpenRouterChatModelRuntimeConfig {
-  /**
-   * Resolved inference executor kind.
-   */
-  inferenceExecutor: 'openrouter'
-  /**
-   * Concrete model name.
-   */
-  model: string
+export interface OpenAIChatModelRuntimeConfig {
   /**
    * Required API key.
    */
@@ -75,79 +49,106 @@ export interface OpenRouterChatModelRuntimeConfig {
    * Optional request headers.
    */
   headers?: ChatModelHeaders
+  /**
+   * Resolved inference executor kind.
+   */
+  inferenceExecutor: 'openai'
+  /**
+   * Concrete model name.
+   */
+  model: string
 }
 
 /**
- * Union of normalized runtime configs for supported chat-model executors.
+ * Runtime config consumed by OpenRouter provider constructors.
  */
-export type ChatModelRuntimeConfig
-  = OpenAIChatModelRuntimeConfig
-    | OllamaChatModelRuntimeConfig
-    | OpenRouterChatModelRuntimeConfig
-
-function getParameters(model: ModelDefinition): Record<string, unknown> {
-  return model.parameters ?? {}
+export interface OpenRouterChatModelRuntimeConfig {
+  /**
+   * Required API key.
+   */
+  apiKey: string
+  /**
+   * Optional base URL override.
+   */
+  baseURL?: string
+  /**
+   * Optional request headers.
+   */
+  headers?: ChatModelHeaders
+  /**
+   * Resolved inference executor kind.
+   */
+  inferenceExecutor: 'openrouter'
+  /**
+   * Concrete model name.
+   */
+  model: string
 }
 
-function parseOptionalStringParameter(
-  parameters: Record<string, unknown>,
-  key: string,
-  modelId: string,
-): string | undefined {
-  const value = parameters[key]
-  const normalized = value == null ? undefined : String(value)
-  const name = `${modelId}.parameters.${key}`
+/**
+ * Resolves Ollama runtime config from one resolved run-context model.
+ *
+ * Use when:
+ * - task execution already has a model resolved through chat-model helpers
+ * - eval code wants typed Ollama provider options with a concise helper name
+ *
+ * Expects:
+ * - `model` to resolve to an Ollama-backed chat model
+ *
+ * Returns:
+ * - validated Ollama runtime config
+ */
+export function ollamaFromRunContext(model: ModelDefinition): OllamaChatModelRuntimeConfig {
+  const runtimeConfig = toChatModelRuntimeConfig(model)
+  if (runtimeConfig.inferenceExecutor !== 'ollama') {
+    throw new Error(`Expected ollama model, got "${runtimeConfig.inferenceExecutor}" for "${model.id}".`)
+  }
 
-  return envFrom({ [name]: normalized }, {
-    name,
-    type: 'string',
-  })
+  return runtimeConfig
 }
 
-function parseRequiredStringParameter(
-  parameters: Record<string, unknown>,
-  key: string,
-  modelId: string,
-): string {
-  const value = parameters[key]
-  const normalized = value == null ? undefined : String(value)
-  const name = `${modelId}.parameters.${key}`
+/**
+ * Resolves OpenAI runtime config from one resolved run-context model.
+ *
+ * Use when:
+ * - task execution already has a model resolved through chat-model helpers
+ * - eval code wants typed OpenAI provider options with a concise helper name
+ *
+ * Expects:
+ * - `model` to resolve to an OpenAI-backed chat model
+ *
+ * Returns:
+ * - validated OpenAI runtime config
+ */
+export function openaiFromRunContext(model: ModelDefinition): OpenAIChatModelRuntimeConfig {
+  const runtimeConfig = toChatModelRuntimeConfig(model)
+  if (runtimeConfig.inferenceExecutor !== 'openai') {
+    throw new Error(`Expected openai model, got "${runtimeConfig.inferenceExecutor}" for "${model.id}".`)
+  }
 
-  return requiredEnvFrom({ [name]: normalized }, {
-    name,
-    type: 'string',
-  })
+  return runtimeConfig
 }
 
-function parseHeadersParameter(
-  parameters: Record<string, unknown>,
-  modelId: string,
-): ChatModelHeaders | undefined {
-  const headers = parameters.headers
-  if (headers == null) {
-    return undefined
+/**
+ * Resolves OpenRouter runtime config from one resolved run-context model.
+ *
+ * Use when:
+ * - task execution already has a model resolved through chat-model helpers
+ * - eval code wants typed OpenRouter provider options with a concise helper name
+ *
+ * Expects:
+ * - `model` to resolve to an OpenRouter-backed chat model
+ *
+ * Returns:
+ * - validated OpenRouter runtime config
+ */
+export function openrouterFromRunContext(model: ModelDefinition): OpenRouterChatModelRuntimeConfig {
+  const runtimeConfig = toChatModelRuntimeConfig(model)
+  if (runtimeConfig.inferenceExecutor !== 'openrouter') {
+    throw new Error(`Expected openrouter model, got "${runtimeConfig.inferenceExecutor}" for "${model.id}".`)
   }
 
-  if (typeof headers !== 'object' || Array.isArray(headers)) {
-    throw new TypeError(`Invalid ${modelId}.parameters.headers: expected an object.`)
-  }
-
-  const normalized: Record<string, string | string[]> = {}
-  for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
-    if (typeof value === 'string') {
-      normalized[key] = value
-      continue
-    }
-
-    if (Array.isArray(value) && value.every(item => typeof item === 'string')) {
-      normalized[key] = value
-      continue
-    }
-
-    throw new Error(`Invalid ${modelId}.parameters.headers.${key}: expected string or string[].`)
-  }
-
-  return normalized
+  return runtimeConfig
 }
 
 /**
@@ -199,68 +200,67 @@ export function toChatModelRuntimeConfig(model: ModelDefinition): ChatModelRunti
   throw new Error(`Unsupported chat inference executor "${model.inferenceExecutorId}" for model "${model.id}".`)
 }
 
-/**
- * Resolves OpenAI runtime config from one resolved run-context model.
- *
- * Use when:
- * - task execution already has a model resolved through chat-model helpers
- * - eval code wants typed OpenAI provider options with a concise helper name
- *
- * Expects:
- * - `model` to resolve to an OpenAI-backed chat model
- *
- * Returns:
- * - validated OpenAI runtime config
- */
-export function openaiFromRunContext(model: ModelDefinition): OpenAIChatModelRuntimeConfig {
-  const runtimeConfig = toChatModelRuntimeConfig(model)
-  if (runtimeConfig.inferenceExecutor !== 'openai') {
-    throw new Error(`Expected openai model, got "${runtimeConfig.inferenceExecutor}" for "${model.id}".`)
-  }
-
-  return runtimeConfig
+function getParameters(model: ModelDefinition): Record<string, unknown> {
+  return model.parameters ?? {}
 }
 
-/**
- * Resolves Ollama runtime config from one resolved run-context model.
- *
- * Use when:
- * - task execution already has a model resolved through chat-model helpers
- * - eval code wants typed Ollama provider options with a concise helper name
- *
- * Expects:
- * - `model` to resolve to an Ollama-backed chat model
- *
- * Returns:
- * - validated Ollama runtime config
- */
-export function ollamaFromRunContext(model: ModelDefinition): OllamaChatModelRuntimeConfig {
-  const runtimeConfig = toChatModelRuntimeConfig(model)
-  if (runtimeConfig.inferenceExecutor !== 'ollama') {
-    throw new Error(`Expected ollama model, got "${runtimeConfig.inferenceExecutor}" for "${model.id}".`)
+function parseHeadersParameter(
+  parameters: Record<string, unknown>,
+  modelId: string,
+): ChatModelHeaders | undefined {
+  const headers = parameters.headers
+  if (headers == null) {
+    return undefined
   }
 
-  return runtimeConfig
+  if (typeof headers !== 'object' || Array.isArray(headers)) {
+    throw new TypeError(`Invalid ${modelId}.parameters.headers: expected an object.`)
+  }
+
+  const normalized: Record<string, string | string[]> = {}
+  for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
+    if (typeof value === 'string') {
+      normalized[key] = value
+      continue
+    }
+
+    if (Array.isArray(value) && value.every(item => typeof item === 'string')) {
+      normalized[key] = value
+      continue
+    }
+
+    throw new Error(`Invalid ${modelId}.parameters.headers.${key}: expected string or string[].`)
+  }
+
+  return normalized
 }
 
-/**
- * Resolves OpenRouter runtime config from one resolved run-context model.
- *
- * Use when:
- * - task execution already has a model resolved through chat-model helpers
- * - eval code wants typed OpenRouter provider options with a concise helper name
- *
- * Expects:
- * - `model` to resolve to an OpenRouter-backed chat model
- *
- * Returns:
- * - validated OpenRouter runtime config
- */
-export function openrouterFromRunContext(model: ModelDefinition): OpenRouterChatModelRuntimeConfig {
-  const runtimeConfig = toChatModelRuntimeConfig(model)
-  if (runtimeConfig.inferenceExecutor !== 'openrouter') {
-    throw new Error(`Expected openrouter model, got "${runtimeConfig.inferenceExecutor}" for "${model.id}".`)
-  }
+function parseOptionalStringParameter(
+  parameters: Record<string, unknown>,
+  key: string,
+  modelId: string,
+): string | undefined {
+  const value = parameters[key]
+  const normalized = value == null ? undefined : String(value)
+  const name = `${modelId}.parameters.${key}`
 
-  return runtimeConfig
+  return envFrom({ [name]: normalized }, {
+    name,
+    type: 'string',
+  })
+}
+
+function parseRequiredStringParameter(
+  parameters: Record<string, unknown>,
+  key: string,
+  modelId: string,
+): string {
+  const value = parameters[key]
+  const normalized = value == null ? undefined : String(value)
+  const name = `${modelId}.parameters.${key}`
+
+  return requiredEnvFrom({ [name]: normalized }, {
+    name,
+    type: 'string',
+  })
 }

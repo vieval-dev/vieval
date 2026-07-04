@@ -7,6 +7,7 @@ export default defineConfig({
   concurrency: {
     case: 4,
   },
+  env: loadEnv('test', cwd(), ''),
   plugins: [
     ChatModels({
       models: [
@@ -22,7 +23,6 @@ export default defineConfig({
       ],
     }),
   ],
-  env: loadEnv('test', cwd(), ''),
   projects: [
     {
       include: ['tasks/**/*.eval.ts'],

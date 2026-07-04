@@ -39,8 +39,8 @@ describe('aggregateRunResults', () => {
       {
         entryId: 'agent/chess-commentary/chess-commentary',
         id: 'run-1',
-        matrix: resultMatrix,
         inferenceExecutorId: 'openai:gpt-4.1-mini',
+        matrix: resultMatrix,
         scores: [
           { kind: 'exact', score: 1 },
         ],
@@ -72,10 +72,10 @@ describe('aggregateRunResults', () => {
       {
         entryId: 'agent/chess-commentary/chess-commentary',
         id: 'run-1',
+        inferenceExecutorId: 'openai:gpt-4.1-mini',
         matrix: createScheduledTaskMatrix({
           difficulty: 'rapid',
         }),
-        inferenceExecutorId: 'openai:gpt-4.1-mini',
         scores: [
           { kind: 'exact', score: 1 },
           { kind: 'exact', score: 0.5 },
@@ -86,10 +86,10 @@ describe('aggregateRunResults', () => {
       {
         entryId: 'agent/chess-commentary/chess-commentary',
         id: 'run-2',
+        inferenceExecutorId: 'openai:gpt-4.1-mini',
         matrix: createScheduledTaskMatrix({
           difficulty: 'blitz',
         }),
-        inferenceExecutorId: 'openai:gpt-4.1-mini',
         scores: [
           { kind: 'exact', score: 0.25 },
           { kind: 'judge', score: 0.5 },
@@ -102,8 +102,8 @@ describe('aggregateRunResults', () => {
       {
         exactAverage: 7 / 12,
         hybridAverage: expect.any(Number),
-        judgeAverage: 0.5,
         inferenceExecutorId: 'openai:gpt-4.1-mini',
+        judgeAverage: 0.5,
         runCount: 2,
       },
     ])
@@ -122,8 +122,8 @@ describe('aggregateRunResults', () => {
       {
         entryId: 'agent/chess-commentary/chess-commentary',
         id: 'run-1',
-        matrix: createScheduledTaskMatrix(),
         inferenceExecutorId: 'openai:gpt-4.1',
+        matrix: createScheduledTaskMatrix(),
         scores: [
           { kind: 'judge', score: 0.8 },
         ],
@@ -134,8 +134,8 @@ describe('aggregateRunResults', () => {
       {
         exactAverage: null,
         hybridAverage: 0.8,
-        judgeAverage: 0.8,
         inferenceExecutorId: 'openai:gpt-4.1',
+        judgeAverage: 0.8,
         runCount: 1,
       },
     ])
@@ -146,8 +146,8 @@ describe('aggregateRunResults', () => {
       {
         entryId: 'agent/chess-commentary/chess-commentary',
         id: 'run-1',
-        matrix: createScheduledTaskMatrix(),
         inferenceExecutorId: 'openai:gpt-4.1',
+        matrix: createScheduledTaskMatrix(),
         scores: [
           { kind: 'judge', score: 0.8 },
           { kind: 'rubric' as 'exact', score: 0.2 },

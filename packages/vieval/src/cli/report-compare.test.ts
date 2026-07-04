@@ -5,10 +5,35 @@ import { describe, expect, it } from 'vitest'
 
 import { buildCompareReportArtifact } from './report-compare'
 
+function createCaseRecord(args: {
+  caseId: string
+  projectName: string
+  taskId?: string
+}): CaseRecord {
+  return {
+    attemptId: 'attempt',
+    caseId: args.caseId,
+    caseName: args.caseId,
+    durationMs: 1,
+    endedAt: 'end',
+    experimentId: 'experiment',
+    metrics: {},
+    projectName: args.projectName,
+    retryCount: 0,
+    runId: 'run',
+    schemaVersion: 1,
+    scores: {},
+    startedAt: 'start',
+    state: 'passed',
+    taskId: args.taskId ?? 'task',
+    workspaceId: 'workspace',
+  }
+}
+
 function createProjectSummary(args: {
-  exactAverage?: number | null
+  exactAverage?: null | number
   executed?: boolean
-  hybridAverage?: number | null
+  hybridAverage?: null | number
   name: string
   runCount?: number
   taskCount?: number
@@ -43,31 +68,6 @@ function createRunOutput(projects: CliProjectSummary[]): CliRunOutput {
   return {
     configFilePath: '/tmp/vieval.config.ts',
     projects,
-  }
-}
-
-function createCaseRecord(args: {
-  caseId: string
-  projectName: string
-  taskId?: string
-}): CaseRecord {
-  return {
-    attemptId: 'attempt',
-    caseId: args.caseId,
-    caseName: args.caseId,
-    durationMs: 1,
-    endedAt: 'end',
-    experimentId: 'experiment',
-    metrics: {},
-    projectName: args.projectName,
-    retryCount: 0,
-    runId: 'run',
-    schemaVersion: 1,
-    scores: {},
-    startedAt: 'start',
-    state: 'passed',
-    taskId: args.taskId ?? 'task',
-    workspaceId: 'workspace',
   }
 }
 

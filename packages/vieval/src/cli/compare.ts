@@ -34,26 +34,25 @@ const compareHelpText = `
     --format      Console output format: table | json (default: table)
 `
 
-function normalizeCliArgv(argv: readonly string[]): string[] {
-  const normalizedArgv = argv[0] === '--'
-    ? argv.slice(1)
-    : [...argv]
+export interface CompareMethodRunResult {
+  caseRecords: Awaited<ReturnType<typeof readCaseRecordsFromReport>>
+  methodId: string
+  output: Awaited<ReturnType<typeof runVievalCli>>
+}
 
-  if (normalizedArgv[0] === 'compare') {
-    return normalizedArgv.slice(1)
-  }
-
-  return normalizedArgv
+export interface CompareRunOutput {
+  benchmarkId: string
+  methods: CompareMethodRunResult[]
 }
 
 export function parseCompareCliArguments(argv: readonly string[]): ParsedCompareCliArguments {
   const cli = meow(compareHelpText, {
     argv: normalizeCliArgv(argv),
     flags: {
-      config: {
+      comparison: {
         type: 'string',
       },
-      comparison: {
+      config: {
         type: 'string',
       },
       format: {
@@ -73,17 +72,6 @@ export function parseCompareCliArguments(argv: readonly string[]): ParsedCompare
     format: cli.flags.format === 'json' ? 'json' : 'table',
     output: cli.flags.output,
   }
-}
-
-export interface CompareMethodRunResult {
-  caseRecords: Awaited<ReturnType<typeof readCaseRecordsFromReport>>
-  methodId: string
-  output: Awaited<ReturnType<typeof runVievalCli>>
-}
-
-export interface CompareRunOutput {
-  benchmarkId: string
-  methods: CompareMethodRunResult[]
 }
 
 /**
@@ -167,4 +155,16 @@ export async function runCompareCliOrExit(argv: readonly string[]): Promise<void
     process.stderr.write(`[vieval compare] ${errorMessage}\n`)
     process.exitCode = 1
   }
+}
+
+function normalizeCliArgv(argv: readonly string[]): string[] {
+  const normalizedArgv = argv[0] === '--'
+    ? argv.slice(1)
+    : [...argv]
+
+  if (normalizedArgv[0] === 'compare') {
+    return normalizedArgv.slice(1)
+  }
+
+  return normalizedArgv
 }

@@ -25,37 +25,33 @@ export interface CreateFilesystemTaskCacheRuntimeOptions {
   workspaceId: string
 }
 
-function sanitizePathSegment(value: string): string {
-  const normalized = value.trim()
-  if (normalized.length === 0) {
-    return 'default'
+/**
+ * Creates a deterministic filesystem-backed task cache runtime.
+ *
+ * Use when:
+ * - eval tasks need reproducible cache paths for expensive pre-processing outputs
+ * - benchmark adapters need one artifact-oriented API for text/json/binary reads and writes
+ *
+ * Expects:
+ * - `cacheRootDirectory` to be writable by the running process
+ * - `workspaceId` + `projectName` to stay stable for reproducible paths
+ *
+ * Returns:
+ * - task cache runtime that resolves namespaced file handles under:
+ *   `<cacheRootDirectory>/<workspaceId>/<projectName>/<namespace>/...`
+ */
+export function createFilesystemTaskCacheRuntime(
+  options: CreateFilesystemTaskCacheRuntimeOptions,
+): TaskCacheRuntime {
+  const workspaceDirectory = sanitizePathSegment(options.workspaceId)
+  const projectDirectory = sanitizePathSegment(options.projectName)
+  const baseDirectory = join(options.cacheRootDirectory, workspaceDirectory, projectDirectory)
+
+  return {
+    namespace(name) {
+      return createCacheNamespace(baseDirectory, name)
+    },
   }
-
-  return normalized.replace(/[^\w.-]+/g, '-')
-}
-
-function normalizeExtension(extension: string | undefined, mediaType: string | undefined): string | undefined {
-  if (extension != null && extension.length > 0) {
-    return extension.startsWith('.') ? extension.slice(1) : extension
-  }
-
-  if (mediaType == null || mediaType.length === 0) {
-    return undefined
-  }
-
-  if (mediaType === 'application/json') {
-    return 'json'
-  }
-
-  if (mediaType === 'text/plain') {
-    return 'txt'
-  }
-
-  if (mediaType === 'audio/wav') {
-    return 'wav'
-  }
-
-  return undefined
 }
 
 /**
@@ -84,17 +80,8 @@ export function normalizeCacheFilePathSegments(options: CacheFileOptions): strin
   return [...withoutTail, `${tail}.${extension}`]
 }
 
-async function writeAtomically(path: string, content: Buffer | string): Promise<void> {
-  const directory = dirname(path)
-  const temporaryPath = `${path}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-  await mkdir(directory, { recursive: true })
-  await writeFile(temporaryPath, content)
-  await rename(temporaryPath, path)
-}
-
 function createCacheFileHandle(path: string): CacheFileHandle {
   return {
-    path,
     async exists() {
       try {
         await access(path)
@@ -104,6 +91,12 @@ function createCacheFileHandle(path: string): CacheFileHandle {
         return false
       }
     },
+    async loadAsCasesInput<T>() {
+      return await this.readJson<T[]>()
+    },
+    async loadAsExpectFixture<T>() {
+      return await this.readJson<T>()
+    },
     openReadStream() {
       return createReadStream(path)
     },
@@ -111,29 +104,24 @@ function createCacheFileHandle(path: string): CacheFileHandle {
       await mkdir(dirname(path), { recursive: true })
       return createWriteStream(path)
     },
+    path,
     async readBuffer() {
       return await readFile(path)
-    },
-    async writeBuffer(value) {
-      await writeAtomically(path, value)
-    },
-    async readText(encoding = 'utf-8') {
-      return await readFile(path, encoding)
-    },
-    async writeText(value, encoding = 'utf-8') {
-      await writeAtomically(path, Buffer.from(value, encoding))
     },
     async readJson<T>() {
       return JSON.parse(await readFile(path, 'utf-8')) as T
     },
+    async readText(encoding = 'utf-8') {
+      return await readFile(path, encoding)
+    },
+    async writeBuffer(value) {
+      await writeAtomically(path, value)
+    },
     async writeJson(value) {
       await writeAtomically(path, `${JSON.stringify(value, null, 2)}\n`)
     },
-    async loadAsCasesInput<T>() {
-      return await this.readJson<T[]>()
-    },
-    async loadAsExpectFixture<T>() {
-      return await this.readJson<T>()
+    async writeText(value, encoding = 'utf-8') {
+      await writeAtomically(path, Buffer.from(value, encoding))
     },
   }
 }
@@ -147,31 +135,43 @@ function createCacheNamespace(baseDirectory: string, namespace: string): CacheNa
   }
 }
 
-/**
- * Creates a deterministic filesystem-backed task cache runtime.
- *
- * Use when:
- * - eval tasks need reproducible cache paths for expensive pre-processing outputs
- * - benchmark adapters need one artifact-oriented API for text/json/binary reads and writes
- *
- * Expects:
- * - `cacheRootDirectory` to be writable by the running process
- * - `workspaceId` + `projectName` to stay stable for reproducible paths
- *
- * Returns:
- * - task cache runtime that resolves namespaced file handles under:
- *   `<cacheRootDirectory>/<workspaceId>/<projectName>/<namespace>/...`
- */
-export function createFilesystemTaskCacheRuntime(
-  options: CreateFilesystemTaskCacheRuntimeOptions,
-): TaskCacheRuntime {
-  const workspaceDirectory = sanitizePathSegment(options.workspaceId)
-  const projectDirectory = sanitizePathSegment(options.projectName)
-  const baseDirectory = join(options.cacheRootDirectory, workspaceDirectory, projectDirectory)
-
-  return {
-    namespace(name) {
-      return createCacheNamespace(baseDirectory, name)
-    },
+function normalizeExtension(extension: string | undefined, mediaType: string | undefined): string | undefined {
+  if (extension != null && extension.length > 0) {
+    return extension.startsWith('.') ? extension.slice(1) : extension
   }
+
+  if (mediaType == null || mediaType.length === 0) {
+    return undefined
+  }
+
+  if (mediaType === 'application/json') {
+    return 'json'
+  }
+
+  if (mediaType === 'text/plain') {
+    return 'txt'
+  }
+
+  if (mediaType === 'audio/wav') {
+    return 'wav'
+  }
+
+  return undefined
+}
+
+function sanitizePathSegment(value: string): string {
+  const normalized = value.trim()
+  if (normalized.length === 0) {
+    return 'default'
+  }
+
+  return normalized.replace(/[^\w.-]+/g, '-')
+}
+
+async function writeAtomically(path: string, content: Buffer | string): Promise<void> {
+  const directory = dirname(path)
+  const temporaryPath = `${path}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  await mkdir(directory, { recursive: true })
+  await writeFile(temporaryPath, content)
+  await rename(temporaryPath, path)
 }

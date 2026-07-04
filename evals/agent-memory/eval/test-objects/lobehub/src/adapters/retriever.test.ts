@@ -52,8 +52,8 @@ describe('createLobeHubRetrieverAdapter', () => {
       }),
       headers: {
         'Authorization': 'Bearer test-token',
-        'X-Benchmark': 'locomo',
         'content-type': 'application/json',
+        'X-Benchmark': 'locomo',
       },
       method: 'POST',
     })

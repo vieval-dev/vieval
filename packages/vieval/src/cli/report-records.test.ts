@@ -14,10 +14,6 @@ describe('report records', () => {
   it('builds a case record from case lifecycle, score, and metric events', () => {
     const records = buildCaseRecords({
       attemptId: 'attempt-1',
-      experimentId: 'default',
-      projectName: 'locomo-lobehub',
-      runId: 'run-1',
-      workspaceId: 'agent-memory',
       events: [
         {
           caseId: 'case-1',
@@ -56,6 +52,10 @@ describe('report records', () => {
           timestamp: '2026-05-08T00:00:01.250Z',
         },
       ],
+      experimentId: 'default',
+      projectName: 'locomo-lobehub',
+      runId: 'run-1',
+      workspaceId: 'agent-memory',
     })
 
     expect(records).toHaveLength(1)
@@ -204,10 +204,10 @@ describe('report records', () => {
    */
   it('summarizes score averages by score kind and metric group', () => {
     const summary = buildMetricsSummary([
-      { schemaVersion: 1, attemptId: 'a', caseId: '1', caseName: '1', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.category': 2 }, projectName: 'p', retryCount: 0, runId: 'r', scores: { exact: 1, judge: 0.5 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
-      { schemaVersion: 1, attemptId: 'a', caseId: '2', caseName: '2', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.category': 2 }, projectName: 'p', retryCount: 0, runId: 'r', scores: { exact: 0 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
-      { schemaVersion: 1, attemptId: 'a', caseId: '3', caseName: '3', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.category': 3 }, projectName: 'p', retryCount: 0, runId: 'r', scores: { exact: 0.5, judge: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
-      { schemaVersion: 1, attemptId: 'a', caseId: '4', caseName: '4', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { nullable: null }, projectName: 'p', retryCount: 0, runId: 'r', scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
+      { attemptId: 'a', caseId: '1', caseName: '1', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.category': 2 }, projectName: 'p', retryCount: 0, runId: 'r', schemaVersion: 1, scores: { exact: 1, judge: 0.5 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
+      { attemptId: 'a', caseId: '2', caseName: '2', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.category': 2 }, projectName: 'p', retryCount: 0, runId: 'r', schemaVersion: 1, scores: { exact: 0 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
+      { attemptId: 'a', caseId: '3', caseName: '3', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.category': 3 }, projectName: 'p', retryCount: 0, runId: 'r', schemaVersion: 1, scores: { exact: 0.5, judge: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
+      { attemptId: 'a', caseId: '4', caseName: '4', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { nullable: null }, projectName: 'p', retryCount: 0, runId: 'r', schemaVersion: 1, scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
     ], ['benchmark.category', 'taskId', 'nullable'])
 
     expect(summary.overall.exact.count).toBe(4)
@@ -227,8 +227,8 @@ describe('report records', () => {
    */
   it('encodes case records as newline-delimited JSON', () => {
     const jsonl = encodeJsonl([
-      { schemaVersion: 1, attemptId: 'a', caseId: '1', caseName: '1', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: {}, projectName: 'p', retryCount: 0, runId: 'r', scores: {}, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
-      { schemaVersion: 1, attemptId: 'a', caseId: '2', caseName: '2', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: {}, projectName: 'p', retryCount: 0, runId: 'r', scores: {}, startedAt: 's', state: 'failed', taskId: 't', workspaceId: 'w' },
+      { attemptId: 'a', caseId: '1', caseName: '1', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: {}, projectName: 'p', retryCount: 0, runId: 'r', schemaVersion: 1, scores: {}, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
+      { attemptId: 'a', caseId: '2', caseName: '2', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: {}, projectName: 'p', retryCount: 0, runId: 'r', schemaVersion: 1, scores: {}, startedAt: 's', state: 'failed', taskId: 't', workspaceId: 'w' },
     ])
 
     expect(jsonl.endsWith('\n')).toBe(true)

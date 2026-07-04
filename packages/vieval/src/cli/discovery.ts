@@ -6,17 +6,17 @@ import { glob } from 'tinyglobby'
  */
 export interface DiscoverEvalFilesOptions {
   /**
-   * Base directory scanned recursively.
+   * Exclude glob patterns matched against relative paths.
    */
-  root: string
+  exclude: readonly string[]
   /**
    * Include glob patterns matched against relative paths.
    */
   include: readonly string[]
   /**
-   * Exclude glob patterns matched against relative paths.
+   * Base directory scanned recursively.
    */
-  exclude: readonly string[]
+  root: string
 }
 
 /**

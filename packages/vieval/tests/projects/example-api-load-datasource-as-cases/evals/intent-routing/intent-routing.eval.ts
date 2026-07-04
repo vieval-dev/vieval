@@ -13,20 +13,6 @@ interface IntentCase {
   name: string
 }
 
-function loadIntentCases(): IntentCase[] {
-  const evalDirectory = dirname(fileURLToPath(import.meta.url))
-  const caseDirectory = join(evalDirectory, 'cases')
-  const caseFiles = readdirSync(caseDirectory)
-    .filter(file => file.endsWith('.json'))
-    .sort((left, right) => left.localeCompare(right))
-
-  return caseFiles.map((file) => {
-    const caseFilePath = join(caseDirectory, file)
-    const rawCase = readFileSync(caseFilePath, 'utf-8')
-    return JSON.parse(rawCase) as IntentCase
-  })
-}
-
 function classifyIntent(message: string): 'opening' | 'recap' | 'tactics' {
   const normalizedMessage = message.toLowerCase()
 
@@ -39,6 +25,20 @@ function classifyIntent(message: string): 'opening' | 'recap' | 'tactics' {
   }
 
   return 'tactics'
+}
+
+function loadIntentCases(): IntentCase[] {
+  const evalDirectory = dirname(fileURLToPath(import.meta.url))
+  const caseDirectory = join(evalDirectory, 'cases')
+  const caseFiles = readdirSync(caseDirectory)
+    .filter(file => file.endsWith('.json'))
+    .sort((left, right) => left.localeCompare(right))
+
+  return caseFiles.map((file) => {
+    const caseFilePath = join(caseDirectory, file)
+    const rawCase = readFileSync(caseFilePath, 'utf-8')
+    return JSON.parse(rawCase) as IntentCase
+  })
 }
 
 const intentCases = loadIntentCases()

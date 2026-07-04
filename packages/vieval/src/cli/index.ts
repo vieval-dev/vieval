@@ -12,7 +12,7 @@ import { runReportIndexCli } from './report-index'
 type Command = 'compare' | 'report' | 'run'
 
 interface ParsedTopLevelCliArguments {
-  command: Command | 'help'
+  command: 'help' | Command
   commandArgv: string[]
 }
 
@@ -35,12 +35,6 @@ const topLevelHelpText = `
     $ vieval report index .vieval/reports --output .vieval/reports/index/runs.jsonl
 `
 
-function normalizeCliArgv(argv: readonly string[]): string[] {
-  return argv[0] === '--'
-    ? argv.slice(1)
-    : [...argv]
-}
-
 /**
  * Parses top-level `vieval` CLI arguments into one command dispatch payload.
  *
@@ -59,9 +53,9 @@ export function parseTopLevelCliArguments(argv: readonly string[]): ParsedTopLev
   const command = normalizedArgv[0]
 
   meow(topLevelHelpText, {
+    argv: normalizedArgv,
     autoHelp: false,
     autoVersion: false,
-    argv: normalizedArgv,
     importMeta: import.meta,
   })
 
@@ -142,4 +136,10 @@ export async function runTopLevelCli(argv: readonly string[]): Promise<void> {
   }
 
   await runEvalRunCli(parsed.commandArgv)
+}
+
+function normalizeCliArgv(argv: readonly string[]): string[] {
+  return argv[0] === '--'
+    ? argv.slice(1)
+    : [...argv]
 }

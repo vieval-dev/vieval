@@ -6,8 +6,16 @@ import { describe, expect, it } from 'vitest'
 
 import { createSummaryReporter } from './summary-reporter'
 
-function stripAnsi(value: string): string {
-  return stripVTControlCharacters(value)
+function createTestReporter(getNow: () => number): SummaryReporter {
+  return createSummaryReporter({
+    getColumns: () => 120,
+    getNow,
+    getWallClockNow: () => new Date(2026, 3, 15, 9, 30, 0, 0).getTime(),
+    isTTY: true,
+    slowThresholdMs: 300,
+    writeError: () => {},
+    writeOutput: () => {},
+  })
 }
 
 function findRow(rows: readonly string[], label: string): string {
@@ -20,16 +28,8 @@ function findRow(rows: readonly string[], label: string): string {
   return stripAnsi(row)
 }
 
-function createTestReporter(getNow: () => number): SummaryReporter {
-  return createSummaryReporter({
-    getColumns: () => 120,
-    getNow,
-    getWallClockNow: () => new Date(2026, 3, 15, 9, 30, 0, 0).getTime(),
-    isTTY: true,
-    slowThresholdMs: 300,
-    writeError: () => {},
-    writeOutput: () => {},
-  })
+function stripAnsi(value: string): string {
+  return stripVTControlCharacters(value)
 }
 
 /**

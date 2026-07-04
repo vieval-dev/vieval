@@ -67,19 +67,19 @@ describe('parseReportAnalyzeCliArguments', () => {
       attempt: 'attempt-1',
       caseState: 'failed',
       contains: 'toolcall',
+      errorContains: 'timeout',
       evalMatrix: {
         rubric: 'strict',
       },
-      errorContains: 'timeout',
       experiment: 'baseline',
       format: 'csv',
       project: 'example-project',
       reportPath: '.vieval/reports',
+      run: 'run-1',
       runMatrix: {
         model: 'gpt-4.1-mini',
         scenario: 'stress',
       },
-      run: 'run-1',
       taskState: 'passed',
       workspace: 'packages-vieval',
     })
@@ -148,6 +148,12 @@ describe('buildExperimentSummaries', () => {
     expect(summaries).toEqual([
       {
         attemptCount: 2,
+        attemptSuccessRateStats: {
+          avg: 0.75,
+          max: 1,
+          min: 0.5,
+          stdev: 0.25,
+        },
         attemptSummaries: [
           {
             attemptId: 'attempt-a',
@@ -168,12 +174,6 @@ describe('buildExperimentSummaries', () => {
             totalTasks: 3,
           },
         ],
-        attemptSuccessRateStats: {
-          avg: 0.75,
-          max: 1,
-          min: 0.5,
-          stdev: 0.25,
-        },
         experimentId: 'exp-1',
         failedProjects: 1,
         runCount: 3,

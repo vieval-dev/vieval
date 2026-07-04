@@ -14,15 +14,15 @@
  */
 export interface ConfigHookPlugin<TConfig> {
   /**
-   * Stable plugin name for diagnostics.
-   */
-  name: string
-  /**
    * Optional config transform hook.
    */
-  configVieval?: (config: TConfig) => TConfig | void | Promise<TConfig | void>
+  configVieval?: (config: TConfig) => Promise<TConfig | void> | TConfig | void
   /**
    * Optional hook after config is finalized.
    */
-  configVievalResolved?: (config: TConfig) => void | Promise<void>
+  configVievalResolved?: (config: TConfig) => Promise<void> | void
+  /**
+   * Stable plugin name for diagnostics.
+   */
+  name: string
 }

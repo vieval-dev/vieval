@@ -10,13 +10,13 @@ import { evaluateMaxFailedRunsPolicy } from './policies/max-failed-runs'
  */
 export interface ProcessRunResultsOptions {
   /**
-   * Threshold policy options.
-   */
-  threshold?: HybridThresholdPolicyOptions
-  /**
    * Hard-limit failed-run policy options.
    */
   maxFailedRuns?: MaxFailedRunsPolicyOptions
+  /**
+   * Threshold policy options.
+   */
+  threshold?: HybridThresholdPolicyOptions
 }
 
 /**

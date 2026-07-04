@@ -1,8 +1,8 @@
-/** JSON-compatible scalar values accepted as telemetry attributes. */
-export type TelemetryAttributeValue = boolean | number | string | null | readonly TelemetryAttributeValue[]
-
 /** Attribute map shared by local report projection and OpenTelemetry span calls. */
 export type TelemetryAttributes = Record<string, TelemetryAttributeValue | undefined>
+
+/** JSON-compatible scalar values accepted as telemetry attributes. */
+export type TelemetryAttributeValue = boolean | null | number | readonly TelemetryAttributeValue[] | string
 
 /**
  * Internal Vieval telemetry runtime.
@@ -19,12 +19,12 @@ export type TelemetryAttributes = Record<string, TelemetryAttributeValue | undef
  * - callback result, preserving thrown errors after telemetry records them
  */
 export interface TelemetryRuntime {
+  addEvent: (name: string, attributes?: TelemetryAttributes) => void
+  recordException: (error: unknown) => void
+  setAttributes: (attributes: TelemetryAttributes) => void
   withSpan: <T>(
     name: string,
     attributes: TelemetryAttributes,
     callback: () => Promise<T>,
   ) => Promise<T>
-  addEvent: (name: string, attributes?: TelemetryAttributes) => void
-  setAttributes: (attributes: TelemetryAttributes) => void
-  recordException: (error: unknown) => void
 }

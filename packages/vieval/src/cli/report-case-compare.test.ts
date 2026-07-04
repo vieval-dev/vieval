@@ -14,8 +14,8 @@ describe('report compare', () => {
   it('reports matched case score deltas and changed metrics', () => {
     const comparison = buildCaseComparison({
       caseKey: 'benchmark.case.id',
-      left: [{ schemaVersion: 1, attemptId: 'a', caseId: 'left-1', caseName: 'Case', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.case.id': 'case-a', 'prediction': 'wrong' }, projectName: 'p', retryCount: 0, runId: 'left', scores: { exact: 0 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' }],
-      right: [{ schemaVersion: 1, attemptId: 'a', caseId: 'right-1', caseName: 'Case', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.case.id': 'case-a', 'prediction': 'right' }, projectName: 'p', retryCount: 0, runId: 'right', scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' }],
+      left: [{ attemptId: 'a', caseId: 'left-1', caseName: 'Case', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.case.id': 'case-a', 'prediction': 'wrong' }, projectName: 'p', retryCount: 0, runId: 'left', schemaVersion: 1, scores: { exact: 0 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' }],
+      right: [{ attemptId: 'a', caseId: 'right-1', caseName: 'Case', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.case.id': 'case-a', 'prediction': 'right' }, projectName: 'p', retryCount: 0, runId: 'right', schemaVersion: 1, scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' }],
       scoreKind: 'exact',
     })
 
@@ -33,8 +33,8 @@ describe('report compare', () => {
    */
   it('reports added and removed cases', () => {
     const comparison = buildCaseComparison({
-      left: [{ schemaVersion: 1, attemptId: 'a', caseId: 'removed', caseName: 'Removed', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: {}, projectName: 'p', retryCount: 0, runId: 'left', scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' }],
-      right: [{ schemaVersion: 1, attemptId: 'a', caseId: 'added', caseName: 'Added', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: {}, projectName: 'p', retryCount: 0, runId: 'right', scores: { exact: 0 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' }],
+      left: [{ attemptId: 'a', caseId: 'removed', caseName: 'Removed', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: {}, projectName: 'p', retryCount: 0, runId: 'left', schemaVersion: 1, scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' }],
+      right: [{ attemptId: 'a', caseId: 'added', caseName: 'Added', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: {}, projectName: 'p', retryCount: 0, runId: 'right', schemaVersion: 1, scores: { exact: 0 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' }],
       scoreKind: 'exact',
     })
 
@@ -49,8 +49,8 @@ describe('report compare', () => {
   it('does not silently fall back when an explicit case key is missing', () => {
     expect(() => buildCaseComparison({
       caseKey: 'benchmark.case.id',
-      left: [{ schemaVersion: 1, attemptId: 'a', caseId: 'same', caseName: 'Left', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: {}, projectName: 'p', retryCount: 0, runId: 'left', scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' }],
-      right: [{ schemaVersion: 1, attemptId: 'a', caseId: 'same', caseName: 'Right', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: {}, projectName: 'p', retryCount: 0, runId: 'right', scores: { exact: 0 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' }],
+      left: [{ attemptId: 'a', caseId: 'same', caseName: 'Left', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: {}, projectName: 'p', retryCount: 0, runId: 'left', schemaVersion: 1, scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' }],
+      right: [{ attemptId: 'a', caseId: 'same', caseName: 'Right', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: {}, projectName: 'p', retryCount: 0, runId: 'right', schemaVersion: 1, scores: { exact: 0 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' }],
     })).toThrow('Missing explicit case key "benchmark.case.id" for case "same".')
   })
 
@@ -61,8 +61,8 @@ describe('report compare', () => {
   it('throws for duplicate case keys on either side', () => {
     expect(() => buildCaseComparison({
       left: [
-        { schemaVersion: 1, attemptId: 'a', caseId: 'first', caseName: 'First', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.case.id': 'same' }, projectName: 'p', retryCount: 0, runId: 'left', scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
-        { schemaVersion: 1, attemptId: 'a', caseId: 'second', caseName: 'Second', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.case.id': 'same' }, projectName: 'p', retryCount: 0, runId: 'left', scores: { exact: 0 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
+        { attemptId: 'a', caseId: 'first', caseName: 'First', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.case.id': 'same' }, projectName: 'p', retryCount: 0, runId: 'left', schemaVersion: 1, scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
+        { attemptId: 'a', caseId: 'second', caseName: 'Second', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.case.id': 'same' }, projectName: 'p', retryCount: 0, runId: 'left', schemaVersion: 1, scores: { exact: 0 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
       ],
       right: [],
     })).toThrow('Duplicate case key "same" in left report.')
@@ -70,8 +70,8 @@ describe('report compare', () => {
     expect(() => buildCaseComparison({
       left: [],
       right: [
-        { schemaVersion: 1, attemptId: 'a', caseId: 'first', caseName: 'First', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.case.id': 'same' }, projectName: 'p', retryCount: 0, runId: 'right', scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
-        { schemaVersion: 1, attemptId: 'a', caseId: 'second', caseName: 'Second', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.case.id': 'same' }, projectName: 'p', retryCount: 0, runId: 'right', scores: { exact: 0 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
+        { attemptId: 'a', caseId: 'first', caseName: 'First', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.case.id': 'same' }, projectName: 'p', retryCount: 0, runId: 'right', schemaVersion: 1, scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
+        { attemptId: 'a', caseId: 'second', caseName: 'Second', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.case.id': 'same' }, projectName: 'p', retryCount: 0, runId: 'right', schemaVersion: 1, scores: { exact: 0 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
       ],
     })).toThrow('Duplicate case key "same" in right report.')
   })
@@ -82,8 +82,8 @@ describe('report compare', () => {
    */
   it('falls back to vieval.case.id before direct caseId', () => {
     const comparison = buildCaseComparison({
-      left: [{ schemaVersion: 1, attemptId: 'a', caseId: 'left-id', caseName: 'Left', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'vieval.case.id': 'canonical' }, projectName: 'p', retryCount: 0, runId: 'left', scores: { exact: 0 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' }],
-      right: [{ schemaVersion: 1, attemptId: 'a', caseId: 'right-id', caseName: 'Right', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'vieval.case.id': 'canonical' }, projectName: 'p', retryCount: 0, runId: 'right', scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' }],
+      left: [{ attemptId: 'a', caseId: 'left-id', caseName: 'Left', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'vieval.case.id': 'canonical' }, projectName: 'p', retryCount: 0, runId: 'left', schemaVersion: 1, scores: { exact: 0 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' }],
+      right: [{ attemptId: 'a', caseId: 'right-id', caseName: 'Right', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'vieval.case.id': 'canonical' }, projectName: 'p', retryCount: 0, runId: 'right', schemaVersion: 1, scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' }],
     })
 
     expect(comparison.cases[0]?.caseKey).toBe('canonical')
@@ -99,14 +99,14 @@ describe('report compare', () => {
     const comparison = buildCaseComparison({
       groupBy: 'benchmark.group',
       left: [
-        { schemaVersion: 1, attemptId: 'a', caseId: 'improved', caseName: 'Improved', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.group': 'date', 'prediction': 'wrong' }, projectName: 'p', retryCount: 0, runId: 'left', scores: { exact: 0 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
-        { schemaVersion: 1, attemptId: 'a', caseId: 'regressed', caseName: 'Regressed', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.group': 'date' }, projectName: 'p', retryCount: 0, runId: 'left', scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
-        { schemaVersion: 1, attemptId: 'a', caseId: 'removed', caseName: 'Removed', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: {}, projectName: 'p', retryCount: 0, runId: 'left', scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
+        { attemptId: 'a', caseId: 'improved', caseName: 'Improved', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.group': 'date', 'prediction': 'wrong' }, projectName: 'p', retryCount: 0, runId: 'left', schemaVersion: 1, scores: { exact: 0 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
+        { attemptId: 'a', caseId: 'regressed', caseName: 'Regressed', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.group': 'date' }, projectName: 'p', retryCount: 0, runId: 'left', schemaVersion: 1, scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
+        { attemptId: 'a', caseId: 'removed', caseName: 'Removed', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: {}, projectName: 'p', retryCount: 0, runId: 'left', schemaVersion: 1, scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
       ],
       right: [
-        { schemaVersion: 1, attemptId: 'a', caseId: 'improved', caseName: 'Improved', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.group': 'date', 'prediction': 'right' }, projectName: 'p', retryCount: 0, runId: 'right', scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
-        { schemaVersion: 1, attemptId: 'a', caseId: 'regressed', caseName: 'Regressed', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.group': 'date' }, projectName: 'p', retryCount: 0, runId: 'right', scores: { exact: 0 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
-        { schemaVersion: 1, attemptId: 'a', caseId: 'added', caseName: 'Added', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: {}, projectName: 'p', retryCount: 0, runId: 'right', scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
+        { attemptId: 'a', caseId: 'improved', caseName: 'Improved', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.group': 'date', 'prediction': 'right' }, projectName: 'p', retryCount: 0, runId: 'right', schemaVersion: 1, scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
+        { attemptId: 'a', caseId: 'regressed', caseName: 'Regressed', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: { 'benchmark.group': 'date' }, projectName: 'p', retryCount: 0, runId: 'right', schemaVersion: 1, scores: { exact: 0 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
+        { attemptId: 'a', caseId: 'added', caseName: 'Added', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: {}, projectName: 'p', retryCount: 0, runId: 'right', schemaVersion: 1, scores: { exact: 1 }, startedAt: 's', state: 'passed', taskId: 't', workspaceId: 'w' },
       ],
     })
 
