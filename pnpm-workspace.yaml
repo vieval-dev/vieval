@@ -32,8 +32,8 @@ catalog:
   '@vitest/runner': ^4.1.9
   '@voidzero-dev/vitepress-theme': ^4.8.4
   '@vue/tsconfig': ^0.9.1
-  '@xsai-ext/providers': 0.5.0-beta.2
-  '@xsai/generate-text': 0.5.0-beta.2
+  '@xsai-ext/providers': 0.5.0-beta.6
+  '@xsai/generate-text': 0.5.0-beta.6
   '@xsai/providers': ^0.1.0-beta.5
   bumpp: ^11.1.0
   c12: ^4.0.0-beta.5

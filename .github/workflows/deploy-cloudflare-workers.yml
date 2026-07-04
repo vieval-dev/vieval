@@ -32,6 +32,11 @@ jobs:
           node-version: lts/*
           cache: pnpm
 
+      - name: Configure pnpm global bin
+        run: |
+          echo "PNPM_HOME=$HOME/.local/share/pnpm" >> "$GITHUB_ENV"
+          echo "$HOME/.local/share/pnpm/bin" >> "$GITHUB_PATH"
+
       # NOTICE:
       #
       # Pre-installing wrangler keeps cloudflare/wrangler-action from mutating the

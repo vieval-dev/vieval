@@ -46,11 +46,11 @@ catalogs:
       specifier: ^0.9.1
       version: 0.9.1
     '@xsai-ext/providers':
-      specifier: 0.5.0-beta.2
-      version: 0.5.0-beta.2
+      specifier: 0.5.0-beta.6
+      version: 0.5.0-beta.6
     '@xsai/generate-text':
-      specifier: 0.5.0-beta.2
-      version: 0.5.0-beta.2
+      specifier: 0.5.0-beta.6
+      version: 0.5.0-beta.6
     '@xsai/providers':
       specifier: ^0.1.0-beta.5
       version: 0.1.0-beta.5
@@ -278,10 +278,10 @@ importers:
         version: 0.1.0-beta.17
       '@xsai-ext/providers':
         specifier: 'catalog:'
-        version: 0.5.0-beta.2
+        version: 0.5.0-beta.6
       '@xsai/generate-text':
         specifier: 'catalog:'
-        version: 0.5.0-beta.2
+        version: 0.5.0-beta.6
       vieval:
         specifier: workspace:*
         version: link:../../packages/vieval
@@ -334,10 +334,10 @@ importers:
         version: 4.1.9
       '@xsai-ext/providers':
         specifier: 'catalog:'
-        version: 0.5.0-beta.2
+        version: 0.5.0-beta.6
       '@xsai/generate-text':
         specifier: 'catalog:'
-        version: 0.5.0-beta.2
+        version: 0.5.0-beta.6
       c12:
         specifier: 'catalog:'
         version: 4.0.0-beta.5(chokidar@5.0.0)(jiti@2.6.1)(magicast@0.5.2)
@@ -2369,8 +2369,8 @@ packages:
     peerDependencies:
       vue: ^3.5.0
 
-  '@xsai-ext/providers@0.5.0-beta.2':
-    resolution: {integrity: sha512-GwOLUlr+Dicl5UGcd5bidPn+bblBrUJsrB/CfIQXI7czLhDs6DJ3COYU5+i6xDVh/WAC0GD/AkO0NdEMfDwfig==}
+  '@xsai-ext/providers@0.5.0-beta.6':
+    resolution: {integrity: sha512-DNvYbSN+/xQEYV2Kpq+4k2haZNGdQebZ06Zs87/0DHqSCyZyacFhHSriLQrkhFmDbDWI+2pVV+DRs0qjvHNa+w==}
 
   '@xsai/embed@0.5.0-beta.6':
     resolution: {integrity: sha512-vLkKGCYS++smP+0l5sNJdk+2YJXc2c4wQiTQ3hRWaH17op26W/Gkp+f0Tmpvrdy4fIm8ztml2c1NjJrTN7J8/w==}
@@ -2383,9 +2383,6 @@ packages:
 
   '@xsai/generate-speech@0.5.0-beta.6':
     resolution: {integrity: sha512-ZJIiZfkTURtVq4yz5Nh9W1xs7WgAmtZFhsr76aVo5qbvpbBU4Va7DSjw+ceFWdNSpKJAqYu4Iica1Inlj/mWGA==}
-
-  '@xsai/generate-text@0.5.0-beta.2':
-    resolution: {integrity: sha512-E2yq0mUWtnYNM7JGSd1UbcqQEX57xoND9pCivQVWbyXDwkEEwCgI3pezBqQYwNQlNWd2mtwVZukYXvFfo43+aw==}
 
   '@xsai/generate-text@0.5.0-beta.6':
     resolution: {integrity: sha512-UVxruh9192qcYdkR4dxiWefBM2+Tp4+5fw3eR2DHTgXohnPKRZ5sJwQBNvJpZOUE648KsyvbU42Dwhwnacb/Pg==}
@@ -6005,7 +6002,7 @@ snapshots:
     dependencies:
       vue: 3.5.39(typescript@6.0.3)
 
-  '@xsai-ext/providers@0.5.0-beta.2':
+  '@xsai-ext/providers@0.5.0-beta.6':
     dependencies:
       '@xsai/shared': 0.5.0-beta.6
 
@@ -6032,11 +6029,6 @@ snapshots:
   '@xsai/generate-speech@0.5.0-beta.6':
     dependencies:
       '@xsai/shared': 0.5.0-beta.6
-
-  '@xsai/generate-text@0.5.0-beta.2':
-    dependencies:
-      '@xsai/shared': 0.5.0-beta.6
-      '@xsai/shared-chat': 0.5.0-beta.6
 
   '@xsai/generate-text@0.5.0-beta.6':
     dependencies:
