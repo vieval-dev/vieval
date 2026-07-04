@@ -6,13 +6,13 @@ theme: dark
 home:
   logoAlt: Vieval 图标
   eyebrow: 评测框架
-  heroTitle: 使用熟悉的测试 API 做评测
-  heroDescription: 面向 agents、模型、prompts、🤗 HuggingFace datasets，也适用于非聊天端点。
+  heroTitle: 对智能体和模型进行可靠评测
+  heroDescription: 智能体是概率性的，输出都不稳定，Vieval 让你可以自信地进行测试和基准评测，Vieval = Vitest + 评测框架。
   primaryAction:
     text: 快速开始
     link: /zh-hans/guide/
   secondaryAction:
-    text: 在 GitHub 查看
+    text: 查看 GitHub
     link: https://github.com/vieval-dev/vieval
   terminal:
     title: vieval run
@@ -27,11 +27,11 @@ home:
         matrix run 4 [model|scenario] / eval 2 [rubric]
         report .vieval/reports/local/baseline/attempt-a/...
   why:
-    eyebrow: 为什么选择 Vieval
+    eyebrow: Vieval 的意义是什么？
     title: 用更可靠的方式衡量概率结果。
     body:
-      - Vieval 让评测用例保持可读，同时为矩阵调度、模型执行、自定义断言和报告提供稳定的包边界。
-      - 你可以从 chat-model 评测开始，再把同一套流程用于 agents、prompts、datasets、托管服务和非聊天产品端点。
+      - Vieval 让评测用例保持可读，同时为多模型并行矩阵调度、分数评判、跨指标横评、自定义断言和报告提供稳定的基础设施。
+      - 原生支持 OpenAI 的 对话补全（Chat Completions），也可以利用在 YOLO，VLM，Robotics 相关领域的评测用例。
     action:
       text: 阅读指南
       link: /zh-hans/guide/

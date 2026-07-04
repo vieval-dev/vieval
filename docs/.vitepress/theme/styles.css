@@ -2,28 +2,90 @@
 
 @source "./**/*.vue";
 
-:root[data-variant="vite"] {
-  --color-brand: #38bdf8;
-  --color-grey: #8aa4b8;
-  --color-nickel: #263746;
-  --color-vite: #38bdf8;
-  --vp-c-brand-soft: rgba(56, 189, 248, 0.16);
+/* Brand color: black in light mode, white in dark mode */
+/* :root,
+:root[data-variant="voidzero"] {
+  --color-brand: #09090b;
+} */
+
+/* :root.dark:not([data-theme])[data-variant="voidzero"],
+:root[data-theme="dark"][data-variant="voidzero"] {
+  --color-brand: #fafafa;
+} */
+
+/* :root[data-theme="light"][data-variant="voidzero"] {
+  --color-brand: #09090b;
+} */
+
+/* Grayscale design tokens */
+:root {
+  --color-white: #ffffff;
+  --color-primary: #09090b;
+  --color-beige: #f4f4f5;
+  --color-nickel: #27272a;
+  --color-grey: #71717a;
+  --color-stroke: #e4e4e7;
+  --color-midnight: #18181b;
+  --color-slate: #27272a;
+  --color-electric: #09090b;
+  --color-vite: #fafafa;
+  --color-space: #09090b;
 }
 
-:root.dark:not([data-theme])[data-variant="vite"],
-:root[data-theme="dark"][data-variant="vite"] {
-  --color-brand: #38bdf8;
-  --color-grey: #8aa4b8;
-  --color-nickel: #263746;
-  --color-vite: #38bdf8;
-  --vp-c-brand-soft: rgba(56, 189, 248, 0.16);
+/* VitePress grayscale mappings — light */
+:root,
+:root[data-theme="light"] {
+  --vp-c-text-1: #09090b;
+  --vp-c-text-2: #71717a;
+  --vp-c-text-3: #a1a1aa;
+
+  --vp-c-bg: #ffffff;
+  --vp-c-bg-alt: #f4f4f5;
+  --vp-c-bg-elv: #ffffff;
+  --vp-c-bg-soft: #f4f4f5;
+
+  --vp-c-border: #e4e4e7;
+  --vp-c-divider: #e4e4e7;
+  --vp-c-gutter: #e4e4e7;
+
+  --vp-c-brand-1: #09090b;
+  --vp-c-brand-2: #18181b;
+  --vp-c-brand-3: #09090b;
+  --vp-c-brand-soft: rgba(9, 9, 11, 0.08);
+
+  --vp-c-default-1: #e4e4e7;
+  --vp-c-default-2: #f4f4f5;
+  --vp-c-default-3: #ffffff;
+  --vp-c-default-soft: rgba(113, 113, 122, 0.12);
+
+  --vp-backdrop-bg-color: rgba(255, 255, 255, 0.7);
 }
 
-:root[data-theme="light"][data-variant="vite"],
-:root[data-variant="vite"]:not(.dark):not([data-theme="light"]) {
-  --color-brand: #0284c7;
-  --color-grey: #64748b;
-  --color-nickel: #cbd5e1;
-  --color-vite: #0284c7;
-  --vp-c-brand-soft: rgba(2, 132, 199, 0.14);
+/* VitePress grayscale mappings — dark */
+:root.dark:not([data-theme]),
+:root[data-theme="dark"] {
+  --vp-c-text-1: #fafafa;
+  --vp-c-text-2: #a1a1aa;
+  --vp-c-text-3: #52525b;
+
+  --vp-c-bg: #09090b;
+  --vp-c-bg-alt: #18181b;
+  --vp-c-bg-elv: #18181b;
+  --vp-c-bg-soft: #27272a;
+
+  --vp-c-border: #27272a;
+  --vp-c-divider: #27272a;
+  --vp-c-gutter: #000000;
+
+  --vp-c-brand-1: #fafafa;
+  --vp-c-brand-2: #e4e4e7;
+  --vp-c-brand-3: #ffffff;
+  --vp-c-brand-soft: rgba(250, 250, 250, 0.12);
+
+  --vp-c-default-1: #3f3f46;
+  --vp-c-default-2: #27272a;
+  --vp-c-default-3: #18181b;
+  --vp-c-default-soft: rgba(161, 161, 170, 0.14);
+
+  --vp-backdrop-bg-color: rgba(9, 9, 11, 0.8);
 }

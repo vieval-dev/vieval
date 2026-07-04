@@ -6,8 +6,8 @@ theme: dark
 home:
   logoAlt: Vieval icon
   eyebrow: Evaluation framework
-  heroTitle: Evaluate with test API you already know
-  heroDescription: For agents, models, prompts, 🤗 HuggingFace datasets, even for non-chat endpoints too.
+  heroTitle: Evaluate agents and models, with confidence.
+  heroDescription: Agents are not deterministic, Vieval let you test and benchmark with confidence, Vieval = Vitest + Benchmark Framework.
   primaryAction:
     text: Get Started
     link: /en/guide/
@@ -30,8 +30,8 @@ home:
     eyebrow: Why Vieval
     title: Measure over probability, but with confidence this time.
     body:
-      - Vieval keeps evaluation cases readable while giving matrix scheduling, model execution, custom assertions, and reporting their own stable package boundaries.
-      - Start with chat-model evals, then use the same workflow for agents, prompts, datasets, hosted services, and non-chat product endpoints.
+      - Vieval keeps evaluation cases readable while giving matrix scheduling, model execution, custom assertions, and reporting a stable infrastructure.
+      - OpenAI compatible chat completions are supported natively, but it's not limited, YOLO, VLM, and Robotics evaluation cases can be used as well.
     action:
       text: Read the guide
       link: /en/guide/
