@@ -12,6 +12,7 @@
   },
   "devDependencies": {
     "@voidzero-dev/vitepress-theme": "catalog:",
+    "@vue/tsconfig": "catalog:",
     "vitepress": "catalog:"
   }
 }
