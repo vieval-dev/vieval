@@ -10,12 +10,13 @@ next:
 
 # 断言、分数与指标
 
-用例只有把成功与否变成可观察的结果，才能成为有效证据。可以先编写确定性断言，再根据评测需要补充归一化分数或报告元数据。
+评测用例需要明确记录通过或失败，并在必要时补充分数和指标。本节先介绍可由代码直接判断的断言，再说明如何记录取值在 `0..1` 之间的分数和报告指标。
 
 ## 从确定性断言开始
 
-Vieval 导出了与 Vitest 兼容的 `expect`。匹配失败会在用例中抛出错误，从而使该用例失败；没有自定义分数且顺利完成的用例会产生 `1` 分的 `exact` 分数，失败用例则产生 `0` 分。
+Vieval 导出了与 Vitest 兼容的 `expect`。如果匹配失败，`expect` 会抛出错误，当前用例也会随之失败。没有记录自定义分数的用例通过时，会得到 `1` 分的 `exact` 分数；失败时则得到 `0` 分。
 
+::: code-group
 ```ts [evals/normalized-answer.eval.ts]
 import { describeTask, expect } from 'vieval'
 
@@ -26,24 +27,26 @@ describeTask('normalized answer', ({ caseOf }) => {
   })
 })
 ```
+:::
 
-精确值、数据结构、必需字段以及其他能够由代码可靠判断的规则，都适合先用这种方式表达。
+精确值、数据结构、必需字段，以及其他可以由代码可靠判断的规则，都适合使用 `expect`。
 
-## 区分不同类型的证据
+## 选择断言、分数或指标
 
 | 术语 | 在 Vieval 中的含义 | 对任务用例的影响 |
 | --- | --- | --- |
-| 断言（Assertion） | 产生通过/失败判断的检查。`expect` 在失败时抛出错误以控制用例状态；`vieval/core/assertions` 还提供返回结构化结果的断言函数。 | 抛出错误的匹配器会使该用例失败。核心断言结果不会自动连接到任务 DSL。 |
-| 分数（Score） | 使用 `context.score(value, kind)` 记录的 `0..1` 归一化数值。公开的分数类型为 `exact` 和 `judge`，默认是 `exact`。 | 用例通过时参与任务结果聚合；已经发出的事件也可能保留在报告的用例记录中。 |
-| 指标（Metric） | 使用 `context.metric(name, value)` 记录的具名评测元数据。值可以是字符串、数值、布尔值、`null`，或由这些遥测值组成的数组。 | 写入报告事件和用例记录，但不改变通过/失败状态，也不参与分数聚合。 |
-| 评分标准（Rubric） | 一种断言：由 `judge` 回调返回理由和归一化分数，再与 `minScore` 比较，默认阈值为 `0.7`。 | 产生分数类型为 `judge` 的 `AssertionOutcome`；作者需要决定怎样把结果连接到任务用例。 |
+| 断言（Assertion） | 检查结果是否满足要求。`expect` 失败时会抛出错误；`vieval/core/assertions` 还提供返回结构化结果的断言函数。 | `expect` 抛出的错误会使当前用例失败。核心断言函数的返回值不会自动写入任务结果。 |
+| 分数（Score） | 通过 `context.score(value, kind)` 记录的 `0..1` 数值。分数类型可以是 `exact` 或 `judge`，默认为 `exact`。 | 用例通过时，分数会参与任务结果的汇总；相应事件也会写入报告中的用例记录。 |
+| 指标（Metric） | 通过 `context.metric(name, value)` 记录的具名数据。值可以是字符串、数值、布尔值、`null`，或这些值组成的数组。 | 指标会写入报告事件和用例记录，但不会改变用例状态，也不参与分数汇总。 |
+| 评分标准（rubric） | 一类核心断言。`judge` 回调返回评分理由和分数，Vieval 再将分数与 `minScore` 比较；默认阈值为 `0.7`。 | 返回一个分数类型为 `judge` 的 `AssertionOutcome`。你需要自行决定如何将它写入当前用例。 |
 
 `caseOf` 和 `casesFromInputs` 收到的用例回调上下文提供 `score` 与 `metric` 方法。
 
 ## 在用例中记录分数与指标
 
-需要参与平均值计算的数据应使用 `score`。需要由报告保留、但不代表结果本身的维度或观察值应使用 `metric`。
+需要计入任务平均分的数据应使用 `score`。只用于筛选、分组或排查问题的数据应使用 `metric`。
 
+::: code-group
 ```ts [evals/retrieval.eval.ts]
 import { describeTask, expect } from 'vieval'
 
@@ -62,17 +65,21 @@ describeTask('retrieval', ({ caseOf }) => {
   })
 })
 ```
+:::
 
-分数必须是 `0..1` 范围内的有限数值。在同一个用例中，再次以相同类型调用 `score` 会替换先前的值，因此每种分数类型应只记录一个最终值。
+分数必须是 `0..1` 之间的有限数值。在同一个用例中，如果再次记录相同类型的分数，新值会替换旧值。因此，每种分数类型最好只记录一次最终结果。
 
-任务结果聚合与报告用例记录的写入时机不同。如果用例随后失败或超时，任务结果聚合会忽略它的自定义分数，并增加一次 `exact` 失败证据。不过，每次调用 `score` 都会立即发出事件，因此失败前已经发出的分数可能仍会保留在报告用例记录中。用例结束事件只会在记录中尚无 `exact` 分数时补上 `0`。诊断报告时，需要结合用例 `state` 与其中记录的分数一起判断。
+任务汇总分数和报告中的用例记录并非同时写入。每次调用 `score` 都会立即发出事件，所以用例失败前记录的分数仍可能出现在报告中。
 
-指标用于筛选、分组和诊断报告。单独记录指标不会让用例通过或失败，也不会提高聚合分数。
+如果用例最终失败或超时，任务汇总会忽略这些自定义分数，并为该用例计入一个 `exact: 0`。用例结束时，只有报告中的用例记录还没有 `exact` 分数，Vieval 才会补写 `exact: 0`。因此，排查结果时应同时检查用例的 `state` 和分数记录。
 
-## 有意识地使用 Rubric 断言
+指标用于筛选、分组和诊断报告。单独记录指标不会让用例通过或失败，也不会提高任务汇总分数。
 
-公开入口 `vieval/core/assertions` 提供 `expectRubric` 和 `evaluateAssertions`。`expectRubric` 会创建一个断言；该断言在执行时（例如由 `evaluateAssertions` 执行）调用传入的 `judge`，把返回分数限制在 `0..1`，应用 `minScore`，并产生结构化的 `AssertionOutcome`：
+## 使用评分标准断言
 
+`vieval/core/assertions` 提供 `expectRubric` 和 `evaluateAssertions`。`expectRubric` 用来创建断言；当 `evaluateAssertions` 执行该断言时，它会调用 `judge`，将返回的分数限制在 `0..1` 之间，再用 `minScore` 判断是否通过，最后返回结构化的 `AssertionOutcome`：
+
+::: code-group
 ```ts [rubric.ts]
 import { evaluateAssertions, expectRubric } from 'vieval/core/assertions'
 
@@ -89,15 +96,20 @@ const [outcome] = await evaluateAssertions([
   text: 'A short answer.',
 })
 ```
-
-这个示例采用确定性逻辑，不会调用模型。`expectRubric` 本身不会选择模型，也不会调用模型提供方。`judge` 回调既可以使用本地逻辑或人工结果，也可以调用模型推理。
-
-核心断言管线与任务 DSL 目前是两个独立的公开接口。`evaluateAssertions` 返回结果，但不会自动调用用例回调上下文的 `score`、`metric` 或 `expect`。手动连接结果时，需要明确决定是记录数值分数、根据 `outcome.pass` 使该用例失败、把理由保留为指标，还是组合使用这些方式。通过抛出错误使该用例失败时，任务结果会把该用例视为一次 `exact` 失败；抛出错误前已经发出的分数事件仍可能出现在报告用例记录中。
-
-::: warning 模型评分会带来运行成本
-如果 `judge` 回调调用模型，就需要相应的模型提供方配置与凭据，并会增加延迟和费用。用例并发可能同时发出多次评分请求，因此并发上限应与模型提供方容量一致。还应检查提供方的数据处理政策，并明确选择哪些用例输入、输出、评分提示词、理由、指标或事件需要保留在报告制品中。
 :::
 
-常见的边界错误包括把指标当成分数，或者认为 Rubric 结果会自动连接到用例。代码中应分别表达判断、数值证据和诊断元数据。
+这个示例只执行本地代码，不会调用模型。`expectRubric` 本身既不选择模型，也不请求模型服务；是否调用模型完全由 `judge` 回调决定。这个回调也可以使用本地规则或人工评分结果。
 
-下一步在[模型与推理执行器](/zh-hans/guide/learn/models-and-inference-executors)中了解模型注册和运行时适配器怎样接入这条流程。断言原语列在公开的 [`vieval/core/assertions` 入口](/zh-hans/api/)下。
+核心断言 API 与任务 DSL 是两套独立的公开接口。`evaluateAssertions` 只返回断言结果，不会自动调用用例上下文中的 `score`、`metric` 或 `expect`。`toRunScores(outcomes)` 可以把这些结果转换成 `RunScore[]`，但同样不会将分数写入当前用例。
+
+得到 `outcome` 后，你可以调用 `score(outcome.score, outcome.scoreKind)` 记录分数，在 `outcome.pass` 为 `false` 时抛出错误，也可以将评分理由记为指标。选择哪种方式取决于你希望它如何影响用例状态和任务汇总。
+
+如果你通过抛出错误使当前用例失败，任务汇总会为该用例计入 `exact: 0`。抛错前已经发出的分数事件仍可能保留在报告的用例记录中。
+
+::: warning 模型评分会带来运行成本
+如果 `judge` 回调调用模型，就需要配置对应的模型服务和凭据，并承担请求延迟和费用。并发运行用例时，可能同时发出多次评分请求，因此应根据服务方的速率限制和配额设置并发上限。还应检查服务方如何处理数据，并决定哪些用例输入、模型输出、评分提示词、评分理由、指标和事件可以写入报告文件。
+:::
+
+常见错误包括把指标当成分数，或误以为评分标准断言的结果会自动写入当前用例。编写评测时，应分别处理用例状态、参与汇总的分数，以及用于排查问题的指标。
+
+下一步在[模型与推理执行器](/zh-hans/guide/learn/models-and-inference-executors)中学习如何注册并选择模型。所有核心断言 API 都可以从 [`vieval/core/assertions`](/zh-hans/api/) 导入。

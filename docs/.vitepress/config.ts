@@ -1,5 +1,6 @@
 import UnoCSS from 'unocss/vite'
 
+import { transformerNotationWordHighlight } from '@shikijs/transformers'
 import { extendConfig } from '@voidzero-dev/vitepress-theme/config'
 import { defineConfig } from 'vitepress'
 
@@ -87,6 +88,9 @@ export default extendConfig(defineConfig({
     },
   },
   markdown: {
+    codeTransformers: [
+      transformerNotationWordHighlight(),
+    ],
     theme: {
       dark: 'github-dark',
       light: 'github-light',

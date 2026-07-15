@@ -2,6 +2,13 @@
 
 @source "./**/*.vue";
 
+.vp-doc [class*='language-'] code .highlighted-word {
+  padding: 1px 2px;
+  margin: -1px -2px;
+  background-color: var(--vp-code-line-highlight-color);
+  border-radius: 4px;
+}
+
 /* Brand color: black in light mode, white in dark mode */
 /* :root,
 :root[data-variant="voidzero"] {

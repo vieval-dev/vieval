@@ -10,11 +10,13 @@ next:
 
 # 矩阵与数据集
 
-矩阵让评测任务在不同配置值下重复执行，输入数组则让任务重复执行其中的用例。区分这两种展开方式，才能更准确地预估一次运行的规模和含义。
+`runMatrix` 和 `evalMatrix` 中各维度的取值会组成矩阵组合，每增加一个矩阵组合，就会增加相应的调度任务。`casesFromInputs` 则为数组中的每个输入注册一个用例，因此输入元素会增加每个调度任务中的用例数。
 
-## 从一个模型轴开始
+## 从一个模型维度开始
 
-先在项目 `runMatrix` 中添加 `model` 轴。只有一个已注册别名时，它会产生一行运行矩阵：
+先在项目的 `runMatrix` 中添加 `model` 维度。这里只有一个模型别名，因此运行矩阵只有一种组合：
+
+::: code-group
 
 ```ts [vieval.config.ts]
 import { defineConfig } from 'vieval'
@@ -35,7 +37,11 @@ export default defineConfig({
 })
 ```
 
-接着添加场景轴。各轴的值会组成笛卡尔积，因此一个模型与两个场景会产生两行运行矩阵：
+:::
+
+再添加 `scenario`。Vieval 会组合所有维度的取值，因此一个模型和两个场景会产生两种运行矩阵组合：
+
+::: code-group
 
 ```ts [vieval.config.ts]
 export default defineConfig({
@@ -53,11 +59,15 @@ export default defineConfig({
 })
 ```
 
-任务代码可以从 `context.task.matrix.run` 取得每个轴的一项选中值。轴名没有内置行为：添加 `scenario` 会产生更多调度行；如果不同场景需要不同执行方式，任务必须读取该值并据此处理。
+:::
+
+任务可以从 `context.task.matrix.run` 读取本次调度选中的值。维度名称本身不会触发任何操作：`scenario` 只会让调度器创建更多矩阵组合。任务需要自行读取该值，并决定不同场景分别执行什么逻辑。
 
 ## 区分运行矩阵与评测矩阵
 
-`runMatrix` 适合表示被测系统的变化，例如模型、提示词语言或场景。`evalMatrix` 适合表示评测方式的变化，例如评分标准名称或评分模型选择器。
+`runMatrix` 用来区分被测方案，例如模型、提示词语言或运行场景。`evalMatrix` 用来区分评测方法，例如评分标准或评分模型。
+
+::: code-group
 
 ```ts [vieval.config.ts]
 export default defineConfig({
@@ -80,23 +90,27 @@ export default defineConfig({
 })
 ```
 
-这个定义包含两行运行矩阵和两行评测矩阵，因此会为每个已发现评测项与每个调度推理执行器生成四组矩阵项组合。两类选中值分别位于 `context.task.matrix.run` 和 `context.task.matrix.eval`。
+:::
 
-这种区分用于组织配置，并不构成自动调用管线。`model` 轴不会自动调用模型，`rubric` 或评分模型轴也不会自动运行评分逻辑。任务或断言代码必须读取选中值并实现相应操作。
+上面的配置有两种运行矩阵组合和两种评测矩阵组合。Vieval 会为每个「评测项 + 推理执行器」组合创建四个调度任务。任务可以分别从 `context.task.matrix.run` 和 `context.task.matrix.eval` 读取两类配置。
 
-## 分层组合项目、评测与任务矩阵
+矩阵只负责组合配置，不会自动调用模型或执行评分。即使维度名为 `model` 或 `rubric`，任务和断言仍需读取对应值，并实现模型调用或评分逻辑。
 
-矩阵从外到内按以下顺序解析：
+## 按项目、评测和任务三层合并矩阵配置
+
+Vieval 按以下顺序合并矩阵配置：
 
 1. `vieval.config.*` 中项目级的 `runMatrix` 和 `evalMatrix`。
 2. `defineEval` 中评测级的 `matrix`。
 3. `defineTask` 中任务级的 `matrix`。
 
-在每一层中，Vieval 按以下顺序应用控制项：
+每一层内部再按以下顺序处理：
 
-1. `disable` 删除此前继承的指定轴，其值是轴名数组。
-2. `extend` 添加新轴，并把去重后的值追加到继承轴。
-3. `override` 用当前层提供的值完整替换该轴。
+1. `disable` 删除从外层继承的指定维度；它的值是维度名称数组。
+2. `extend` 添加新维度，或向已有维度追加值；重复值会被删除。
+3. `override` 用当前层给出的值替换整个维度。
+
+::: code-group
 
 ```ts [evals/layered.eval.ts]
 import { defineEval, defineTask } from 'vieval/config'
@@ -136,11 +150,17 @@ export default defineEval({
 })
 ```
 
-结合前一段项目配置，评测层会删除 `scenario`，添加两个 `promptLanguage` 值，并固定模型轴。任务层则把继承的两个评分标准值替换为 `strict`。扁平矩阵对象仍可使用，并会被规范化为 `extend`；分层形式能更明确地表达继承关系。同一个对象中不能混合 `disable` 等控制键与普通矩阵轴键。
+:::
 
-## 添加输入用例而不增加矩阵行
+在前一节项目配置的基础上，评测级配置会删除 `scenario`，添加 `en` 和 `zh` 两种 `promptLanguage`，并把 `model` 替换为 `assistant-default`。任务级配置再把 `rubric` 替换为 `strict`。
 
-`casesFromInputs` 接受一组已经由你的代码加载或构造的数组。它为每个元素注册一个用例，并在回调中通过 `matrix.inputs` 提供该元素：
+项目配置中的 `runMatrix` 和 `evalMatrix` 可以直接写成扁平的矩阵对象，Vieval 会把它们当作 `extend` 处理。`defineEval` 的评测级矩阵和 `defineTask` 的任务级矩阵只接受分层形式，需要通过 `extend`、`override` 或 `disable` 调整继承的配置。不要在同一个对象中混写这些控制项和普通维度名称，否则配置会报错。
+
+## 添加输入用例而不增加矩阵组合
+
+`casesFromInputs` 接受一个由你的代码加载或构造的数组。它为每个元素注册一个用例，并在回调中通过 `matrix.inputs` 提供当前元素：
+
+::: code-group
 
 ```ts [evals/dataset.eval.ts]
 import { describeTask, expect } from 'vieval'
@@ -159,34 +179,38 @@ describeTask('arithmetic dataset', ({ casesFromInputs }) => {
 })
 ```
 
-这个 API 不会发现或加载通用外部数据集。如果数据位于 JSON、数据库或其他数据源中，需要由你的代码先加载并校验，再把结果数组传给 `casesFromInputs`。
+:::
+
+这个 API 不会自行读取外部数据集。数据来自 JSON、数据库或其他来源时，请先在评测代码中加载并校验，再把得到的数组传给 `casesFromInputs`。
 
 运行结构如下：
 
 ```text
 项目
   -> 已发现的评测项及其任务
-    -> 推理执行器 × 运行矩阵项 × 评测矩阵项
+    -> 推理执行器 × 运行矩阵组合 × 评测矩阵组合
       -> 一次调度任务执行
-        -> 显式 caseOf 用例 + casesFromInputs 每个输入对应的一个用例
+        -> 通过 caseOf 注册的用例 + casesFromInputs 为每个输入注册的用例
 ```
 
-因此，输入不会增加调度器中的矩阵行。它们会在每个注册这些输入的调度任务中生成用例。
+输入元素不会增加矩阵组合或调度任务。每个已经创建的调度任务都会为这些元素分别运行一个用例。
 
 ## 在运行前计算展开规模
 
-在计算尝试与重试之前，调度数量为：
+矩阵展开后，调度任务数为：
 
 ```text
-已发现评测项 × 项目推理执行器 × 运行矩阵行数 × 评测矩阵行数
+已发现评测项 × 项目推理执行器 × 运行矩阵组合数 × 评测矩阵组合数
 ```
 
-如果任务只注册了一组包含 `N` 个输入的 `casesFromInputs`，那么在重试或追加尝试之前，初始用例回调次数就是该任务的调度执行次数乘以 `N`。其他 `caseOf` 或输入组会分别增加自己的用例。
+如果任务只调用了一次 `casesFromInputs`，并传入 `N` 个元素，那么首次执行的用例回调次数就是调度任务数乘以 `N`。任务中每增加一次 `caseOf` 调用或另一处 `casesFromInputs` 调用，还会相应增加用例数。
 
-例如，一个评测项、默认的单个调度推理执行器、两行运行矩阵、两行评测矩阵和三个输入，会产生四次调度任务执行与十二次用例回调执行。
+`autoAttempt` 和 `autoRetry` 不会创建新的调度任务。它们只会在已有的调度任务中再次执行用例回调，因此需要另行计算增加的执行次数。
+
+例如，一个评测项使用一个推理执行器、两种运行矩阵组合、两种评测矩阵组合和三个输入时，会创建四个调度任务，并首次执行十二次用例回调。
 
 ::: warning 注意组合增长与速率限制
-任何矩阵轴增加取值都会成倍增加调度执行，增加输入则会增加每次调度任务中的用例工作量。这些变化会增加运行时间和报告记录。只有重复执行的任务或用例代码实际调用模型提供方时，才会增加调用次数、费用和速率限制风险，而且一个用例也可能调用多次。应单独估算调用次数，并根据模型提供方容量设置并发限制。
+为矩阵维度增加取值会增加矩阵组合；增加输入则会增加每个调度任务中的用例。两者都会延长运行时间，并增加报告中的记录数。只有任务或用例代码实际调用模型服务时，调用次数和费用才会随之增加；一个用例也可能发起多次调用。请按实际调用次数估算费用，并根据服务方的限流规则设置并发数。
 :::
 
-下一步在[可靠执行](/zh-hans/guide/learn/reliable-execution)中控制重试、尝试、超时和并发。底层矩阵与任务类型见[配置参考](/zh-hans/config/)和 [API 参考](/zh-hans/api/)。
+下一步可在[可靠执行](/zh-hans/guide/learn/reliable-execution)中设置重试、自动尝试、超时和并发。矩阵与任务的完整类型见[配置参考](/zh-hans/config/)和[API 参考](/zh-hans/api/)。
