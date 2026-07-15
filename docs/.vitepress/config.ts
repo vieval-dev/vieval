@@ -156,11 +156,26 @@ export default extendConfig(defineConfig({
       ],
       '/en/guide/': [
         {
+          collapsed: false,
           items: [
-            { link: '/en/guide/', text: 'Introduction' },
+            { link: '/en/guide/', text: 'Guide Overview' },
+            { link: '/en/guide/why', text: 'Why Vieval' },
             { link: '/en/guide/getting-started', text: 'Getting Started' },
+            { link: '/en/guide/core-concepts', text: 'Core Concepts' },
           ],
-          text: 'Guide',
+          text: 'Introduction',
+        },
+        {
+          collapsed: false,
+          items: [
+            { link: '/en/guide/learn/tasks-cases-and-inputs', text: 'Tasks, Cases, and Inputs' },
+            { link: '/en/guide/learn/assertions-scores-and-metrics', text: 'Assertions, Scores, and Metrics' },
+            { link: '/en/guide/learn/models-and-inference-executors', text: 'Models and Inference Executors' },
+            { link: '/en/guide/learn/matrices-and-datasets', text: 'Matrices and Datasets' },
+            { link: '/en/guide/learn/reliable-execution', text: 'Reliable Execution' },
+            { link: '/en/guide/learn/reports-and-comparisons', text: 'Reports and Comparisons' },
+          ],
+          text: 'Learn',
         },
       ],
       '/zh-hans/api/': [
@@ -181,11 +196,26 @@ export default extendConfig(defineConfig({
       ],
       '/zh-hans/guide/': [
         {
+          collapsed: false,
           items: [
-            { link: '/zh-hans/guide/', text: '介绍' },
+            { link: '/zh-hans/guide/', text: '指南概览' },
+            { link: '/zh-hans/guide/why', text: '为什么选择 Vieval' },
             { link: '/zh-hans/guide/getting-started', text: '快速开始' },
+            { link: '/zh-hans/guide/core-concepts', text: '核心概念' },
           ],
-          text: '指南',
+          text: '介绍',
+        },
+        {
+          collapsed: false,
+          items: [
+            { link: '/zh-hans/guide/learn/tasks-cases-and-inputs', text: '任务、用例与输入' },
+            { link: '/zh-hans/guide/learn/assertions-scores-and-metrics', text: '断言、分数与指标' },
+            { link: '/zh-hans/guide/learn/models-and-inference-executors', text: '模型与推理执行器' },
+            { link: '/zh-hans/guide/learn/matrices-and-datasets', text: '矩阵与数据集' },
+            { link: '/zh-hans/guide/learn/reliable-execution', text: '可靠执行' },
+            { link: '/zh-hans/guide/learn/reports-and-comparisons', text: '报告与比较' },
+          ],
+          text: '学习',
         },
       ],
     },
