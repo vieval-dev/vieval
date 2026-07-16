@@ -26,6 +26,7 @@ catalog:
   '@moeru/std': 0.1.0-beta.17
   '@opentelemetry/api': ^1.9.1
   '@pnpm/find-workspace-dir': ^1000.1.5
+  '@shikijs/transformers': 3.23.0
   '@types/node': ^26.1.0
   '@unocss/eslint-plugin': ^66.7.4
   '@unocss/reset': ^66.7.4

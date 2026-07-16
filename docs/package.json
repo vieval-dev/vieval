@@ -11,6 +11,7 @@
     "vue": "catalog:"
   },
   "devDependencies": {
+    "@shikijs/transformers": "catalog:",
     "@voidzero-dev/vitepress-theme": "catalog:",
     "@vue/tsconfig": "catalog:",
     "vitepress": "catalog:"

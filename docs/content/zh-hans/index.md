@@ -1,13 +1,13 @@
 ---
 title: Vieval
-titleTemplate: 面向 Agent 的评测框架
+titleTemplate: 面向智能体的评测框架
 layout: home
 theme: dark
 home:
   logoAlt: Vieval 图标
   eyebrow: 评测框架
-  heroTitle: 对智能体和模型进行可靠评测
-  heroDescription: 智能体是概率性的，输出都不稳定，Vieval 让你可以自信地进行测试和基准评测，Vieval = Vitest + 评测框架。
+  heroTitle: 可靠地评测智能体与模型
+  heroDescription: Vieval 用熟悉的测试写法组织可重复执行的评测，并汇总用例结果与分数，生成报告。可以把它理解为 Vitest 式开发体验与评测运行器的结合。
   primaryAction:
     text: 快速开始
     link: /zh-hans/guide/
@@ -25,29 +25,28 @@ home:
         4 files, 6 entries, 24 runs
         cases 198 passed | 3 failed | 0 timeout
         matrix run 4 [model|scenario] / eval 2 [rubric]
-        report .vieval/reports/local/baseline/attempt-a/...
   why:
-    eyebrow: Vieval 的意义是什么？
-    title: 用更可靠的方式衡量概率结果。
+    eyebrow: 为什么使用 Vieval？
+    title: 通过反复运行评测，衡量不稳定的行为。
     body:
-      - Vieval 让评测用例保持可读，同时为多模型并行矩阵调度、分数评判、跨指标横评、自定义断言和报告提供稳定的基础设施。
-      - 原生支持 OpenAI 的 对话补全（Chat Completions），也可以利用在 YOLO，VLM，Robotics 相关领域的评测用例。
+      - 用 TypeScript 编写评测用例，再由 Vieval 发现文件、组合矩阵变量、调度任务，并汇总断言结果、分数和指标。
+      - 模型注册与模型调用彼此分离。内置聊天模型插件负责管理 OpenAI、OpenRouter 和 Ollama 等运行配置；任务代码决定是否以及何时调用模型。
     action:
       text: 阅读指南
       link: /zh-hans/guide/
   features:
     - title: 测试风格的评测文件
-      details: 使用 describeTask、caseOf、casesFromInputs 和 expect，让评测用例贴近它们验证的产品代码。
-    - title: 原生数据集用例
-      details: casesFromInputs 可以接入 HuggingFace datasets、S3 objects、本地 fixtures 或动态生成的输入。
-    - title: 从上到下的矩阵能力
-      details: 通过 workspace、project、eval 和 task 的矩阵参数，对比一个或多个实现。
-    - title: 内置 Rubric 评估
-      details: 当 agent 行为无法直接断言时，可以请另一个模型或 agent 根据 rubric 打分。
-    - title: Chat models、Voice models 等都可扩展
-      details: ChatModels 只是一个插件：第一天先定义聊天提供方，之后可用同一插件接口扩展新的运行时。
-    - title: 同时适合 LLM 和人类阅读的报告
-      details: 内置 CLI 工具帮助 agents 分析和检查运行结果，让 coding agents 能优化 agent 或模型运行，同时保持可读的人类 DX。
+      details: 使用 describeTask、caseOf、casesFromInputs 和 expect，把任务、输入与断言写在同一份 TypeScript 文件中。
+    - title: 从输入数组批量生成用例
+      details: 先用代码加载或构造输入数组，再交给 casesFromInputs 为每个元素注册一个用例。
+    - title: 分层配置矩阵
+      details: 在项目、评测项和任务三个层级组合模型、场景与评分方式等变量，并对每组组合执行同一个任务。
+    - title: 内置评分标准断言
+      details: 当行为无法用确定性断言判断时，可以让评分标准（rubric）的评判回调返回评分理由和分数；是否调用另一个模型由评测代码决定。
+    - title: 可扩展的模型注册
+      details: 内置 ChatModels 插件管理聊天模型元数据；也可以编写项目插件，向配置中注册其他模型定义。
+    - title: 面向开发者和工具的输出
+      details: CLI 默认显示便于阅读的进度与摘要，也可输出 JSON，或将运行摘要、事件和用例记录写入报告目录。
 ---
 
 <script setup lang="ts">
