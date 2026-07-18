@@ -1,0 +1,15 @@
+{
+  "name": "@vieval-examples/run-matrix-multi-models",
+  "type": "module",
+  "private": true,
+  "description": "Minimal Vieval matrix eval demo using sleep as the task mock.",
+  "scripts": {
+    "eval:run": "vieval run"
+  },
+  "dependencies": {
+    "@moeru/std": "catalog:"
+  },
+  "devDependencies": {
+    "vieval": "workspace:^"
+  }
+}

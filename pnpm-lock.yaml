@@ -305,6 +305,16 @@ importers:
         specifier: workspace:^
         version: link:../../packages/vieval
 
+  examples/run-matrix-multi-models:
+    dependencies:
+      '@moeru/std':
+        specifier: 'catalog:'
+        version: 0.1.0-beta.17
+    devDependencies:
+      vieval:
+        specifier: workspace:^
+        version: link:../../packages/vieval
+
   examples/self-evolve:
     dependencies:
       '@xsai/providers':
@@ -2407,6 +2417,9 @@ packages:
 
   '@xsai/shared@0.5.0-beta.6':
     resolution: {integrity: sha512-fE3+vEzDe+NftOIYbxdjFtnTAaHpYBCQ2Bsa/9vfQ03l9Mz9KeC83bOdiz/pvndrBlARtVhZC26h4wnRK3/A0A==}
+
+  '@xsai/shared@0.5.0-beta.7':
+    resolution: {integrity: sha512-w2nplQtguUWmLRobtQJS7rwWW8FvU7Bb7jrHsQGJ7KbpTQV9vjYQwY9+owdrUGmTpXg/D/JiaEvSkpKYMHY3nw==}
 
   '@xsai/stream-object@0.5.0-beta.6':
     resolution: {integrity: sha512-wpUS4tRpNUX8N/Olgci5Bjz9wL+PFW+b6uS/KyfoKEms+kXasKvxXshHDfCeyVr1m0GKBE6cH3uXnNEjpAQMVQ==}
@@ -6041,7 +6054,7 @@ snapshots:
 
   '@xsai/providers@0.1.0-beta.5':
     dependencies:
-      '@xsai/shared': 0.5.0-beta.6
+      '@xsai/shared': 0.5.0-beta.7
 
   '@xsai/shared-chat@0.5.0-beta.6':
     dependencies:
@@ -6052,6 +6065,8 @@ snapshots:
       '@xsai/shared': 0.5.0-beta.6
 
   '@xsai/shared@0.5.0-beta.6': {}
+
+  '@xsai/shared@0.5.0-beta.7': {}
 
   '@xsai/stream-object@0.5.0-beta.6':
     dependencies:
