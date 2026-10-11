@@ -1,4 +1,5 @@
 import type { RunScore } from '../core/runner'
+import type { CaseOutputStream } from '../core/runner/case-output'
 import type { ScheduledTask } from '../core/runner/schedule'
 import type { TaskExecutionContext } from '../core/runner/task-context'
 import type { TelemetryRuntime } from '../core/telemetry'
@@ -353,6 +354,31 @@ export interface TaskCaseReporterEndPayload extends TaskCaseReporterPayload {
 }
 
 /**
+ * Payload emitted when case code writes to `process.stdout` or `process.stderr`.
+ *
+ * Use when:
+ * - reporter hooks group process output by the case that produced it
+ */
+export interface TaskCaseReporterOutputPayload {
+  /**
+   * Raw output chunk, possibly without a trailing newline.
+   */
+  content: string
+  /**
+   * Zero-based case position within the task.
+   */
+  index: number
+  /**
+   * Declared case label.
+   */
+  name: string
+  /**
+   * Process stream that received the chunk.
+   */
+  stream: CaseOutputStream
+}
+
+/**
  * Payload emitted when a task case starts.
  *
  * Use when:
@@ -563,6 +589,17 @@ export interface TaskReporterHooks {
    * Runs after a case settles.
    */
   onCaseEnd?: (payload: TaskCaseReporterEndPayload) => void
+  /**
+   * Runs when case code writes to `process.stdout` or `process.stderr`.
+   *
+   * Use when:
+   * - process output should be grouped per case instead of interleaving on the terminal
+   *
+   * Expects:
+   * - output is captured only while the CLI intercepts process streams
+   * - when the hook is absent, case output goes straight to the terminal
+   */
+  onCaseOutput?: (payload: TaskCaseReporterOutputPayload) => void
   /**
    * Runs when a case is about to execute.
    */

@@ -5,6 +5,7 @@ import type { TelemetryAttributeValue } from '../core/telemetry'
 import { errorMessageFrom, sleep } from '@moeru/std'
 
 import { defineEval, defineTask } from '../config'
+import { runWithCaseOutput } from '../core/runner/case-output'
 import { createSchedulerQueue } from '../core/scheduler/queue'
 import { createNoopTelemetryRuntime } from '../core/telemetry'
 import { registerEvalDefinition } from './registry'
@@ -453,7 +454,7 @@ async function runCaseOnce(
       'vieval.task.id': context.task.id,
       'vieval.task.name': context.task.entry.name,
     }, async () => {
-      const runPromise = Promise.resolve(taskCase.run({
+      const runCase = () => taskCase.run({
         ...context,
         matrix: {
           ...cloneCaseMatrix(context.task.matrix),
@@ -495,7 +496,19 @@ async function runCaseOnce(
           })
         },
         signal: abortController.signal,
-      }))
+      })
+      const onCaseOutput = context.reporterHooks?.onCaseOutput
+      // Without an output hook nobody would print captured output, so the case writes to the terminal directly.
+      const runPromise = Promise.resolve(onCaseOutput == null
+        ? runCase()
+        : runWithCaseOutput((stream, content) => {
+            try {
+              onCaseOutput({ content, index, name: taskCase.name, stream })
+            }
+            catch {
+              // Reporter hooks must never affect task scoring.
+            }
+          }, runCase))
 
       if (timeout != null) {
         const timeoutPromise = new Promise<never>((_, reject) => {

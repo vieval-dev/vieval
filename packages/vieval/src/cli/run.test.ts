@@ -2448,4 +2448,72 @@ export default defineConfig({
     expect(output.projects[1]?.executed).toBe(false)
     expect(formatVievalCliRunOutput(output)).toContain('Tasks     1 executed / 2 scheduled')
   })
+
+  /**
+   * @example
+   * it('prints the full output of each concurrent case as one block when stdout is not a TTY', async () => {})
+   */
+  it('prints the full output of each concurrent case as one block when stdout is not a TTY', async () => {
+    const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
+    const projectDirectory = await createDslProject({
+      evalFiles: {
+        'output.eval.ts': `
+import process from 'node:process'
+import { setTimeout as delay } from 'node:timers/promises'
+
+import { caseOf, describeTask } from '${vievalImportPath}'
+
+describeTask('output-task', () => {
+  for (const name of ['alpha', 'beta']) {
+    caseOf(name, async () => {
+      process.stdout.write(name + ' line 1\\n')
+      await delay(20)
+      process.stderr.write(name + ' warning\\n')
+      console.log(name + ' line 2')
+    })
+  }
+}, { concurrency: { case: 2 } })
+`,
+      },
+      projectName: 'output-project',
+    })
+    const stdoutWrites: string[] = []
+    const stderrWrites: string[] = []
+    const originalStdoutWrite = process.stdout.write
+
+    await runVievalCli({
+      configFilePath: join(projectDirectory, 'vieval.config.ts'),
+      cwd: projectDirectory,
+      reporter: {
+        getNow: () => 0,
+        isTTY: false,
+        writeError: value => stderrWrites.push(value),
+        writeOutput: value => stdoutWrites.push(value),
+      },
+    })
+
+    /**
+     * @example
+     * expect(process.stdout.write).toBe(originalStdoutWrite)
+     */
+    expect(process.stdout.write).toBe(originalStdoutWrite)
+    // NOTICE:
+    // `console.log` lines are not asserted: Vitest replaces the worker console with its own
+    // stream that never reaches `process.stdout.write`, so only direct stream writes are observable.
+    // Source: `vitest/src/runtime/console.ts` (`createCustomConsole`).
+    // Removal condition: this scenario moves to a CLI subprocess test with the real global console.
+    /**
+     * @example
+     * expect(stdoutWrites.toSorted()).toEqual(['|output-project| output > alpha\n│ alpha line 1\n│ alpha warning\n└─ Done in 0ms\n', ...])
+     */
+    expect(stdoutWrites.toSorted()).toEqual([
+      '|output-project| output > alpha\n│ alpha line 1\n│ alpha warning\n└─ Done in 0ms\n',
+      '|output-project| output > beta\n│ beta line 1\n│ beta warning\n└─ Done in 0ms\n',
+    ])
+    /**
+     * @example
+     * expect(stderrWrites).toEqual([])
+     */
+    expect(stderrWrites).toEqual([])
+  })
 })
