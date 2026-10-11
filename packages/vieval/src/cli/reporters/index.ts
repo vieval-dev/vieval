@@ -1,7 +1,7 @@
 import type { SummaryReporterOptions } from './summary-reporter'
 import type { CliReporter } from './types'
 
-import { createNoopReporter } from './noop-reporter'
+import { createCaseOutputReporter } from './case-output'
 import { createSummaryReporter } from './summary-reporter'
 
 /**
@@ -25,22 +25,22 @@ export interface CreateCliReporterOptions extends SummaryReporterOptions {}
  *
  * Use when:
  * - interactive terminals should use the live summary reporter
- * - non-interactive environments should stay silent with the noop reporter
+ * - non-interactive environments should only print case output, one block per case
  *
  * Expects:
  * - `isTTY` decides whether the live summary reporter can be used
  *
  * Returns:
- * - a summary reporter for TTY runs, otherwise a noop reporter
+ * - a summary reporter for TTY runs, otherwise a case output reporter
  */
 export function createCliReporter(options: CreateCliReporterOptions): CliReporter {
   if (!options.isTTY) {
-    return createNoopReporter()
+    return createCaseOutputReporter({ getNow: options.getNow, write: options.writeOutput })
   }
 
   return createSummaryReporter(options)
 }
 
-export * from './noop-reporter'
+export * from './case-output'
 export * from './summary-reporter'
 export * from './types'

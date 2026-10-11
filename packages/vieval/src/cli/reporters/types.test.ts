@@ -1,57 +1,6 @@
-import type { CliReporter } from './types'
-
 import { describe, expect, it } from 'vitest'
 
-import { createCliReporter, createNoopReporter } from './index'
-
-/**
- * @example
- * describe('createNoopReporter', () => {})
- */
-describe('createNoopReporter', () => {
-  /**
-   * @example
-   * it('exposes the reporter lifecycle without throwing', () => {})
-   */
-  it('exposes the reporter lifecycle without throwing', () => {
-    const reporter: CliReporter = createNoopReporter()
-
-    /**
-     * @example
-     * expect(() => reporter.dispose()).not.toThrow()
-     */
-    expect(() => {
-      reporter.onRunStart({ totalTasks: 2 })
-      reporter.onTaskQueued({ taskId: 'task-1' })
-      reporter.onTaskStart({ taskId: 'task-1' })
-      reporter.onCaseStart({ caseId: 'case-1', taskId: 'task-1' })
-      reporter.onCaseEnd({ caseId: 'case-1', state: 'passed', taskId: 'task-1' })
-      reporter.onTaskEnd({ state: 'passed', taskId: 'task-1' })
-      reporter.onRunEnd({ failedTasks: 0, passedTasks: 1, skippedTasks: 0, totalTasks: 2 })
-      reporter.dispose()
-    }).not.toThrow()
-  })
-
-  /**
-   * @example
-   * it('allows dispose() to be called multiple times safely', () => {})
-   */
-  it('allows dispose() to be called multiple times safely', () => {
-    const reporter: CliReporter = createNoopReporter()
-
-    /**
-     * @example
-     * expect(() => {
-     *   reporter.dispose()
-     *   reporter.dispose()
-     * }).not.toThrow()
-     */
-    expect(() => {
-      reporter.dispose()
-      reporter.dispose()
-    }).not.toThrow()
-  })
-})
+import { createCliReporter } from './index'
 
 /**
  * @example
@@ -60,9 +9,9 @@ describe('createNoopReporter', () => {
 describe('createCliReporter', () => {
   /**
    * @example
-   * it('selects the noop reporter when TTY output is disabled', () => {})
+   * it('selects the case output reporter when TTY output is disabled', () => {})
    */
-  it('selects the noop reporter when TTY output is disabled', () => {
+  it('selects the case output reporter when TTY output is disabled', () => {
     const reporter = createCliReporter({
       getColumns: () => 120,
       getNow: () => 0,

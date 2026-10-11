@@ -1,4 +1,4 @@
-import type { TaskConcurrencyConfig, TaskExecutionPolicy, TaskReporterEventPayload, TaskRunContext, TaskRunOutput } from '../config'
+import type { TaskConcurrencyConfig, TaskExecutionPolicy, TaskRunContext, TaskRunOutput } from '../config'
 import type { RunScoreKind } from '../core/runner'
 import type { TelemetryAttributeValue } from '../core/telemetry'
 
@@ -170,6 +170,18 @@ function autoRetryDelayMs(retryIndex: number): number {
   return 500 * 2 ** (retryIndex - 1)
 }
 
+/**
+ * Calls one reporter hook. Hooks are best-effort observers, so their errors are swallowed.
+ */
+function callReporterHook(call: () => void): void {
+  try {
+    call()
+  }
+  catch {
+    // Reporter hooks must never affect task scoring.
+  }
+}
+
 function canAttachMetricAsAttribute(value: TelemetryAttributeValue): value is boolean | number | readonly boolean[] | readonly number[] | readonly string[] | string {
   if (isTelemetryAttributeScalar(value)) {
     return true
@@ -258,25 +270,6 @@ function createTaskCaseReporterId(index: number, name: string): string {
   return `${index}:${encodeURIComponent(name)}`
 }
 
-function emitCaseEnd(
-  hooks: TaskRunContext['reporterHooks'] | undefined,
-  payload: {
-    errorMessage?: string
-    index: number
-    name: string
-    output?: unknown
-    state: 'failed' | 'passed' | 'timeout'
-    total: number
-  },
-): void {
-  try {
-    hooks?.onCaseEnd?.(payload)
-  }
-  catch {
-    // Reporter hooks must never affect task scoring.
-  }
-}
-
 function emitCaseOutcome(
   context: TaskRunContext,
   taskCase: RegisteredCase<unknown>,
@@ -284,45 +277,14 @@ function emitCaseOutcome(
   index: number,
   totalCases: number,
 ): void {
-  emitCaseEnd(context.reporterHooks, {
+  callReporterHook(() => context.reporterHooks?.onCaseEnd?.({
     ...(outcome.errorMessage == null ? {} : { errorMessage: outcome.errorMessage }),
     index,
     ...(outcome.output === undefined ? {} : { output: outcome.output }),
     name: taskCase.name,
     state: outcome.state,
     total: totalCases,
-  })
-}
-
-function emitCaseStart(
-  hooks: TaskRunContext['reporterHooks'] | undefined,
-  payload: {
-    autoRetry?: number
-    index: number
-    input?: unknown
-    name: string
-    retryIndex?: number
-    total: number
-  },
-): void {
-  try {
-    hooks?.onCaseStart?.(payload)
-  }
-  catch {
-    // Reporter hooks must never affect task scoring.
-  }
-}
-
-function emitReporterEvent(
-  hooks: TaskRunContext['reporterHooks'] | undefined,
-  payload: TaskReporterEventPayload,
-): void {
-  try {
-    hooks?.onEvent?.(payload)
-  }
-  catch {
-    // Reporter hooks must never affect task scoring.
-  }
+  }))
 }
 
 async function executeRegisteredCase(
@@ -345,7 +307,7 @@ async function executeRegisteredCase(
       }
     }
 
-    emitCaseStart(context.reporterHooks, {
+    callReporterHook(() => context.reporterHooks?.onCaseStart?.({
       ...(resolvedPolicy.autoRetry > 0
         ? {
             autoRetry: resolvedPolicy.autoRetry,
@@ -356,7 +318,7 @@ async function executeRegisteredCase(
       ...(taskCase.input === undefined ? {} : { input: taskCase.input }),
       name: taskCase.name,
       total: totalCases,
-    })
+    }))
     lastOutcome = await runCaseOnce(context, taskCase, index, resolvedPolicy.timeout)
     if (lastOutcome.state === 'passed') {
       return lastOutcome
@@ -465,14 +427,14 @@ async function runCaseOnce(
             return
           }
 
-          emitReporterEvent(context.reporterHooks, {
+          callReporterHook(() => context.reporterHooks?.onEvent?.({
             caseId,
             data: {
               name,
               value,
             },
             event: 'task.case.metric',
-          })
+          }))
           telemetry.addEvent('vieval.case.metric', { name, value })
           if (canAttachMetricAsAttribute(value)) {
             telemetry.setAttributes({ [name]: value })
@@ -489,25 +451,20 @@ async function runCaseOnce(
             'vieval.score.kind': kind,
             'vieval.score.value': score,
           })
-          emitReporterEvent(context.reporterHooks, {
+          callReporterHook(() => context.reporterHooks?.onEvent?.({
             caseId,
             data: { kind, score },
             event: 'task.case.score',
-          })
+          }))
         },
         signal: abortController.signal,
       })
-      const onCaseOutput = context.reporterHooks?.onCaseOutput
+      const hooks = context.reporterHooks
       // Without an output hook nobody would print captured output, so the case writes to the terminal directly.
-      const runPromise = Promise.resolve(onCaseOutput == null
+      const runPromise = Promise.resolve(hooks?.onCaseOutput == null
         ? runCase()
         : runWithCaseOutput((stream, content) => {
-            try {
-              onCaseOutput({ content, index, name: taskCase.name, stream })
-            }
-            catch {
-              // Reporter hooks must never affect task scoring.
-            }
+            callReporterHook(() => hooks.onCaseOutput?.({ content, index, name: taskCase.name, stream }))
           }, runCase))
 
       if (timeout != null) {

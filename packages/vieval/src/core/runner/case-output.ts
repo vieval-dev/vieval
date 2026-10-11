@@ -14,27 +14,19 @@ export type CaseOutputSink = (stream: CaseOutputStream, content: string) => void
 export type CaseOutputStream = 'stderr' | 'stdout'
 
 /**
- * Options for {@link interceptProcessOutput}.
+ * Process stream interception created by {@link createProcessOutputInterceptor}.
  */
-export interface InterceptProcessOutputOptions {
-  /**
-   * Receives output written outside every case scope.
-   *
-   * @default writes the chunk to the original stream
-   */
-  onUnscopedOutput?: CaseOutputSink
-}
-
-/**
- * Active process stream interception created by {@link interceptProcessOutput}.
- */
-export interface ProcessOutputInterception {
+export interface ProcessOutputInterceptor {
   /**
    * Restores the original `process.stdout.write` and `process.stderr.write`.
    *
-   * Safe to call more than once.
+   * Safe to call more than once, and before `start()`.
    */
   restore: () => void
+  /**
+   * Starts routing writes: case-scoped writes go to their case sink, all other writes to `onUnscopedOutput`.
+   */
+  start: (onUnscopedOutput: CaseOutputSink) => void
   /**
    * Writes to stderr without passing through the interception.
    */
@@ -64,21 +56,22 @@ const caseOutputStorageSymbol = Symbol.for('vieval.runner.case-output.storage')
  * - the CLI runs many cases concurrently in one process and needs to know which case wrote what
  *
  * Expects:
+ * - the writers are captured when the interceptor is created, so they stay usable before `start()`
  * - callers call `restore()` once the run settles
  * - `console.*` writes are covered because the global console writes through these streams
  * - child processes that inherit the file descriptors bypass this interception
  *
  * Returns:
- * - a handle with `restore()` plus writers that bypass the interception
+ * - a handle with `start()`, `restore()`, and writers that bypass the interception
  *
  * Call stack:
  *
  * runVievalCli (../../cli/run)
- *   -> {@link interceptProcessOutput}
+ *   -> {@link createProcessOutputInterceptor}
  *     -> case code writes to `process.stdout`
  *       -> {@link CaseOutputSink} from {@link runWithCaseOutput}, or `onUnscopedOutput`
  */
-export function interceptProcessOutput(options: InterceptProcessOutputOptions = {}): ProcessOutputInterception {
+export function createProcessOutputInterceptor(): ProcessOutputInterceptor {
   const storage = getCaseOutputStorage()
   const originalStdoutWrite = process.stdout.write
   const originalStderrWrite = process.stderr.write
@@ -88,15 +81,8 @@ export function interceptProcessOutput(options: InterceptProcessOutputOptions = 
   const writeStderr = (value: string): void => {
     originalStderrWrite.call(process.stderr, value)
   }
-  const onUnscopedOutput = options.onUnscopedOutput ?? ((stream, content) => {
-    if (stream === 'stderr') {
-      writeStderr(content)
-      return
-    }
-    writeStdout(content)
-  })
 
-  function createWrite(stream: CaseOutputStream): typeof process.stdout.write {
+  function createWrite(stream: CaseOutputStream, onUnscopedOutput: CaseOutputSink): typeof process.stdout.write {
     return (
       chunk: string | Uint8Array,
       encodingOrCallback?: BufferEncoding | StreamWriteCallback,
@@ -116,18 +102,14 @@ export function interceptProcessOutput(options: InterceptProcessOutputOptions = 
     }
   }
 
-  process.stdout.write = createWrite('stdout')
-  process.stderr.write = createWrite('stderr')
-
-  let restored = false
   return {
     restore() {
-      if (restored) {
-        return
-      }
-      restored = true
       process.stdout.write = originalStdoutWrite
       process.stderr.write = originalStderrWrite
+    },
+    start(onUnscopedOutput) {
+      process.stdout.write = createWrite('stdout', onUnscopedOutput)
+      process.stderr.write = createWrite('stderr', onUnscopedOutput)
     },
     writeStderr,
     writeStdout,
@@ -141,7 +123,7 @@ export function interceptProcessOutput(options: InterceptProcessOutputOptions = 
  * - the DSL runner executes one case and wants its stdout/stderr grouped per case
  *
  * Expects:
- * - output is captured only while {@link interceptProcessOutput} is active
+ * - output is captured only while {@link createProcessOutputInterceptor} is active
  * - async work started inside `run` keeps the scope through async context propagation
  *
  * Returns:

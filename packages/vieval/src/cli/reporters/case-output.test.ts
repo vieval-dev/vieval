@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { CaseOutputLines, createCaseOutputCollector, formatCaseOutputBlock, truncateToWidth } from './case-output'
+import { CaseOutputCollector, CaseOutputLines, createCaseOutputReporter, truncateToWidth } from './case-output'
 
 /**
  * @example
@@ -67,53 +67,6 @@ describe('caseOutputLines', () => {
 
 /**
  * @example
- * describe('formatCaseOutputBlock', () => {})
- */
-describe('formatCaseOutputBlock', () => {
-  const twelveLines = Array.from({ length: 12 }, (_, index) => ({ stream: 'stdout' as const, text: `line ${index + 1}` }))
-
-  /**
-   * @example
-   * it('collapses a passed case to its last 10 lines', () => {})
-   */
-  it('collapses a passed case to its last 10 lines', () => {
-    const block = formatCaseOutputBlock({ collapse: true, colors: false, durationMs: 2_000, header: 'task > case', lines: twelveLines, state: 'passed' })
-
-    /**
-     * @example
-     * expect(block.split('\n').slice(0, 3)).toEqual(['task > case', '[2 lines collapsed]', '│ line 3'])
-     */
-    expect(block.split('\n').slice(0, 3)).toEqual(['task > case', '[2 lines collapsed]', '│ line 3'])
-    /**
-     * @example
-     * expect(block.endsWith('│ line 12\n└─ Done in 2 seconds\n')).toBe(true)
-     */
-    expect(block.endsWith('│ line 12\n└─ Done in 2 seconds\n')).toBe(true)
-  })
-
-  /**
-   * @example
-   * it('keeps the full output and the error message of a failed case', () => {})
-   */
-  it('keeps the full output and the error message of a failed case', () => {
-    const block = formatCaseOutputBlock({ collapse: true, colors: false, durationMs: 500, errorMessage: 'boom', header: 'task > case', lines: twelveLines, state: 'failed' })
-
-    /**
-     * @example
-     * expect(block).not.toContain('collapsed')
-     */
-    expect(block).not.toContain('collapsed')
-    expect(block).toContain('│ line 1\n')
-    /**
-     * @example
-     * expect(block.endsWith('└─ Failed in 500ms: boom\n')).toBe(true)
-     */
-    expect(block.endsWith('└─ Failed in 500ms: boom\n')).toBe(true)
-  })
-})
-
-/**
- * @example
  * describe('truncateToWidth', () => {})
  */
 describe('truncateToWidth', () => {
@@ -136,20 +89,37 @@ describe('truncateToWidth', () => {
   })
 })
 
+function createCollector(options: { collapse?: boolean, holdUntilFlush?: boolean } = {}): { collector: CaseOutputCollector, writes: string[] } {
+  const writes: string[] = []
+  const collector = new CaseOutputCollector({
+    collapse: options.collapse ?? false,
+    colors: false,
+    getNow: () => 0,
+    holdUntilFlush: options.holdUntilFlush ?? false,
+    write: value => writes.push(value),
+  })
+  collector.onTaskQueued({ displayName: 'task', projectName: 'project', taskId: 'task-id' })
+  return { collector, writes }
+}
+
+function writeLines(collector: CaseOutputCollector, caseId: string, count: number): void {
+  for (let line = 1; line <= count; line += 1) {
+    collector.onCaseOutput({ caseId, content: `line ${line}\n`, stream: 'stdout', taskId: 'task-id' })
+  }
+}
+
 /**
  * @example
- * describe('createCaseOutputCollector', () => {})
+ * describe('caseOutputCollector', () => {})
  */
-describe('createCaseOutputCollector', () => {
+describe('caseOutputCollector', () => {
   /**
    * @example
-   * it('prints interleaved output of concurrent cases as one full block per case when each ends', () => {})
+   * it('prints interleaved output of concurrent cases as one block per case when each ends', () => {})
    */
-  it('prints interleaved output of concurrent cases as one full block per case when each ends', () => {
-    const writes: string[] = []
-    const collector = createCaseOutputCollector({ getNow: () => 0, write: value => writes.push(value) })
+  it('prints interleaved output of concurrent cases as one block per case when each ends', () => {
+    const { collector, writes } = createCollector()
 
-    collector.onTaskQueued({ displayName: 'task', projectName: 'project', taskId: 'task-id' })
     collector.onCaseStart({ caseId: 'a', caseName: 'case a', taskId: 'task-id' })
     collector.onCaseStart({ caseId: 'b', caseName: 'case b', taskId: 'task-id' })
     collector.onCaseOutput({ caseId: 'a', content: 'a1\n', stream: 'stdout', taskId: 'task-id' })
@@ -170,16 +140,44 @@ describe('createCaseOutputCollector', () => {
 
   /**
    * @example
-   * it('skips cases without output and flushes unfinished cases as stopped', () => {})
+   * it('collapses a passed case to its last 10 lines but keeps the full output of a failed case', () => {})
    */
-  it('skips cases without output and flushes unfinished cases as stopped', () => {
-    const writes: string[] = []
-    const collector = createCaseOutputCollector({ getNow: () => 0, write: value => writes.push(value) })
+  it('collapses a passed case to its last 10 lines but keeps the full output of a failed case', () => {
+    const { collector, writes } = createCollector({ collapse: true })
 
-    collector.onCaseStart({ caseId: 'quiet', caseName: 'quiet', taskId: 'task-id' })
-    collector.onCaseEnd({ caseId: 'quiet', state: 'passed', taskId: 'task-id' })
-    collector.onCaseStart({ caseId: 'busy', caseName: 'busy', taskId: 'task-id' })
-    collector.onCaseOutput({ caseId: 'busy', content: 'working', stream: 'stdout', taskId: 'task-id' })
+    for (const [caseId, state] of [['passed-case', 'passed'], ['failed-case', 'failed']] as const) {
+      collector.onCaseStart({ caseId, caseName: caseId, taskId: 'task-id' })
+      writeLines(collector, caseId, 12)
+      collector.onCaseEnd({ caseId, state, taskId: 'task-id' })
+    }
+
+    /**
+     * @example
+     * expect(writes[0]?.split('\n').slice(0, 3)).toEqual(['|project| task > passed-case', '[2 lines collapsed]', '│ line 3'])
+     */
+    expect(writes[0]?.split('\n').slice(0, 3)).toEqual(['|project| task > passed-case', '[2 lines collapsed]', '│ line 3'])
+    /**
+     * @example
+     * expect(writes[1]).not.toContain('collapsed')
+     */
+    expect(writes[1]).not.toContain('collapsed')
+    expect(writes[1]).toContain('│ line 1\n')
+  })
+
+  /**
+   * @example
+   * it('holds blocks until flush and prints them grouped by task and case order', () => {})
+   */
+  it('holds blocks until flush and prints them grouped by task and case order', () => {
+    const { collector, writes } = createCollector({ holdUntilFlush: true })
+    collector.onTaskQueued({ displayName: 'second', taskId: 'task-b' })
+
+    for (const [taskId, caseId] of [['task-b', 'b1'], ['task-id', 'a1'], ['task-id', 'a2']] as const) {
+      collector.onCaseStart({ caseId, caseName: caseId, taskId })
+      collector.onCaseOutput({ caseId, content: `${caseId}\n`, stream: 'stdout', taskId })
+    }
+    collector.onCaseEnd({ caseId: 'a2', state: 'passed', taskId: 'task-id' })
+    collector.onCaseEnd({ caseId: 'b1', state: 'passed', taskId: 'task-b' })
 
     /**
      * @example
@@ -188,6 +186,77 @@ describe('createCaseOutputCollector', () => {
     expect(writes).toEqual([])
 
     collector.flush()
+
+    /**
+     * @example
+     * expect(writes.map(block => block.split('\n')[0])).toEqual(['|project| task > a1', '|project| task > a2', 'second > b1'])
+     */
+    expect(writes.map(block => block.split('\n')[0])).toEqual(['|project| task > a1', '|project| task > a2', 'second > b1'])
+    /**
+     * @example
+     * expect(writes[0]).toContain('└─ Stopped after 0ms')
+     */
+    expect(writes[0]).toContain('└─ Stopped after 0ms')
+  })
+
+  /**
+   * @example
+   * it('keeps the case name for output written after the case ended', () => {})
+   */
+  it('keeps the case name for output written after the case ended', () => {
+    const { collector, writes } = createCollector()
+
+    collector.onCaseStart({ caseId: '0:timed-out', caseName: 'timed-out', taskId: 'task-id' })
+    collector.onCaseOutput({ caseId: '0:timed-out', content: 'before\n', stream: 'stdout', taskId: 'task-id' })
+    collector.onCaseEnd({ caseId: '0:timed-out', state: 'timeout', taskId: 'task-id' })
+    collector.onCaseOutput({ caseId: '0:timed-out', content: 'after\n', stream: 'stdout', taskId: 'task-id' })
+    collector.flush()
+
+    /**
+     * @example
+     * expect(writes[1]).toBe('|project| task > timed-out\n│ after\n└─ Wrote more output after the case ended\n')
+     */
+    expect(writes[1]).toBe('|project| task > timed-out\n│ after\n└─ Wrote more output after the case ended\n')
+  })
+
+  /**
+   * @example
+   * it('marks retries and prints cases of an ended task as stopped', () => {})
+   */
+  it('marks retries and prints cases of an ended task as stopped', () => {
+    const { collector, writes } = createCollector()
+
+    collector.onCaseStart({ caseId: 'flaky', caseName: 'flaky', taskId: 'task-id' })
+    collector.onCaseOutput({ caseId: 'flaky', content: 'try 1\n', stream: 'stdout', taskId: 'task-id' })
+    collector.onCaseStart({ autoRetry: 2, caseId: 'flaky', caseName: 'flaky', retryIndex: 1, taskId: 'task-id' })
+    collector.onCaseOutput({ caseId: 'flaky', content: 'try 2\n', stream: 'stdout', taskId: 'task-id' })
+    collector.onTaskEnd('task-id')
+
+    /**
+     * @example
+     * expect(writes).toEqual(['|project| task > flaky\n│ try 1\n│ ── retry 1/2 ──\n│ try 2\n└─ Stopped after 0ms\n'])
+     */
+    expect(writes).toEqual(['|project| task > flaky\n│ try 1\n│ ── retry 1/2 ──\n│ try 2\n└─ Stopped after 0ms\n'])
+  })
+})
+
+/**
+ * @example
+ * describe('createCaseOutputReporter', () => {})
+ */
+describe('createCaseOutputReporter', () => {
+  /**
+   * @example
+   * it('prints unfinished cases once even when dispose() is called twice', () => {})
+   */
+  it('prints unfinished cases once even when dispose() is called twice', () => {
+    const writes: string[] = []
+    const reporter = createCaseOutputReporter({ getNow: () => 0, write: value => writes.push(value) })
+
+    reporter.onCaseStart({ caseId: 'busy', taskId: 'task-id' })
+    reporter.onCaseOutput({ caseId: 'busy', content: 'working', stream: 'stdout', taskId: 'task-id' })
+    reporter.dispose()
+    reporter.dispose()
 
     /**
      * @example
