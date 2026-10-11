@@ -1,5 +1,12 @@
 import type { CaseOutputStream } from '../../core/runner/case-output'
-import type { CliReporterCaseEndPayload, CliReporterCaseOutputPayload, CliReporterCaseState } from './types'
+import type {
+  CliReporter,
+  CliReporterCaseEndPayload,
+  CliReporterCaseOutputPayload,
+  CliReporterCaseStartPayload,
+  CliReporterCaseState,
+  CliReporterTaskQueuedPayload,
+} from './types'
 
 import { stripVTControlCharacters } from 'node:util'
 
@@ -25,61 +32,25 @@ export const CASE_OUTPUT_VISIBLE_LINES = 10
 const SEGMENTER = new Intl.Segmenter()
 
 /**
- * Inputs for {@link formatCaseOutputBlock}.
+ * Options for {@link CaseOutputCollector}.
  */
-export interface CaseOutputBlockOptions {
+export interface CaseOutputCollectorOptions {
   /**
    * Keeps only the last {@link CASE_OUTPUT_VISIBLE_LINES} lines of a passed case.
    */
   collapse: boolean
   /**
-   * Enables ANSI colors.
+   * Enables ANSI colors in printed blocks.
    */
   colors: boolean
-  /**
-   * Wall time the case ran for.
-   */
-  durationMs: number
-  /**
-   * Failure message shown on the status line of failed and timed-out cases.
-   */
-  errorMessage?: string
-  /**
-   * Header line naming the case, for example `|project| task > case`.
-   */
-  header: string
-  /**
-   * Captured output lines.
-   */
-  lines: readonly CaseOutputLine[]
-  /**
-   * Terminal case state, or `stopped` when the task ended before the case reported its result.
-   */
-  state: 'stopped' | CliReporterCaseState
-}
-
-/**
- * Buffers case output for reporters without a live window and prints one block per case.
- */
-export interface CaseOutputCollector {
-  /**
-   * Prints blocks of cases that never ended, for example after an interrupted run.
-   */
-  flush: () => void
-  onCaseEnd: (payload: CliReporterCaseEndPayload) => void
-  onCaseOutput: (payload: CliReporterCaseOutputPayload) => void
-  onCaseStart: (payload: { caseId: string, caseName?: string, taskId: string }) => void
-  onTaskQueued: (payload: { displayName?: string, projectName?: string, taskId: string }) => void
-}
-
-/**
- * Options for {@link createCaseOutputCollector}.
- */
-export interface CaseOutputCollectorOptions {
   /**
    * Returns milliseconds from a monotonic or deterministic clock.
    */
   getNow: () => number
+  /**
+   * Holds every block until {@link CaseOutputCollector.flush} instead of printing it when its case ends.
+   */
+  holdUntilFlush: boolean
   /**
    * Writes one finished case block.
    */
@@ -87,18 +58,205 @@ export interface CaseOutputCollectorOptions {
 }
 
 /**
- * One complete output line written by a case.
+ * One output line written by a case.
  */
 export interface CaseOutputLine {
   stream: CaseOutputStream
   text: string
 }
 
-interface CollectedCase {
+/**
+ * Status shown on the last line of a block.
+ *
+ * - `late`: output written after the case's block was already printed (a timed-out case that kept running)
+ * - `stopped`: the task ended before the case reported its result
+ */
+type CaseOutputBlockState = 'late' | 'stopped' | CliReporterCaseState
+
+interface CaseOutputEntry {
   caseName: string
-  output: CaseOutputLines
+  durationMs?: number
+  errorMessage?: string
+  lines: CaseOutputLines
+  order: number
   startedAt: number
+  state?: CaseOutputBlockState
   taskId: string
+}
+
+interface CaseOutputTask {
+  displayName?: string
+  order: number
+  projectName?: string
+}
+
+/**
+ * Tracks the output of every case in a run and prints it as pnpm-style blocks.
+ *
+ * Use when:
+ * - a reporter must group concurrent case output per case instead of interleaving it
+ *
+ * Expects:
+ * - lifecycle calls follow the run order; `onCaseEnd` arrives once per case, after retries
+ * - repeated or out-of-order calls for an ended case are ignored
+ *
+ * Returns:
+ * - nothing directly; blocks go to `write` when a case ends, or on `flush()` with `holdUntilFlush`
+ *
+ * Call stack:
+ *
+ * runCaseOnce (../../dsl/task)
+ *   -> process.stdout.write
+ *     -> {@link CaseOutputCollector.onCaseOutput}
+ * executeRegisteredCase (../../dsl/task)
+ *   -> {@link CaseOutputCollector.onCaseEnd}
+ *     -> block written now, or held until {@link CaseOutputCollector.flush}
+ */
+export class CaseOutputCollector {
+  private readonly cases = new Map<string, CaseOutputEntry>()
+  private readonly options: CaseOutputCollectorOptions
+  private readonly tasks = new Map<string, CaseOutputTask>()
+
+  constructor(options: CaseOutputCollectorOptions) {
+    this.options = options
+  }
+
+  /**
+   * Prints every block not printed yet, grouped by task in queue order and cases in start order.
+   * Cases still running are printed as stopped.
+   */
+  flush(): void {
+    const entries = [...this.cases.values()].sort((left, right) =>
+      this.getTask(left.taskId).order - this.getTask(right.taskId).order || left.order - right.order)
+    this.cases.clear()
+
+    for (const entry of entries) {
+      this.writeBlock(entry, entry.state ?? 'stopped')
+    }
+  }
+
+  /**
+   * Lines captured so far for one case, for live tails.
+   */
+  linesOf(taskId: string, caseId: string): readonly CaseOutputLine[] {
+    return this.cases.get(createCaseKey(taskId, caseId))?.lines.lines ?? []
+  }
+
+  onCaseEnd(payload: CliReporterCaseEndPayload): void {
+    const entry = this.cases.get(createCaseKey(payload.taskId, payload.caseId))
+    if (entry == null || entry.state != null) {
+      return
+    }
+    this.endCase(entry, payload.state, payload.errorMessage)
+  }
+
+  onCaseOutput(payload: CliReporterCaseOutputPayload): void {
+    this.getCase(payload.taskId, payload.caseId).lines.append(payload.stream, payload.content)
+  }
+
+  onCaseStart(payload: CliReporterCaseStartPayload & { caseName?: string }): void {
+    const entry = this.getCase(payload.taskId, payload.caseId)
+    if (entry.state != null) {
+      return
+    }
+    if (payload.retryIndex != null && payload.retryIndex > 0 && entry.lines.lines.length > 0) {
+      entry.lines.appendMarker(`── retry ${payload.retryIndex}/${payload.autoRetry ?? payload.retryIndex} ──`)
+    }
+    entry.caseName = payload.caseName ?? entry.caseName
+  }
+
+  /**
+   * Marks the cases of an ended task that never reported a result as stopped.
+   */
+  onTaskEnd(taskId: string): void {
+    for (const entry of this.cases.values()) {
+      if (entry.taskId === taskId && entry.state == null) {
+        this.endCase(entry, 'stopped')
+      }
+    }
+  }
+
+  onTaskQueued(payload: CliReporterTaskQueuedPayload & { displayName?: string, projectName?: string }): void {
+    const task = this.getTask(payload.taskId)
+    task.displayName = payload.displayName ?? task.displayName
+    task.projectName = payload.projectName ?? task.projectName
+  }
+
+  private endCase(entry: CaseOutputEntry, state: CaseOutputBlockState, errorMessage?: string): void {
+    entry.state = state
+    entry.errorMessage = errorMessage
+    entry.durationMs = Math.max(0, this.options.getNow() - entry.startedAt)
+    if (this.options.holdUntilFlush) {
+      return
+    }
+
+    this.writeBlock(entry, state)
+    // Keep the entry so output written after the case ended still knows its case name.
+    entry.lines = new CaseOutputLines()
+    entry.state = 'late'
+  }
+
+  private getCase(taskId: string, caseId: string): CaseOutputEntry {
+    const key = createCaseKey(taskId, caseId)
+    const existing = this.cases.get(key)
+    if (existing != null) {
+      return existing
+    }
+
+    const created: CaseOutputEntry = {
+      caseName: caseId,
+      lines: new CaseOutputLines(),
+      order: this.cases.size,
+      startedAt: this.options.getNow(),
+      taskId,
+    }
+    this.cases.set(key, created)
+    return created
+  }
+
+  private getTask(taskId: string): CaseOutputTask {
+    const existing = this.tasks.get(taskId)
+    if (existing != null) {
+      return existing
+    }
+
+    const created = { order: this.tasks.size }
+    this.tasks.set(taskId, created)
+    return created
+  }
+
+  private writeBlock(entry: CaseOutputEntry, state: CaseOutputBlockState): void {
+    const lines = entry.lines.lines
+    if (lines.length === 0) {
+      return
+    }
+
+    const color = (paint: (value: string) => string, value: string): string => this.options.colors ? paint(value) : value
+    const shownLines = this.options.collapse && state === 'passed' && lines.length > CASE_OUTPUT_VISIBLE_LINES
+      ? lines.slice(-CASE_OUTPUT_VISIBLE_LINES)
+      : lines
+    const collapsedCount = lines.length - shownLines.length
+    const duration = formatHumanDuration(entry.durationMs ?? Math.max(0, this.options.getNow() - entry.startedAt))
+    const message = entry.errorMessage == null ? '' : `: ${entry.errorMessage}`
+    const status = {
+      failed: color(c.red, `Failed in ${duration}${message}`),
+      late: color(c.yellow, 'Wrote more output after the case ended'),
+      passed: color(c.magentaBright, `Done in ${duration}`),
+      skipped: color(c.yellow, `Skipped after ${duration}`),
+      stopped: color(c.yellow, `Stopped after ${duration}`),
+      timeout: color(c.yellow, `Timed out in ${duration}${message}`),
+    }[state]
+    const task = this.getTask(entry.taskId)
+    const project = task.projectName == null ? '' : color(c.dim, `|${task.projectName}| `)
+
+    this.options.write([
+      `${project}${task.displayName ?? entry.taskId} ${color(c.dim, '>')} ${entry.caseName}`,
+      ...(collapsedCount > 0 ? [`[${collapsedCount} lines collapsed]`] : []),
+      ...shownLines.map(line => `${color(c.magentaBright, '│')} ${line.stream === 'stderr' ? color(c.gray, line.text) : line.text}`),
+      `${color(c.magentaBright, '└─')} ${status}`,
+      '',
+    ].join('\n'))
+  }
 }
 
 /**
@@ -117,183 +275,71 @@ export class CaseOutputLines {
   /**
    * Captured lines, including a trailing line that has no newline yet.
    */
-  get lines(): readonly CaseOutputLine[] {
-    return this.partial == null ? this.completeLines : [...this.completeLines, this.partial]
-  }
+  readonly lines: CaseOutputLine[] = []
 
-  private readonly completeLines: CaseOutputLine[] = []
-
-  private partial: CaseOutputLine | undefined
+  private lastLineOpen = false
 
   /**
    * Appends one raw chunk.
    */
   append(stream: CaseOutputStream, content: string): void {
+    if (content.length === 0) {
+      return
+    }
+
     const pieces = content.split('\n')
-
     for (const [index, piece] of pieces.entries()) {
-      const isLast = index === pieces.length - 1
-      if (isLast && piece.length === 0) {
-        break
+      const lastLine = this.lines.at(-1)
+      // A chunk on another stream starts a new line instead of joining the open one.
+      if (index === 0 && this.lastLineOpen && lastLine?.stream === stream) {
+        lastLine.text = normalizeOutputLine(`${lastLine.text}${piece}`)
+        continue
       }
-
-      // A chunk on another stream ends the pending partial line instead of joining it.
-      if (this.partial != null && this.partial.stream !== stream) {
-        this.completeLines.push(this.partial)
-        this.partial = undefined
+      // The empty piece after a trailing newline is not a line.
+      if (index === pieces.length - 1 && piece.length === 0) {
+        continue
       }
-
-      const text = `${this.partial?.text ?? ''}${piece}`
-      this.partial = undefined
-      if (isLast) {
-        this.partial = { stream, text }
-        break
-      }
-      this.completeLines.push({ stream, text: normalizeOutputLine(text) })
+      this.lines.push({ stream, text: normalizeOutputLine(piece) })
     }
-
-    if (this.partial != null) {
-      this.partial = { stream, text: normalizeOutputLine(this.partial.text) }
-    }
+    this.lastLineOpen = pieces.at(-1) !== ''
   }
 
   /**
    * Appends one separator line written by the reporter itself, for example a retry marker.
    */
   appendMarker(text: string): void {
-    if (this.partial != null) {
-      this.completeLines.push(this.partial)
-      this.partial = undefined
-    }
-    this.completeLines.push({ stream: 'stdout', text })
+    this.lines.push({ stream: 'stdout', text })
+    this.lastLineOpen = false
   }
 }
 
 /**
- * Creates the case output grouping used when stdout is not a TTY (CI logs, pipes).
+ * Creates the reporter used when stdout is not a TTY (CI logs, pipes).
  *
  * Use when:
- * - concurrent case output must stay readable without a live terminal window
+ * - there is no live window, but concurrent case output must stay readable
  *
  * Expects:
- * - lifecycle calls follow the run order; `onCaseEnd` arrives once per case after retries
+ * - `dispose()` runs once the run settles
  *
  * Returns:
- * - a collector that prints each case's full output as one block when the case ends; nothing is collapsed,
- *   because a log file has no live view to recover hidden lines from
+ * - a reporter that prints each case's full output as one block when the case ends and nothing else;
+ *   nothing is collapsed, because a log file has no live view to recover hidden lines from
  */
-export function createCaseOutputCollector(options: CaseOutputCollectorOptions): CaseOutputCollector {
-  const tasks = new Map<string, { displayName?: string, projectName?: string }>()
-  const cases = new Map<string, CollectedCase>()
-
-  function getCase(taskId: string, caseId: string, caseName?: string): CollectedCase {
-    const key = `${taskId}\u0000${caseId}`
-    const existing = cases.get(key)
-    if (existing != null) {
-      return existing
-    }
-    const created = { caseName: caseName ?? caseId, output: new CaseOutputLines(), startedAt: options.getNow(), taskId }
-    cases.set(key, created)
-    return created
-  }
-
-  function writeCase(collected: CollectedCase, state: CaseOutputBlockOptions['state'], errorMessage?: string): void {
-    if (collected.output.lines.length === 0) {
-      return
-    }
-    const task = tasks.get(collected.taskId)
-    options.write(formatCaseOutputBlock({
-      collapse: false,
-      colors: false,
-      durationMs: options.getNow() - collected.startedAt,
-      errorMessage,
-      header: formatCaseOutputHeader(task?.projectName, task?.displayName ?? collected.taskId, collected.caseName),
-      lines: collected.output.lines,
-      state,
-    }))
-  }
+export function createCaseOutputReporter(options: Pick<CaseOutputCollectorOptions, 'getNow' | 'write'>): CliReporter {
+  const collector = new CaseOutputCollector({ ...options, collapse: false, colors: false, holdUntilFlush: false })
 
   return {
-    flush() {
-      for (const collected of cases.values()) {
-        writeCase(collected, 'stopped')
-      }
-      cases.clear()
-    },
-    onCaseEnd(payload) {
-      const key = `${payload.taskId}\u0000${payload.caseId}`
-      const collected = cases.get(key)
-      if (collected == null) {
-        return
-      }
-      cases.delete(key)
-      writeCase(collected, payload.state, payload.errorMessage)
-    },
-    onCaseOutput(payload) {
-      getCase(payload.taskId, payload.caseId).output.append(payload.stream, payload.content)
-    },
-    onCaseStart(payload) {
-      const collected = getCase(payload.taskId, payload.caseId, payload.caseName)
-      collected.caseName = payload.caseName ?? collected.caseName
-    },
-    onTaskQueued(payload) {
-      const task = tasks.get(payload.taskId) ?? {}
-      task.displayName = payload.displayName ?? task.displayName
-      task.projectName = payload.projectName ?? task.projectName
-      tasks.set(payload.taskId, task)
-    },
+    dispose: () => collector.flush(),
+    onCaseEnd: payload => collector.onCaseEnd(payload),
+    onCaseOutput: payload => collector.onCaseOutput(payload),
+    onCaseStart: payload => collector.onCaseStart(payload),
+    onRunEnd() {},
+    onRunStart() {},
+    onTaskEnd: payload => collector.onTaskEnd(payload.taskId),
+    onTaskQueued: payload => collector.onTaskQueued(payload),
+    onTaskStart() {},
   }
-}
-
-/**
- * Formats the static block printed once a case ends.
- *
- * Use when:
- * - a reporter replaces a case's live output with its final, pnpm-style collapsed form
- *
- * Expects:
- * - `lines` is non-empty; cases without output print no block
- *
- * Returns:
- * - the block text, ending with a newline
- */
-export function formatCaseOutputBlock(options: CaseOutputBlockOptions): string {
-  const color = (paint: (value: string) => string, value: string): string => options.colors ? paint(value) : value
-  const bar = color(c.magentaBright, '│')
-  const shownLines = options.collapse && options.state === 'passed' && options.lines.length > CASE_OUTPUT_VISIBLE_LINES
-    ? options.lines.slice(-CASE_OUTPUT_VISIBLE_LINES)
-    : options.lines
-  const collapsedCount = options.lines.length - shownLines.length
-  const duration = formatHumanDuration(options.durationMs)
-  const message = options.errorMessage == null ? '' : `: ${options.errorMessage}`
-  const status = {
-    failed: color(c.red, `Failed in ${duration}${message}`),
-    passed: color(c.magentaBright, `Done in ${duration}`),
-    skipped: color(c.yellow, `Skipped after ${duration}`),
-    stopped: color(c.yellow, `Stopped after ${duration}`),
-    timeout: color(c.yellow, `Timed out in ${duration}${message}`),
-  }[options.state]
-
-  return [
-    options.header,
-    ...(collapsedCount > 0 ? [`[${collapsedCount} lines collapsed]`] : []),
-    ...shownLines.map(line => `${bar} ${line.stream === 'stderr' ? color(c.gray, line.text) : line.text}`),
-    `${color(c.magentaBright, '└─')} ${status}`,
-    '',
-  ].join('\n')
-}
-
-/**
- * Formats the header line naming one case.
- *
- * Before:
- * - project "demo", task "episodes [repeat=1]", case "chrome/open"
- *
- * After:
- * - "|demo| episodes [repeat=1] > chrome/open"
- */
-export function formatCaseOutputHeader(projectName: string | undefined, taskName: string, caseName: string): string {
-  return `${projectName == null ? '' : `|${projectName}| `}${taskName} > ${caseName}`
 }
 
 /**
@@ -324,6 +370,10 @@ export function truncateToWidth(text: string, width: number): string {
     resultWidth += segmentWidth
   }
   return `${result}…`
+}
+
+function createCaseKey(taskId: string, caseId: string): string {
+  return `${taskId}\u0000${caseId}`
 }
 
 /**

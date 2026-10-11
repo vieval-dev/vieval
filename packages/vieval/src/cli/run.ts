@@ -16,14 +16,13 @@ import c from 'tinyrainbow'
 import { errorMessageFrom } from '@moeru/std'
 
 import { collectEvalEntries, createFilesystemTaskCacheRuntime, createRunnerRuntimeContext, createRunnerSchedule, createSchedulerRuntime, createTaskExecutionContext, RunnerExecutionError, runScheduledTasks } from '../core/runner'
-import { interceptProcessOutput } from '../core/runner/case-output'
+import { createProcessOutputInterceptor } from '../core/runner/case-output'
 import { createNoopTelemetryRuntime, createOpenTelemetryRuntime } from '../core/telemetry'
 import { loadVievalCliConfig } from './config'
 import { discoverEvalFiles } from './discovery'
 import { loadEvalModulesWithVitestRuntime } from './module-runtime'
 import { writeRunReportArtifacts } from './report-artifacts'
 import { createCliReporter } from './reporters'
-import { createCaseOutputCollector } from './reporters/case-output'
 import { WindowRenderer } from './reporters/renderers/windowed-renderer'
 import { createVievalVitestCompatReporterBridge } from './reporters/vitest-compat-reporter'
 
@@ -802,6 +801,30 @@ function createExperimentMatrixRows(tasks: readonly ScheduledTask[]): string[] {
   return [...rows].sort((left, right) => left.localeCompare(right))
 }
 
+function createLiveRenderer(
+  reporter: SummaryReporter,
+  options: RunVievalCliReporterOptions | undefined,
+  output: { getColumns: () => number, getRows: () => number | undefined, writeOutput: (value: string) => void },
+): WindowRenderer {
+  const rendererBaseOptions = {
+    getColumns: output.getColumns,
+    getWindow: () => reporter.getWindowRows({
+      maxRows: normalizeLiveReporterMaxRows(output.getRows()),
+    }),
+    queueRenderReset: options?.queueRenderReset,
+    supportsAnsiWindowing: options?.supportsAnsiWindowing,
+    writeOutput: output.writeOutput,
+  }
+
+  return options?.clearInterval != null && options.createInterval != null
+    ? new WindowRenderer({
+        ...rendererBaseOptions,
+        clearInterval: options.clearInterval,
+        createInterval: options.createInterval,
+      })
+    : new WindowRenderer(rendererBaseOptions)
+}
+
 function createProjectBadge(name: string, colors: CliColorPalette, colorEnabled: boolean): string {
   if (!colorEnabled || !c.isColorSupported) {
     return `|${name}| `
@@ -917,32 +940,21 @@ function createRunIdentity(
  *
  * {@link runVievalCli}
  *   -> {@link createRunReporter}
- *     -> {@link interceptProcessOutput}
- *       -> case output (TTY): {@link SummaryReporter.onCaseOutput} -> live tail -> collapsed block at run end
- *       -> case output (non-TTY): {@link createCaseOutputCollector} -> full block on case end
+ *     -> {@link createProcessOutputInterceptor}
+ *       -> case output: {@link CliReporter.onCaseOutput} ({@link createCliReporter} picks TTY or non-TTY)
  *       -> other output: {@link WindowRenderer.write} (TTY) or the original stream
  */
 function createRunReporter(options: RunVievalCliReporterOptions | undefined): CliRunReporter {
-  let renderer: undefined | WindowRenderer
-  // Output written outside of a case (for example by project executors or plugins) is printed
-  // above the live window instead of tearing through it.
-  const processOutput = interceptProcessOutput({
-    onUnscopedOutput: (stream, content) => {
-      if (renderer != null) {
-        renderer.write(content)
-        return
-      }
-      writeStream(stream, content)
-    },
-  })
+  const processOutput = createProcessOutputInterceptor()
   const writeOutput = options?.writeOutput ?? processOutput.writeStdout
   const writeError = options?.writeError ?? processOutput.writeStderr
   const getColumns = options?.getColumns ?? (() => process.stdout.columns ?? 80)
-  const getNow = options?.getNow ?? (() => Date.now())
   const getRows = options?.getRows ?? (() => process.stdout.rows)
+  // The reporter writes through the renderer, and the renderer draws the reporter's rows.
+  let renderer: undefined | WindowRenderer
   const reporter = createCliReporter({
     getColumns,
-    getNow,
+    getNow: options?.getNow ?? (() => Date.now()),
     getWallClockNow: options?.getWallClockNow ?? (() => Date.now()),
     isTTY: options?.isTTY ?? (process.stdout.isTTY === true),
     slowThresholdMs: options?.slowThresholdMs ?? 300,
@@ -950,108 +962,47 @@ function createRunReporter(options: RunVievalCliReporterOptions | undefined): Cl
     // Case blocks printed at run end must land above the live window, not inside it.
     writeOutput: value => renderer == null ? writeOutput(value) : renderer.write(value),
   })
+  renderer = isSummaryReporter(reporter)
+    ? createLiveRenderer(reporter, options, { getColumns, getRows, writeOutput })
+    : undefined
 
-  function writeStream(stream: 'stderr' | 'stdout', value: string): void {
-    if (stream === 'stderr') {
-      writeError(value)
+  // Output written outside of a case (for example by project executors or plugins) is printed
+  // above the live window instead of tearing through it.
+  processOutput.start((stream, content) => {
+    if (renderer != null) {
+      renderer.write(content)
       return
     }
-    writeOutput(value)
-  }
-
-  if (!isSummaryReporter(reporter)) {
-    // Without a live window, case output is printed in full as one block per case when the case ends.
-    const caseOutput = createCaseOutputCollector({ getNow, write: writeOutput })
-
-    return {
-      ...reporter,
-      dispose() {
-        caseOutput.flush()
-        processOutput.restore()
-        reporter.dispose()
-      },
-      onCaseEnd(payload) {
-        reporter.onCaseEnd(payload)
-        caseOutput.onCaseEnd(payload)
-      },
-      onCaseOutput(payload) {
-        reporter.onCaseOutput(payload)
-        caseOutput.onCaseOutput(payload)
-      },
-      onCaseStart(payload) {
-        reporter.onCaseStart(payload)
-        caseOutput.onCaseStart(payload)
-      },
-      onTaskQueued(payload) {
-        reporter.onTaskQueued(payload)
-        caseOutput.onTaskQueued(payload)
-      },
+    if (stream === 'stderr') {
+      writeError(content)
+      return
     }
-  }
+    writeOutput(content)
+  })
+  renderer?.start()
 
-  const rendererBaseOptions = {
-    getColumns,
-    getWindow: () => reporter.getWindowRows({
-      maxRows: normalizeLiveReporterMaxRows(getRows()),
-    }),
-    queueRenderReset: options?.queueRenderReset,
-    supportsAnsiWindowing: options?.supportsAnsiWindowing,
-    writeOutput,
-  }
-  const liveRenderer = options?.clearInterval != null && options.createInterval != null
-    ? new WindowRenderer({
-        ...rendererBaseOptions,
-        clearInterval: options.clearInterval,
-        createInterval: options.createInterval,
-      })
-    : new WindowRenderer(rendererBaseOptions)
-  renderer = liveRenderer
-
-  liveRenderer.start()
-
-  function scheduleRender(): void {
-    liveRenderer.schedule()
+  // Every lifecycle event can change the live window; `schedule()` renders at most once per reset window.
+  function withRender<TPayload>(handle: (payload: TPayload) => void): (payload: TPayload) => void {
+    return (payload) => {
+      handle(payload)
+      renderer?.schedule()
+    }
   }
 
   return {
     dispose() {
       processOutput.restore()
       reporter.dispose()
-      liveRenderer.dispose()
+      renderer?.dispose()
     },
-    onCaseEnd(payload) {
-      reporter.onCaseEnd(payload)
-      scheduleRender()
-    },
-    onCaseOutput(payload) {
-      reporter.onCaseOutput(payload)
-      // `schedule()` renders at most once per reset window, so chatty cases do not redraw per chunk.
-      scheduleRender()
-    },
-    onCaseStart(payload) {
-      reporter.onCaseStart(payload)
-      scheduleRender()
-    },
-    onRunEnd(payload) {
-      reporter.onRunEnd(payload)
-      scheduleRender()
-    },
-    onRunStart(payload) {
-      reporter.onRunStart(payload)
-      scheduleRender()
-    },
-    onTaskEnd(payload) {
-      reporter.onTaskEnd(payload)
-      scheduleRender()
-    },
-    onTaskQueued(payload) {
-      reporter.onTaskQueued(payload)
-      scheduleRender()
-    },
-    onTaskStart(payload) {
-      reporter.onTaskStart(payload)
-      scheduleRender()
-    },
+    onCaseEnd: withRender(payload => reporter.onCaseEnd(payload)),
+    onCaseOutput: withRender(payload => reporter.onCaseOutput(payload)),
+    onCaseStart: withRender(payload => reporter.onCaseStart(payload)),
+    onRunEnd: withRender(payload => reporter.onRunEnd(payload)),
+    onRunStart: withRender(payload => reporter.onRunStart(payload)),
+    onTaskEnd: withRender(payload => reporter.onTaskEnd(payload)),
+    onTaskQueued: withRender(payload => reporter.onTaskQueued(payload)),
+    onTaskStart: withRender(payload => reporter.onTaskStart(payload)),
   }
 }
 

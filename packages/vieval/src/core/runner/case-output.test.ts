@@ -6,7 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 
 import { describe, expect, it } from 'vitest'
 
-import { interceptProcessOutput, runWithCaseOutput } from './case-output'
+import { createProcessOutputInterceptor, runWithCaseOutput } from './case-output'
 
 interface CapturedChunk {
   content: string
@@ -16,18 +16,17 @@ interface CapturedChunk {
 
 /**
  * @example
- * describe('interceptProcessOutput', () => {})
+ * describe('createProcessOutputInterceptor', () => {})
  */
-describe('interceptProcessOutput', () => {
+describe('createProcessOutputInterceptor', () => {
   /**
    * @example
    * it('attributes interleaved writes of concurrent scopes to their own sink', async () => {})
    */
   it('attributes interleaved writes of concurrent scopes to their own sink', async () => {
     const chunks: CapturedChunk[] = []
-    const interception = interceptProcessOutput({
-      onUnscopedOutput: (stream, content) => chunks.push({ content, owner: 'unscoped', stream }),
-    })
+    const interception = createProcessOutputInterceptor()
+    interception.start((stream, content) => chunks.push({ content, owner: 'unscoped', stream }))
 
     try {
       await Promise.all(['alpha', 'beta'].map(async owner => await runWithCaseOutput(
@@ -69,9 +68,8 @@ describe('interceptProcessOutput', () => {
    */
   it('decodes buffer chunks and still invokes the write callback', async () => {
     const contents: string[] = []
-    const interception = interceptProcessOutput({
-      onUnscopedOutput: (_stream, content) => contents.push(content),
-    })
+    const interception = createProcessOutputInterceptor()
+    interception.start((_stream, content) => contents.push(content))
 
     try {
       await new Promise<void>((resolve) => {
@@ -96,7 +94,8 @@ describe('interceptProcessOutput', () => {
   it('restores the original stream writers', () => {
     const originalStdoutWrite = process.stdout.write
     const originalStderrWrite = process.stderr.write
-    const interception = interceptProcessOutput({ onUnscopedOutput: () => {} })
+    const interception = createProcessOutputInterceptor()
+    interception.start(() => {})
 
     interception.restore()
     interception.restore()
