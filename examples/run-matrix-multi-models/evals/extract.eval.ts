@@ -9,6 +9,6 @@ async function scoreExtract(input: number) {
 describeTask('sleep-matrix', () => {
   caseOf('sleep mock', async (context) => {
     const res = await extract()
-    context.score(await scoreExtract(res))
+    context.recordScore(await scoreExtract(res))
   })
 })

@@ -46,10 +46,10 @@ const inputs = [
 ]
 
 describeTask('addition', ({ casesFromInputs }) => {
-  casesFromInputs('addition', inputs, ({ matrix, metric }) => {
+  casesFromInputs('addition', inputs, ({ matrix, recordMetric }) => {
     const { a, b, expected } = matrix.inputs.input
 
-    metric('benchmark.case.id', matrix.inputs.name)
+    recordMetric('benchmark.case.id', matrix.inputs.name)
     expect(a + b).toBe(expected)
   })
 })

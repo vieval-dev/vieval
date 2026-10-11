@@ -316,13 +316,13 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
   it('supports custom exact/judge scores while keeping describeTask case semantics', async () => {
     const taskDefinition = describeTask('dsl-custom-scores', () => {
       caseOf('case-1', (context) => {
-        context.score(0.8)
-        context.score(0.6, 'judge')
+        context.recordScore(0.8)
+        context.recordScore(0.6, 'judge')
       }, { input: {} })
 
       caseOf('case-2', (context) => {
-        context.score(0.2)
-        context.score(0.4, 'judge')
+        context.recordScore(0.2)
+        context.recordScore(0.4, 'judge')
       }, { input: {} })
     })
 
@@ -358,7 +358,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const taskDefinition = describeTask('dsl-case-metrics', () => {
       caseOf('case-1', (context) => {
-        context.metric('overallAverageScore', 0.77)
+        context.recordMetric('overallAverageScore', 0.77)
       }, { input: {} })
     })
 
@@ -407,8 +407,8 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const taskDefinition = describeTask('dsl-reporter-event-isolation', () => {
       caseOf('case-1', (context) => {
-        context.score(0.42)
-        context.metric('customMetric', 0.9)
+        context.recordScore(0.42)
+        context.recordMetric('customMetric', 0.9)
       }, { input: {} })
     })
 
@@ -455,9 +455,9 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const taskDefinition = describeTask('dsl-case-telemetry', () => {
       caseOf('case-1', (context) => {
-        context.score(0.75, 'exact')
-        context.metric('benchmark.id', 'locomo')
-        context.metric('benchmark.tags', ['retrieval', 'qa'])
+        context.recordScore(0.75, 'exact')
+        context.recordMetric('benchmark.id', 'locomo')
+        context.recordMetric('benchmark.tags', ['retrieval', 'qa'])
       }, { input: {} })
     })
 

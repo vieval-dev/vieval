@@ -29,7 +29,7 @@ export interface CaseRunContext<TInput> extends TaskRunContext {
    */
   matrix: TaskRunContext['task']['matrix'] & { inputs: TInput }
   /**
-   * Emits one custom case metric into report events.
+   * Records one custom case metric into report events.
    *
    * Use when:
    * - tasks need structured benchmark metadata beyond exact/judge score families
@@ -38,9 +38,9 @@ export interface CaseRunContext<TInput> extends TaskRunContext {
    * - `name` to be a stable metric identifier
    * - `value` to be JSON-serializable
    */
-  metric: (name: string, value: TelemetryAttributeValue) => void
+  recordMetric: (name: string, value: TelemetryAttributeValue) => void
   /**
-   * Overrides one case score family with a custom normalized value.
+   * Records a custom normalized value for one case score family, replacing an earlier value of the same kind.
    *
    * Use when:
    * - one case computes a benchmark-native score that should flow into run aggregation
@@ -48,7 +48,7 @@ export interface CaseRunContext<TInput> extends TaskRunContext {
    * Expects:
    * - `score` to stay in the `0..1` range
    */
-  score: (score: number, kind?: RunScoreKind) => void
+  recordScore: (score: number, kind?: RunScoreKind) => void
   /**
    * Cooperative abort signal for the current case execution.
    */
@@ -422,7 +422,7 @@ async function runCaseOnce(
           ...cloneCaseMatrix(context.task.matrix),
           inputs: taskCase.input,
         },
-        metric(name, value) {
+        recordMetric(name, value) {
           if (abortController.signal.aborted || settled) {
             return
           }
@@ -440,7 +440,7 @@ async function runCaseOnce(
             telemetry.setAttributes({ [name]: value })
           }
         },
-        score(score, kind = 'exact') {
+        recordScore(score, kind = 'exact') {
           if (abortController.signal.aborted || settled) {
             return
           }
