@@ -670,10 +670,10 @@ import { caseOf, describeTask } from '${vievalImportPath}'
 
 describeTask('semantic-artifact-task', () => {
   caseOf('semantic-artifact-case', (context) => {
-    context.metric('benchmark.id', 'locomo')
-    context.metric('benchmark.case.id', 'case-semantic')
-    context.metric('benchmark.locomo.category', 2)
-    context.score(0.75)
+    context.recordMetric('benchmark.id', 'locomo')
+    context.recordMetric('benchmark.case.id', 'case-semantic')
+    context.recordMetric('benchmark.locomo.category', 2)
+    context.recordScore(0.75)
     return {
       answer: '7 May 2023',
     }

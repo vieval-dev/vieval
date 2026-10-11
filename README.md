@@ -176,7 +176,7 @@ Each scheduled task receives stable matrix metadata:
 - `project`: one eval task project with discovery rules, model registrations, optional executor, matrix layers, and scoring/reporting behavior.
 - `experiment`: run metadata derived from explicit `--experiment` or, when omitted, stable matrix row metadata. It does not create an extra scheduler layer.
 - `task`: one eval definition discovered from files and expanded across inference executors plus run/eval matrix rows.
-- `case`: the scoring and evidence source inside a task. `context.score(...)` contributes normalized score evidence; `context.metric(...)` emits benchmark metadata for reports.
+- `case`: the scoring and evidence source inside a task. `context.recordScore(...)` contributes normalized score evidence; `context.recordMetric(...)` emits benchmark metadata for reports.
 - `attempt`: a full task rerun used to estimate reliability. With `autoAttempt`, each full attempt contributes evidence, so a fail-then-pass pair scores as a success rate rather than replacing the earlier failure.
 - `retry`: an in-case retry. With `autoRetry`, a case can recover inside one attempt; a retry pass still counts as that attempt passing.
 
