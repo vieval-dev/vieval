@@ -2,6 +2,7 @@ import type { TaskConcurrencyConfig, TaskExecutionPolicy, TaskRunContext, TaskRu
 import type { RunScoreKind } from '../core/runner'
 import type { TelemetryAttributeValue } from '../core/telemetry'
 import type { RunEventDefinition, RunEventEmitter } from '../events'
+import type { RecordArtifactOptions } from './case-artifacts'
 
 import { errorMessageFrom, sleep } from '@moeru/std'
 
@@ -9,7 +10,8 @@ import { defineEval, defineTask } from '../config'
 import { runWithCaseOutput } from '../core/runner/case-output'
 import { createSchedulerQueue } from '../core/scheduler/queue'
 import { createNoopTelemetryRuntime } from '../core/telemetry'
-import { caseEnded, caseOutput, caseStarted, metricRecorded, scoreRecorded } from '../events'
+import { artifactRecorded, caseEnded, caseOutput, caseStarted, metricRecorded, scoreRecorded } from '../events'
+import { createCaseArtifacts } from './case-artifacts'
 import { registerEvalDefinition } from './registry'
 
 /**
@@ -27,9 +29,37 @@ export interface CaseRegistrationOptions<TInput> extends TaskExecutionPolicy {
  */
 export interface CaseRunContext<TInput> extends TaskRunContext {
   /**
+   * Absolute directory for this case's files, created when read.
+   *
+   * Use when:
+   * - case code produces logs, screenshots, or other evidence that should live with the run report
+   *
+   * Expects:
+   * - case code may organize files inside it freely; only files passed to `recordArtifact` are announced
+   */
+  artifactsDirectory: string
+  /**
+   * Stable ids of the current execution.
+   */
+  ids: CaseRunIds
+  /**
    * Case-scoped matrix payload.
    */
   matrix: TaskRunContext['task']['matrix'] & { inputs: TInput }
+  /**
+   * Records one artifact of this case and emits an `artifact.recorded` report event.
+   *
+   * Use when:
+   * - a file should be shown and kept with the run report, for example a screenshot or an evaluator log
+   *
+   * Expects:
+   * - exactly one of `options.body` or `options.path`
+   * - `name` is the file name used when the content is written or copied into `artifactsDirectory`
+   *
+   * Returns:
+   * - a promise that settles once the file is stored and the event is emitted
+   */
+  recordArtifact: (name: string, options: RecordArtifactOptions) => Promise<void>
   /**
    * Records one custom case metric into report events.
    *
@@ -55,6 +85,28 @@ export interface CaseRunContext<TInput> extends TaskRunContext {
    * Cooperative abort signal for the current case execution.
    */
   signal: AbortSignal
+}
+
+/**
+ * Stable ids of one case execution.
+ */
+export interface CaseRunIds {
+  /**
+   * Attempt id of the run, or `local` outside `vieval run`.
+   */
+  attemptId: string
+  /**
+   * Case id within the task, the same id used by report events.
+   */
+  caseId: string
+  /**
+   * Run id, or `local` outside `vieval run`.
+   */
+  runId: string
+  /**
+   * Scheduled task id.
+   */
+  taskId: string
 }
 
 /**
@@ -428,12 +480,29 @@ async function runCaseOnce(
       'vieval.task.id': context.task.id,
       'vieval.task.name': context.task.entry.name,
     }, async () => {
+      const artifacts = createCaseArtifacts(context.runStorage?.artifactsRoot, context.task.id, caseId)
       const runCase = () => taskCase.run({
         ...context,
+        get artifactsDirectory() {
+          return artifacts.directory
+        },
         events,
+        ids: {
+          attemptId: context.runStorage?.attemptId ?? 'local',
+          caseId,
+          runId: context.runStorage?.runId ?? 'local',
+          taskId: context.task.id,
+        },
         matrix: {
           ...cloneCaseMatrix(context.task.matrix),
           inputs: taskCase.input,
+        },
+        async recordArtifact(name, options) {
+          if (abortController.signal.aborted || settled) {
+            return
+          }
+
+          emitSafely(events, artifactRecorded, await artifacts.record(name, options))
         },
         recordMetric(name, value) {
           if (abortController.signal.aborted || settled) {

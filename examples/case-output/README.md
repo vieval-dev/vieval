@@ -26,3 +26,16 @@ What to look for in a terminal:
 - `[module] episodes.eval.ts loaded` is written outside every case, so it is printed as-is.
 
 When stdout is not a TTY (CI logs, `| cat`), there is no live window. Each case's full output is printed as one block when the case ends.
+
+## Report and artifacts
+
+The run writes its report to `.vieval/reports/<workspace>/case-output/<experiment>/<attempt>/<run>/`:
+
+- `events.jsonl` is appended while the run is in progress. Each line has a `seq` that orders it within the run.
+- Every case records an `actions.json` artifact with `context.recordArtifact(...)`. It is stored under `artifacts/<task>/<case>/` and announced as an `artifact.recorded` event in `events.jsonl`.
+
+Pass `--no-report` to write nothing:
+
+```shell
+pnpm -F @vieval-examples/case-output eval:run --no-report
+```

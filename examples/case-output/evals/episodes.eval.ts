@@ -20,8 +20,10 @@ describeTask('episodes', () => {
       const repeat = context.task.matrix.run.repeat
       console.info(`[${episode.name}#${repeat}] pod created`)
 
+      const actions: Array<{ step: number, x: number, y: number }> = []
       for (let step = 1; step <= episode.steps; step += 1) {
         await delay(episode.stepMs)
+        actions.push({ step, x: step * 100, y: step * 50 })
         console.info(`[${episode.name}#${repeat}] step ${step}/${episode.steps}: click (${step * 100}, ${step * 50})`)
       }
 
@@ -29,6 +31,12 @@ describeTask('episodes', () => {
         console.warn(`[${episode.name}#${repeat}] evaluator: symbol still has the old name`)
       }
 
+      // Stored under `.vieval/reports/.../artifacts/<task>/<case>/` and announced as an `artifact.recorded` event.
+      await context.recordArtifact('actions.json', {
+        body: `${JSON.stringify({ actions, ids: context.ids }, null, 2)}\n`,
+        contentType: 'application/json',
+        purpose: 'example.agent_actions',
+      })
       console.info(`[${episode.name}#${repeat}] pod deleted`)
       expect(episode.fails === true ? 0 : 1).toBe(1)
     })

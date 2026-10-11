@@ -231,11 +231,13 @@ export interface CliProjectConfig {
  * - `models` exposes configured model registrations for plugin helpers
  * - `events` follows `TaskRunContext['events']`; forward it into `task.entry.task.run(...)` so case progress
  *   and output reach the terminal and the event log
+ * - `runStorage` follows `TaskRunContext['runStorage']`; forward it too, so cases get their ids and artifacts directory
  * - `telemetry` follows `TaskRunContext['telemetry']`
  * - `runtimeConcurrency` follows `TaskRunContext['runtimeConcurrency']`
  */
 export interface CliProjectExecutorContext extends TaskExecutionContext {
   events?: TaskRunContext['events']
+  runStorage?: TaskRunContext['runStorage']
   runtimeConcurrency?: TaskRunContext['runtimeConcurrency']
   telemetry?: TaskRunContext['telemetry']
 }

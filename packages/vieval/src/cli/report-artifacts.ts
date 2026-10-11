@@ -7,9 +7,7 @@ import { resolve } from 'node:path'
 
 import { glob } from 'tinyglobby'
 
-import * as v from 'valibot'
-
-import { RUN_EVENT_SCHEMA_VERSION, runEventEnvelopeSchema } from '../events'
+import { readReportEvents } from './report-log'
 import { buildLocalOtlpProjection } from './report-otlp'
 import { buildCaseRecords, buildMetricsSummary, encodeJsonl } from './report-records'
 
@@ -72,14 +70,7 @@ export async function readReportArtifacts(reportPath: string): Promise<ReportRun
 export function readReportRunArtifact(summaryFilePath: string): ReportRunArtifact {
   const reportDirectory = resolve(summaryFilePath, '..')
   const summary = JSON.parse(readFileSync(summaryFilePath, 'utf-8')) as CliRunOutput
-  const eventsFilePath = resolve(reportDirectory, 'events.jsonl')
-  const events = existsSync(eventsFilePath)
-    ? readFileSync(eventsFilePath, 'utf-8')
-        .split('\n')
-        .map((line, index) => ({ line, lineNumber: index + 1 }))
-        .filter(({ line }) => line.trim().length > 0)
-        .map(({ line, lineNumber }) => parseReportRunEvent(line, `${eventsFilePath}:${lineNumber}`))
-    : []
+  const events = readReportEvents(resolve(reportDirectory, 'events.jsonl'))
 
   return {
     events,
@@ -88,6 +79,34 @@ export function readReportRunArtifact(summaryFilePath: string): ReportRunArtifac
     summary,
     summaryFilePath,
   }
+}
+
+/**
+ * Resolves the directory that holds one run's report artifacts.
+ *
+ * Use when:
+ * - the run starts and needs a stable place for its live event log and case artifacts
+ *
+ * Expects:
+ * - `projectNames` are the projects selected for the run, known before execution starts
+ *
+ * Returns:
+ * - `<reportRoot>/<workspace>/<project>/<experiment>/<attempt>/<run>`, where the project segment is the
+ *   only selected project name, or `multi-project` when several projects run together
+ */
+export function resolveRunReportDirectory(
+  reportRoot: string,
+  identity: ReportArtifactIdentity,
+  projectNames: readonly string[],
+): string {
+  return resolve(
+    reportRoot,
+    identity.workspaceId,
+    deriveReportProjectId(projectNames),
+    identity.experimentId,
+    identity.attemptId,
+    identity.runId,
+  )
 }
 
 /**
@@ -148,34 +167,26 @@ export function summarizeReportRunArtifact(artifact: ReportRunArtifact): ReportR
 }
 
 /**
- * Writes one complete local run report artifact set.
+ * Writes the summary artifacts of one finished run, derived from its event log.
  *
  * Use when:
- * - CLI runs need deterministic local artifacts under workspace/project/experiment/attempt/run
+ * - the run ended and its live `events.jsonl` is closed
  * - report commands need normalized case, metrics, and OTLP-shaped files
  *
  * Expects:
- * - `events` are the same envelopes written to `events.jsonl`
+ * - `reportDirectory` comes from {@link resolveRunReportDirectory} and already holds `events.jsonl`
  * - `output` already contains run identity fields
  *
  * Returns:
- * - absolute report directory path containing the written artifacts
+ * - the report directory path
  */
 export async function writeRunReportArtifacts(
   output: CliRunOutput,
-  events: readonly ReportRunEvent[],
   identity: ReportArtifactIdentity,
-  reportOut: string,
+  reportDirectory: string,
 ): Promise<string> {
-  const projectId = deriveReportProjectId(output)
-  const reportDirectory = resolve(
-    reportOut,
-    identity.workspaceId,
-    projectId,
-    identity.experimentId,
-    identity.attemptId,
-    identity.runId,
-  )
+  const projectId = deriveReportProjectId(output.projects.map(project => project.name))
+  const events = readReportEvents(resolve(reportDirectory, 'events.jsonl'))
   const persistedOutput: CliRunOutput = {
     ...output,
     reportDirectory,
@@ -185,11 +196,6 @@ export async function writeRunReportArtifacts(
   await writeFile(
     resolve(reportDirectory, 'run-summary.json'),
     `${JSON.stringify(persistedOutput, null, 2)}\n`,
-    'utf-8',
-  )
-  await writeFile(
-    resolve(reportDirectory, 'events.jsonl'),
-    events.map(event => JSON.stringify(event)).join('\n').concat(events.length > 0 ? '\n' : ''),
     'utf-8',
   )
 
@@ -215,25 +221,13 @@ export async function writeRunReportArtifacts(
   return reportDirectory
 }
 
-function deriveReportProjectId(output: CliRunOutput): string {
-  const uniqueProjectNames = [...new Set(output.projects.map(project => project.name))]
+function deriveReportProjectId(projectNames: readonly string[]): string {
+  const uniqueProjectNames = [...new Set(projectNames)]
   if (uniqueProjectNames.length === 1) {
     return sanitizeIdentitySegment(uniqueProjectNames[0] ?? 'default-project')
   }
 
   return 'multi-project'
-}
-
-/**
- * Parses one `events.jsonl` line and rejects envelopes of other report schema versions.
- */
-function parseReportRunEvent(line: string, location: string): ReportRunEvent {
-  const result = v.safeParse(runEventEnvelopeSchema, JSON.parse(line))
-  if (!result.success) {
-    throw new Error(`Unsupported event record at ${location}: expected report schema version ${RUN_EVENT_SCHEMA_VERSION}. Reports written by older vieval versions cannot be read; re-run the eval to regenerate them.`)
-  }
-
-  return result.output
 }
 
 function sanitizeIdentitySegment(value: string): string {

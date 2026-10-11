@@ -17,6 +17,7 @@ interface ParsedCliArguments {
   json: boolean
   project: string[]
   projectConcurrency?: number
+  report: boolean
   reportOut?: string
   taskConcurrency?: number
   workspace?: string
@@ -27,7 +28,7 @@ const evalRunHelpText = `
   Execute vieval projects from discovered or explicit config.
 
   Usage
-    $ vieval run [--config <path>] [--project <name>] [--json] [--report-out <path>]
+    $ vieval run [--config <path>] [--project <name>] [--json] [--report-out <path> | --no-report]
 
   Options
     --config     Config file path
@@ -40,7 +41,8 @@ const evalRunHelpText = `
     --task-concurrency      Task scheduling cap
     --attempt-concurrency   Attempt scheduling cap
     --case-concurrency      Case scheduling cap
-    --report-out Report output root directory
+    --report-out Report output root directory (default: .vieval/reports next to the config file)
+    --no-report  Do not write reports or case artifacts
     --json       Print machine-readable JSON output
 `
 
@@ -87,6 +89,11 @@ export function parseCliArguments(argv: readonly string[]): ParsedCliArguments {
       projectConcurrency: {
         type: 'number',
       },
+      // meow turns `--no-report` into `report: false`.
+      report: {
+        default: true,
+        type: 'boolean',
+      },
       reportOut: {
         type: 'string',
       },
@@ -112,6 +119,7 @@ export function parseCliArguments(argv: readonly string[]): ParsedCliArguments {
     json: cli.flags.json === true,
     project: normalizeProjectNames(cli.flags.project),
     projectConcurrency: cli.flags.projectConcurrency,
+    report: cli.flags.report,
     reportOut: cli.flags.reportOut,
     taskConcurrency: cli.flags.taskConcurrency,
     workspace: cli.flags.workspace,
@@ -159,6 +167,7 @@ export async function runEvalRunCli(argv: readonly string[]): Promise<void> {
       experiment: parsed.experiment,
       project: parsed.project,
       projectConcurrency: parsed.projectConcurrency,
+      report: parsed.report,
       reportOut: parsed.reportOut,
       taskConcurrency: parsed.taskConcurrency,
       workspace: parsed.workspace,
