@@ -1,8 +1,12 @@
+import type { RunEventBus } from '../core/runner/event-bus'
 import type { TelemetryAttributes, TelemetryRuntime } from '../core/telemetry'
+import type { CaseEndedData, CaseStartedData, RunEventEnvelope } from '../events'
 
 import { errorMessageFrom } from '@moeru/std'
 import { describe, expect, it, vi } from 'vitest'
 
+import { createRunEventBus } from '../core/runner/event-bus'
+import { caseEnded, caseStarted, metricRecorded, scoreRecorded } from '../events'
 import { caseOf, casesFromInputs, describeEval, describeTask } from './task'
 
 function createDeferredPromise() {
@@ -43,6 +47,29 @@ function createTestModels() {
   }]
 }
 
+/**
+ * Creates a real run event bus with the given listeners, standing in for the CLI subscribers.
+ */
+function createTestRunEvents(listeners: {
+  onAny?: (envelope: RunEventEnvelope) => void
+  onCaseEnd?: (data: CaseEndedData) => void
+  onCaseStart?: (data: CaseStartedData) => void
+}): RunEventBus {
+  const bus = createRunEventBus({ attemptId: 'attempt-test', experimentId: 'experiment-test', runId: 'run-test', workspaceId: 'workspace-test' })
+  if (listeners.onCaseStart != null) {
+    const onCaseStart = listeners.onCaseStart
+    bus.on(caseStarted, ({ data }) => onCaseStart(data))
+  }
+  if (listeners.onCaseEnd != null) {
+    const onCaseEnd = listeners.onCaseEnd
+    bus.on(caseEnded, ({ data }) => onCaseEnd(data))
+  }
+  if (listeners.onAny != null) {
+    bus.onAny(listeners.onAny)
+  }
+  return bus
+}
+
 function createTestTaskCacheRuntime() {
   return {
     namespace() {
@@ -57,6 +84,13 @@ function createTestTaskCacheRuntime() {
       }
     },
   } as any
+}
+
+/**
+ * Projects envelopes to the fields the DSL controls.
+ */
+function toEmitted(envelope: RunEventEnvelope): { caseId?: string, data: unknown, event: string } {
+  return { caseId: envelope.caseId, data: envelope.data, event: envelope.event }
 }
 
 async function waitForExpectation(assertion: () => void, attempts = 20): Promise<void> {
@@ -139,8 +173,8 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
   })
 
   it('emits reporter hooks around each case without changing the score average', async () => {
-    const startPayloads: Array<{ index: number, name: string, total: number }> = []
-    const endPayloads: Array<{ index: number, name: string, state: 'failed' | 'passed' | 'timeout', total: number }> = []
+    const startPayloads: CaseStartedData[] = []
+    const endPayloads: CaseEndedData[] = []
     let resolveFirstCase: (() => void) | undefined
 
     const taskDefinition = describeTask('dsl-hooks', () => {
@@ -157,15 +191,11 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const runPromise = taskDefinition.task?.run({
       cache: createTestTaskCacheRuntime(),
+      events: createTestRunEvents({
+        onCaseEnd: data => endPayloads.push(data),
+        onCaseStart: data => startPayloads.push(data),
+      }),
       models: createTestModels(),
-      reporterHooks: {
-        onCaseEnd(payload) {
-          endPayloads.push(payload)
-        },
-        onCaseStart(payload) {
-          startPayloads.push(payload)
-        },
-      },
       task: {
         entry: {
           description: 'd',
@@ -353,8 +383,8 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
     ])
   })
 
-  it('emits task.case.metric events from case contexts', async () => {
-    const events: Array<{ caseId?: string, data?: unknown, event: string }> = []
+  it('emits metric.recorded events from case contexts', async () => {
+    const events: Array<{ caseId?: string, data: unknown, event: string }> = []
 
     const taskDefinition = describeTask('dsl-case-metrics', () => {
       caseOf('case-1', (context) => {
@@ -364,12 +394,10 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     await taskDefinition.task?.run({
       cache: createTestTaskCacheRuntime(),
+      events: createTestRunEvents({
+        onAny: envelope => events.push(toEmitted(envelope)),
+      }),
       models: createTestModels(),
-      reporterHooks: {
-        onEvent(payload) {
-          events.push(payload)
-        },
-      },
       task: {
         entry: {
           description: 'd',
@@ -388,22 +416,25 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
       },
     })
 
-    expect(events).toEqual([
+    expect(events.filter(event => event.event === 'metric.recorded')).toEqual([
       {
         caseId: '0:case-1',
         data: {
           name: 'overallAverageScore',
           value: 0.77,
         },
-        event: 'task.case.metric',
+        event: 'metric.recorded',
       },
     ])
   })
 
-  it('isolates reporter event hook failures from case score and metric calls', async () => {
+  it('isolates throwing run event subscribers from case score and metric calls', async () => {
     const onEvent = vi.fn(() => {
       throw new Error('reporter unavailable')
     })
+    const events = createRunEventBus({ attemptId: 'attempt-test', experimentId: 'experiment-test', runId: 'run-test', workspaceId: 'workspace-test' })
+    events.on(metricRecorded, onEvent)
+    events.on(scoreRecorded, onEvent)
 
     const taskDefinition = describeTask('dsl-reporter-event-isolation', () => {
       caseOf('case-1', (context) => {
@@ -414,10 +445,8 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const runResult = await taskDefinition.task?.run({
       cache: createTestTaskCacheRuntime(),
+      events,
       models: createTestModels(),
-      reporterHooks: {
-        onEvent,
-      },
       task: {
         entry: {
           description: 'd',
@@ -441,7 +470,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
    * it('emits score and metric events inside a case span') verifies the case context drives both artifacts and telemetry.
    */
   it('emits score and metric events inside a case span', async () => {
-    const reporterEvents: Array<{ caseId?: string, data?: unknown, event: string }> = []
+    const reporterEvents: Array<{ caseId?: string, data: unknown, event: string }> = []
     const spanCalls: Array<{ attributes: TelemetryAttributes, name: string }> = []
     const telemetry: TelemetryRuntime = {
       addEvent: vi.fn(),
@@ -463,12 +492,10 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const runResult = await taskDefinition.task?.run({
       cache: createTestTaskCacheRuntime(),
+      events: createTestRunEvents({
+        onAny: envelope => reporterEvents.push(toEmitted(envelope)),
+      }),
       models: createTestModels(),
-      reporterHooks: {
-        onEvent(payload) {
-          reporterEvents.push(payload)
-        },
-      },
       task: {
         entry: {
           description: 'd',
@@ -500,7 +527,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
         kind: 'exact',
         score: 0.75,
       },
-      event: 'task.case.score',
+      event: 'score.recorded',
     })
     expect(reporterEvents).toContainEqual({
       caseId: '0:case-1',
@@ -508,7 +535,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
         name: 'benchmark.id',
         value: 'locomo',
       },
-      event: 'task.case.metric',
+      event: 'metric.recorded',
     })
     expect(telemetry.addEvent).toHaveBeenCalledWith('vieval.case.score', {
       'vieval.score.kind': 'exact',
@@ -617,7 +644,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
   it('limits casesFromInputs execution to the configured per-group case concurrency override', async () => {
     const startedInputs: number[] = []
-    const startPayloads: Array<{ index: number, name: string, total: number }> = []
+    const startPayloads: CaseStartedData[] = []
     const pendingCases = new Map<number, ReturnType<typeof createDeferredPromise>>()
 
     const taskDefinition = describeTask('dsl-cases-from-inputs-concurrency-override', (task) => {
@@ -643,12 +670,10 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const runPromise = taskDefinition.task!.run({
       cache: createTestTaskCacheRuntime(),
+      events: createTestRunEvents({
+        onCaseStart: data => startPayloads.push(data),
+      }),
       models: [],
-      reporterHooks: {
-        onCaseStart(payload) {
-          startPayloads.push(payload)
-        },
-      },
       task: {
         entry: {
           description: 'd',
@@ -818,7 +843,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
   })
 
   it('emits a distinct timeout state when a case exceeds the configured timeout', async () => {
-    const endPayloads: Array<{ errorMessage?: string, index: number, name: string, state: 'failed' | 'passed' | 'timeout', total: number }> = []
+    const endPayloads: CaseEndedData[] = []
 
     const taskDefinition = describeTask('dsl-case-timeout', () => {
       caseOf('slow-case', async () => {
@@ -831,12 +856,10 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const runResult = await taskDefinition.task?.run({
       cache: createTestTaskCacheRuntime(),
+      events: createTestRunEvents({
+        onCaseEnd: data => endPayloads.push(data),
+      }),
       models: createTestModels(),
-      reporterHooks: {
-        onCaseEnd(payload) {
-          endPayloads.push(payload)
-        },
-      },
       task: {
         entry: {
           description: 'd',
@@ -867,7 +890,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
   it('retries a failing case within the same task attempt until it passes', async () => {
     let runs = 0
-    const startPayloads: Array<{ autoRetry?: number, index: number, name: string, retryIndex?: number, total: number }> = []
+    const startPayloads: CaseStartedData[] = []
 
     const taskDefinition = describeTask('dsl-case-auto-retry', () => {
       caseOf('retry-case', async () => {
@@ -883,12 +906,10 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const runResult = await taskDefinition.task?.run({
       cache: createTestTaskCacheRuntime(),
+      events: createTestRunEvents({
+        onCaseStart: data => startPayloads.push(data),
+      }),
       models: createTestModels(),
-      reporterHooks: {
-        onCaseStart(payload) {
-          startPayloads.push(payload)
-        },
-      },
       task: {
         entry: {
           description: 'd',

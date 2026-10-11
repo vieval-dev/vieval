@@ -8,6 +8,9 @@ import meow from 'meow'
 
 import { errorMessageFrom } from '@moeru/std'
 
+import * as v from 'valibot'
+
+import { caseEnded, caseEndedDataSchema, taskEnded, taskEndedDataSchema } from '../events'
 import { readReportArtifacts, summarizeReportRunArtifact } from './report-artifacts'
 
 export interface ParsedReportAnalyzeCliArguments {
@@ -404,12 +407,12 @@ function formatTableOutput(output: ReportAnalyzeOutput): string {
 
 function hasCaseState(artifact: ReportRunArtifact, targetState: 'failed' | 'passed' | 'skipped'): boolean {
   return artifact.events.some((event) => {
-    if (event.event !== 'CaseEnded') {
+    if (event.event !== caseEnded.id) {
       return false
     }
 
-    const state = (event.data as undefined | { state?: unknown })?.state
-    return state === targetState
+    const result = v.safeParse(caseEndedDataSchema, event.data)
+    return result.success && result.output.state === targetState
   })
 }
 
@@ -423,12 +426,12 @@ function hasRunMatrixMatch(artifact: ReportRunArtifact, selector: Record<string,
 
 function hasTaskState(artifact: ReportRunArtifact, targetState: 'failed' | 'passed' | 'skipped'): boolean {
   return artifact.events.some((event) => {
-    if (event.event !== 'TaskEnded') {
+    if (event.event !== taskEnded.id) {
       return false
     }
 
-    const state = (event.data as undefined | { state?: unknown })?.state
-    return state === targetState
+    const result = v.safeParse(taskEndedDataSchema, event.data)
+    return result.success && result.output.state === targetState
   })
 }
 

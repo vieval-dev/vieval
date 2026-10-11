@@ -1,8 +1,30 @@
 import type { TaskRunContext } from '../../config/types'
+import type { RunEventEmitter } from '../../events'
 
 import { describe, expect, it } from 'vitest'
 
+import { createRunEventBus } from '../../core/runner/event-bus'
 import { emitChatModelErrorTelemetry, emitChatModelRequestTelemetry, emitChatModelResponseTelemetry, extractChatModelToolCalls, extractMeteringDimensions } from './telemetry'
+
+/**
+ * Creates a context whose run events are captured as `{ caseId, data, event }`, optionally scoped to one case.
+ */
+function createTestContext(caseId?: string): { context: TaskRunContext, events: Array<{ caseId?: string, data: unknown, event: string }> } {
+  const bus = createRunEventBus({ attemptId: 'attempt-test', experimentId: 'experiment-test', runId: 'run-test', workspaceId: 'workspace-test' })
+  const events: Array<{ caseId?: string, data: unknown, event: string }> = []
+  bus.onAny(envelope => events.push({ caseId: envelope.caseId, data: envelope.data, event: envelope.event }))
+  const emitter: RunEventEmitter = caseId == null ? bus : bus.scope({ caseId })
+
+  return {
+    context: {
+      cache: createTestTaskCacheRuntime(),
+      events: emitter,
+      models: [],
+      task: {} as TaskRunContext['task'],
+    },
+    events,
+  }
+}
 
 function createTestTaskCacheRuntime() {
   return {
@@ -63,17 +85,7 @@ describe('extractMeteringDimensions', () => {
 
 describe('emitChatModelResponseTelemetry', () => {
   it('emits inference response and per-tool lifecycle events', () => {
-    const events: Array<{ caseId?: string, data?: unknown, event: string }> = []
-    const context = {
-      cache: createTestTaskCacheRuntime(),
-      models: [],
-      reporterHooks: {
-        onEvent(payload) {
-          events.push(payload)
-        },
-      },
-      task: {} as TaskRunContext['task'],
-    } as TaskRunContext
+    const { context, events } = createTestContext()
 
     emitChatModelResponseTelemetry(context, {
       latencyMs: 842,
@@ -100,9 +112,9 @@ describe('emitChatModelResponseTelemetry', () => {
     })
 
     expect(events.map(event => event.event)).toEqual([
-      'InferenceResponse',
-      'ToolCallStarted',
-      'ToolCallEnded',
+      'inference.responded',
+      'tool-call.started',
+      'tool-call.ended',
     ])
     expect(events[0]?.caseId).toBeUndefined()
     expect(events[0]?.data).toMatchObject({
@@ -143,20 +155,9 @@ describe('emitChatModelResponseTelemetry', () => {
 
 describe('emitChatModelRequestTelemetry', () => {
   it('emits inference request events with model/provider payload', () => {
-    const events: Array<{ caseId?: string, data?: unknown, event: string }> = []
-    const context = {
-      cache: createTestTaskCacheRuntime(),
-      models: [],
-      reporterHooks: {
-        onEvent(payload) {
-          events.push(payload)
-        },
-      },
-      task: {} as TaskRunContext['task'],
-    } as TaskRunContext
+    const { context, events } = createTestContext('case-1')
 
     emitChatModelRequestTelemetry(context, {
-      caseId: 'case-1',
       data: {
         messagesCount: 3,
       },
@@ -179,7 +180,7 @@ describe('emitChatModelRequestTelemetry', () => {
             model: 'gpt-4.1-mini',
           },
         },
-        event: 'InferenceRequest',
+        event: 'inference.requested',
       },
     ])
   })
@@ -187,20 +188,9 @@ describe('emitChatModelRequestTelemetry', () => {
 
 describe('emitChatModelErrorTelemetry', () => {
   it('emits inference error events with normalized error message', () => {
-    const events: Array<{ caseId?: string, data?: unknown, event: string }> = []
-    const context = {
-      cache: createTestTaskCacheRuntime(),
-      models: [],
-      reporterHooks: {
-        onEvent(payload) {
-          events.push(payload)
-        },
-      },
-      task: {} as TaskRunContext['task'],
-    } as TaskRunContext
+    const { context, events } = createTestContext('case-2')
 
     emitChatModelErrorTelemetry(context, {
-      caseId: 'case-2',
       error: new Error('provider timeout'),
       provider: {
         id: 'openai',
@@ -217,7 +207,7 @@ describe('emitChatModelErrorTelemetry', () => {
             id: 'openai',
           },
         },
-        event: 'InferenceError',
+        event: 'inference.failed',
       },
     ])
   })

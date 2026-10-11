@@ -584,7 +584,7 @@ describeTask('cache-runtime-task', () => {
         const output = await task.entry.task.run({
           cache: context.cache,
           models: context.models,
-          reporterHooks: context.reporterHooks,
+          events: context.events,
           task,
         })
 
@@ -733,6 +733,7 @@ describeTask('semantic-artifact-task', () => {
 
   it('persists task-emitted custom telemetry events into report artifacts', async () => {
     const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
+    const vievalEventsImportPath = join(packageDirectory, 'src', 'events', 'index.ts').replaceAll('\\', '/')
     const reportOut = await mkdtemp(join(tmpdir(), 'vieval-report-telemetry-'))
     temporaryDirectories.push(reportOut)
 
@@ -740,28 +741,27 @@ describeTask('semantic-artifact-task', () => {
       evalFiles: {
         'custom-telemetry.eval.ts': `
 import { caseOf, describeTask } from '${vievalImportPath}'
+import { defineEventa } from '${vievalEventsImportPath}'
+
+const inferenceMetered = defineEventa<{ metering: { dimensions: Record<string, number> }, toolCalls: Array<{ args: unknown, name: string }> }>('custom.inference-metered')
 
 describeTask('custom-telemetry-task', () => {
-  caseOf('custom-telemetry-case', (context) => {
-    context.reporterHooks?.onEvent?.({
-      caseId: 'custom-telemetry-case',
-      data: {
-        metering: {
-          dimensions: {
-            input_tokens: 12,
-            output_tokens: 6,
-            total_tokens: 18,
-            tool_call_count: 1,
-          },
+  caseOf('custom-telemetry-case', async (context) => {
+    await context.events?.emit(inferenceMetered, {
+      metering: {
+        dimensions: {
+          input_tokens: 12,
+          output_tokens: 6,
+          total_tokens: 18,
+          tool_call_count: 1,
         },
-        toolCalls: [
-          {
-            args: { city: 'tokyo' },
-            name: 'weather.lookup',
-          },
-        ],
       },
-      event: 'InferenceResponse',
+      toolCalls: [
+        {
+          args: { city: 'tokyo' },
+          name: 'weather.lookup',
+        },
+      ],
     })
   })
 })
@@ -799,12 +799,12 @@ describeTask('custom-telemetry-task', () => {
         projectId?: string
         taskId?: string
       })
-    const telemetryEvent = events.find(event => event.event === 'InferenceResponse')
+    const telemetryEvent = events.find(event => event.event === 'custom.inference-metered')
 
     expect(telemetryEvent).toBeDefined()
     expect(telemetryEvent?.taskId).toBeDefined()
     expect(telemetryEvent?.projectId).toBe('custom-telemetry-project')
-    expect(telemetryEvent?.caseId).toBe('custom-telemetry-case')
+    expect(telemetryEvent?.caseId).toBe('0:custom-telemetry-case')
     expect(telemetryEvent?.data?.metering?.dimensions?.tool_call_count).toBe(1)
     expect(telemetryEvent?.data?.toolCalls?.[0]?.name).toBe('weather.lookup')
   })
@@ -1105,7 +1105,7 @@ export default defineConfig({
         const output = await task.entry.task.run({
           cache: context.cache,
           models: context.models,
-          reporterHooks: context.reporterHooks,
+          events: context.events,
           task,
         })
 
@@ -1947,9 +1947,9 @@ export default defineConfig({
 
   /**
    * @example
-   * it('threads case reporter hooks through custom project executors', async () => {})
+   * it('forwards run events through custom project executors', async () => {})
    */
-  it('threads case reporter hooks through custom project executors', async () => {
+  it('forwards run events through custom project executors', async () => {
     const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
     const projectDirectory = await createDslProject({
       evalFiles: {
@@ -1973,7 +1973,7 @@ describeTask('custom-live-task', () => {
         const output = await task.entry.task.run({
           cache: context.cache,
           models: context.models,
-          reporterHooks: context.reporterHooks,
+          events: context.events,
           task,
         })
 
@@ -2054,9 +2054,9 @@ describeTask('custom-live-task', () => {
 
   /**
    * @example
-   * it('classifies start-hook failures on the triggering task and keeps final counters accurate', async () => {})
+   * it('keeps tasks and run totals intact when the terminal reporter throws', async () => {})
    */
-  it('classifies start-hook failures on the triggering task and keeps final counters accurate', async () => {
+  it('keeps tasks and run totals intact when the terminal reporter throws', async () => {
     const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
     const projectDirectory = await createDslProject({
       evalFiles: {
@@ -2108,6 +2108,7 @@ describeTask('second-task', () => {
         },
         onTaskEnd(payload: unknown) {
           reporterEvents.push({ payload, type: 'task-end' })
+          throw new Error('end hook boom')
         },
         onTaskQueued(payload: unknown) {
           reporterEvents.push({ payload, type: 'task-queued' })
@@ -2117,6 +2118,7 @@ describeTask('second-task', () => {
           taskStartCount += 1
 
           if (taskStartCount === 1) {
+            // Subscribers are best-effort observers: this must neither fail the task nor skip the next one.
             throw new Error('start hook boom')
           }
         },
@@ -2129,160 +2131,27 @@ describeTask('second-task', () => {
         configFilePath: join(projectDirectory, 'vieval.config.ts'),
         cwd: projectDirectory,
       })
-      const queuedTaskIds = reporterEvents
-        .filter(event => event.type === 'task-queued')
-        .map(event => (event.payload as { taskId: string }).taskId)
       const taskEndEvents = reporterEvents
         .filter(event => event.type === 'task-end')
-        .map(event => event.payload as { state: string, taskId: string })
-      const runEndPayload = reporterEvents.find(event => event.type === 'run-end')?.payload as {
-        failedTasks: number
-        passedTasks: number
-        skippedTasks: number
-        totalTasks: number
-      }
+        .map(event => (event.payload as { state: string }).state)
+      const runEndPayload = reporterEvents.find(event => event.type === 'run-end')?.payload
 
-      expect(queuedTaskIds).toHaveLength(2)
+      /**
+       * @example
+       * expect(output.projects[0]).toMatchObject({ errorMessage: null, executed: true })
+       */
       expect(output.projects[0]).toMatchObject({
-        discoveredEvalFileCount: 2,
-        entryCount: 2,
-        errorMessage: `Runner task "${queuedTaskIds[0]}" failed: start hook boom`,
-        executed: false,
+        errorMessage: null,
+        executed: true,
         name: 'start-hook-failure-project',
         taskCount: 2,
       })
-      expect(taskEndEvents).toEqual([
-        {
-          state: 'failed',
-          taskId: queuedTaskIds[0],
-        },
-        {
-          state: 'skipped',
-          taskId: queuedTaskIds[1],
-        },
-      ])
-      expect(runEndPayload).toMatchObject({
-        failedTasks: 1,
-        passedTasks: 0,
-        skippedTasks: 1,
-        totalTasks: 2,
-      })
-    }
-    finally {
-      vi.doUnmock('./reporters')
-      vi.resetModules()
-    }
-  })
-
-  it('does not commit passed task counters before a task end observer settles', async () => {
-    const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
-    const projectDirectory = await mkdtemp(join(tmpdir(), 'vieval-run-observer-failure-'))
-    temporaryDirectories.push(projectDirectory)
-
-    await mkdir(join(projectDirectory, 'evals'), { recursive: true })
-    await writeFile(
-      join(projectDirectory, 'evals', 'observer.eval.ts'),
-      `
-import { caseOf, describeTask } from '${vievalImportPath}'
-
-describeTask('observer-task', () => {
-  caseOf('observer-case', () => {}, {
-    input: {
-      source: 'observer-case',
-    },
-  })
-})
-`,
-      'utf-8',
-    )
-    await writeFile(
-      join(projectDirectory, 'vieval.config.ts'),
-      `
-import { defineConfig } from '${vievalImportPath}'
-
-export default defineConfig({
-  models: [
-    {
-      aliases: [],
-      id: 'openai:gpt-4.1-mini',
-      model: 'gpt-4.1-mini',
-      inferenceExecutor: 'openai',
-      inferenceExecutorId: 'openai:gpt-4.1-mini',
-    },
-  ],
-  projects: [
-    {
-      include: ['evals/*.eval.ts'],
-      name: 'observer-project',
-      root: '.',
-    },
-  ],
-})
-`,
-      'utf-8',
-    )
-
-    const reporterEvents: Array<{ payload: unknown, type: string }> = []
-    let queuedTaskId: string | undefined
-
-    vi.resetModules()
-    vi.doMock('./reporters', () => ({
-      createCliReporter: () => ({
-        dispose() {
-          reporterEvents.push({ payload: undefined, type: 'dispose' })
-        },
-        onCaseEnd(payload: unknown) {
-          reporterEvents.push({ payload, type: 'case-end' })
-        },
-        onCaseStart(payload: unknown) {
-          reporterEvents.push({ payload, type: 'case-start' })
-        },
-        onRunEnd(payload: unknown) {
-          reporterEvents.push({ payload, type: 'run-end' })
-        },
-        onRunStart(payload: unknown) {
-          reporterEvents.push({ payload, type: 'run-start' })
-        },
-        onTaskEnd(payload: unknown) {
-          reporterEvents.push({ payload, type: 'task-end' })
-          if ((payload as { state?: string }).state === 'passed') {
-            throw new Error('observer end boom')
-          }
-        },
-        onTaskQueued(payload: unknown) {
-          reporterEvents.push({ payload, type: 'task-queued' })
-          queuedTaskId = (payload as { taskId?: string }).taskId
-        },
-        onTaskStart(payload: unknown) {
-          reporterEvents.push({ payload, type: 'task-start' })
-        },
-      }),
-    }))
-
-    try {
-      const { runVievalCli: isolatedRunVievalCli } = await import('./run')
-      const output = await isolatedRunVievalCli({
-        configFilePath: join(projectDirectory, 'vieval.config.ts'),
-        cwd: projectDirectory,
-      })
-      const runEndPayload = reporterEvents.find(event => event.type === 'run-end')?.payload as {
-        failedTasks: number
-        passedTasks: number
-        skippedTasks: number
-        totalTasks: number
-      }
-
-      expect(queuedTaskId).toBeDefined()
-      expect(output.projects[0]).toMatchObject({
-        errorMessage: `Runner task "${queuedTaskId}" failed: observer end boom`,
-        executed: false,
-        name: 'observer-project',
-      })
-      expect(runEndPayload).toMatchObject({
+      expect(taskEndEvents).toEqual(['passed', 'passed'])
+      expect(runEndPayload).toEqual({
         failedTasks: 0,
-        passedTasks: 0,
+        passedTasks: 2,
         skippedTasks: 0,
-        totalTasks: 1,
+        totalTasks: 2,
       })
     }
     finally {

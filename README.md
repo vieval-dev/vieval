@@ -375,6 +375,7 @@ sequenceDiagram
   participant M as src/cli/module-runtime.ts
   participant S as src/core/runner/*
   participant T as src/dsl/task.ts
+  participant B as src/core/runner/event-bus.ts
   participant P as src/cli/reporters/*
 
   U->>C: vieval run --config ...
@@ -385,14 +386,17 @@ sequenceDiagram
   R->>M: loadEvalModulesWithVitestRuntime()
   M->>T: register describeTask definitions
   R->>S: collectEvalEntries() + createRunnerSchedule()
-  R->>P: createCliReporter(isTTY)
-  R->>P: onRunStart + onTaskQueued
+  R->>B: createRunEventBus(identity)
+  R->>P: createCliReporter(isTTY), subscribe to the bus
+  R->>B: emit run.started + task.queued
   R->>S: runScheduledTasks(...)
-  S->>P: onTaskStart / onTaskEnd
-  S->>T: task.run(context)
-  T->>P: reporterHooks.onCaseStart / onCaseEnd
+  S->>B: emit task.started / task.ended
+  S->>T: task.run(context with events)
+  T->>B: emit case.started / case.output / metric.recorded / case.ended
+  B->>P: deliver events to subscribers (terminal, event log, Vitest bridge)
   S-->>R: aggregated run results
-  R->>P: onRunEnd + dispose
+  R->>B: emit run.ended
+  R->>P: dispose
   R-->>E: CliRunOutput
   E->>U: static summary or JSON
 ```

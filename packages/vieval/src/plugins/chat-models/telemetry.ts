@@ -2,6 +2,8 @@ import type { TaskRunContext } from '../../config/types'
 
 import { errorMessageFrom } from '@moeru/std'
 
+import { inferenceFailed, inferenceRequested, inferenceResponded, toolCallEnded, toolCallStarted } from '../../events'
+
 /**
  * Provider identity attached to chat-model telemetry events.
  */
@@ -46,10 +48,6 @@ export interface ChatModelToolCall {
  */
 export interface EmitChatModelErrorTelemetryOptions {
   /**
-   * Optional case id for case-scoped telemetry events.
-   */
-  caseId?: string
-  /**
    * Error payload emitted by the inference client/runtime.
    */
   error: unknown
@@ -64,10 +62,6 @@ export interface EmitChatModelErrorTelemetryOptions {
  */
 export interface EmitChatModelRequestTelemetryOptions {
   /**
-   * Optional case id for case-scoped telemetry events.
-   */
-  caseId?: string
-  /**
    * Optional request payload metadata.
    */
   data?: unknown
@@ -81,10 +75,6 @@ export interface EmitChatModelRequestTelemetryOptions {
  * Input options for response telemetry emission.
  */
 export interface EmitChatModelResponseTelemetryOptions {
-  /**
-   * Optional case id for case-scoped telemetry events.
-   */
-  caseId?: string
   /**
    * Optional response latency in milliseconds.
    */
@@ -106,20 +96,16 @@ export interface EmitChatModelResponseTelemetryOptions {
  * - one inference call fails and report artifacts should include normalized error context
  *
  * Expects:
- * - `context.reporterHooks?.onEvent` to be available in CLI execution paths
+ * - `context.events` to be available in CLI execution paths; pass the case context to stamp the case id
  */
 export function emitChatModelErrorTelemetry(
   context: TaskRunContext,
   options: EmitChatModelErrorTelemetryOptions,
 ): void {
-  context.reporterHooks?.onEvent?.({
-    caseId: options.caseId,
-    data: {
-      error: errorMessageFrom(options.error) ?? 'Unknown inference error.',
-      modality: 'chat',
-      provider: options.provider,
-    },
-    event: 'InferenceError',
+  void context.events?.emit(inferenceFailed, {
+    error: errorMessageFrom(options.error) ?? 'Unknown inference error.',
+    modality: 'chat',
+    provider: options.provider,
   })
 }
 
@@ -130,20 +116,16 @@ export function emitChatModelErrorTelemetry(
  * - task code submits one model request and wants request-side traceability
  *
  * Expects:
- * - `context.reporterHooks?.onEvent` to be available in CLI execution paths
+ * - `context.events` to be available in CLI execution paths; pass the case context to stamp the case id
  */
 export function emitChatModelRequestTelemetry(
   context: TaskRunContext,
   options: EmitChatModelRequestTelemetryOptions,
 ): void {
-  context.reporterHooks?.onEvent?.({
-    caseId: options.caseId,
-    data: {
-      data: options.data,
-      modality: 'chat',
-      provider: options.provider,
-    },
-    event: 'InferenceRequest',
+  void context.events?.emit(inferenceRequested, {
+    data: options.data,
+    modality: 'chat',
+    provider: options.provider,
   })
 }
 
@@ -152,10 +134,10 @@ export function emitChatModelRequestTelemetry(
  *
  * Use when:
  * - task code receives one chat-model response and wants standardized report events
- * - `ToolCall*` and metering metrics should be persisted in `events.jsonl`
+ * - `tool-call.*` events and metering metrics should be persisted in `events.jsonl`
  *
  * Expects:
- * - `context.reporterHooks?.onEvent` to be available in CLI execution paths
+ * - `context.events` to be available in CLI execution paths; pass the case context to stamp the case id
  *
  * Returns:
  * - no return value; this is a best-effort reporting helper
@@ -171,7 +153,7 @@ export function emitChatModelResponseTelemetry(
     meteringDimensions.tool_call_count = toolCalls.length
   }
 
-  const data = {
+  void context.events?.emit(inferenceResponded, {
     metering: {
       dimensions: meteringDimensions,
       latency_ms: options.latencyMs,
@@ -182,33 +164,11 @@ export function emitChatModelResponseTelemetry(
     modality: 'chat',
     provider: options.provider,
     toolCalls,
-  }
-
-  context.reporterHooks?.onEvent?.({
-    caseId: options.caseId,
-    data,
-    event: 'InferenceResponse',
   })
 
   for (const toolCall of toolCalls) {
-    context.reporterHooks?.onEvent?.({
-      caseId: options.caseId,
-      data: {
-        modality: 'chat',
-        provider: options.provider,
-        toolCall,
-      },
-      event: 'ToolCallStarted',
-    })
-    context.reporterHooks?.onEvent?.({
-      caseId: options.caseId,
-      data: {
-        modality: 'chat',
-        provider: options.provider,
-        toolCall,
-      },
-      event: 'ToolCallEnded',
-    })
+    void context.events?.emit(toolCallStarted, { modality: 'chat', provider: options.provider, toolCall })
+    void context.events?.emit(toolCallEnded, { modality: 'chat', provider: options.provider, toolCall })
   }
 }
 

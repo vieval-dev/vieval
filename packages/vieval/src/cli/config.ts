@@ -224,17 +224,18 @@ export interface CliProjectConfig {
  * Execution context exposed to project-level `executor` implementations.
  *
  * Use when:
- * - a project executor needs task-scoped models plus case reporter hooks
- * - custom scheduling logic wants the same hook shape as `TaskRunContext`
+ * - a project executor needs task-scoped models plus the task's run event emitter
+ * - custom scheduling logic wants the same context shape as `TaskRunContext`
  *
  * Expects:
  * - `models` exposes configured model registrations for plugin helpers
- * - `reporterHooks` follows `TaskRunContext['reporterHooks']`
+ * - `events` follows `TaskRunContext['events']`; forward it into `task.entry.task.run(...)` so case progress
+ *   and output reach the terminal and the event log
  * - `telemetry` follows `TaskRunContext['telemetry']`
  * - `runtimeConcurrency` follows `TaskRunContext['runtimeConcurrency']`
  */
 export interface CliProjectExecutorContext extends TaskExecutionContext {
-  reporterHooks?: TaskRunContext['reporterHooks']
+  events?: TaskRunContext['events']
   runtimeConcurrency?: TaskRunContext['runtimeConcurrency']
   telemetry?: TaskRunContext['telemetry']
 }

@@ -1,4 +1,4 @@
-import type { TaskReporterHooks } from '../config'
+import type { RunEventEmitter } from '../events'
 import type { CliProjectConfig } from './config'
 
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -620,12 +620,12 @@ describe('loadVievalCliConfig', () => {
 
   /**
    * @example
-   * it('exposes reporterHooks on project executor context', () => {})
+   * it('exposes the run event emitter on project executor context', () => {})
    */
-  it('exposes reporterHooks on project executor context', () => {
+  it('exposes the run event emitter on project executor context', () => {
     type ProjectExecutor = NonNullable<CliProjectConfig['executor']>
     type ProjectExecutorContext = Parameters<ProjectExecutor>[1]
 
-    expectTypeOf<ProjectExecutorContext['reporterHooks']>().toEqualTypeOf<TaskReporterHooks | undefined>()
+    expectTypeOf<ProjectExecutorContext['events']>().toEqualTypeOf<RunEventEmitter | undefined>()
   })
 })
