@@ -1,3 +1,4 @@
+import type { RunEventEnvelope } from '../events'
 import type { CliRunOutput } from './run'
 
 import { existsSync, readFileSync } from 'node:fs'
@@ -6,6 +7,9 @@ import { resolve } from 'node:path'
 
 import { glob } from 'tinyglobby'
 
+import * as v from 'valibot'
+
+import { RUN_EVENT_SCHEMA_VERSION, runEventEnvelopeSchema } from '../events'
 import { buildLocalOtlpProjection } from './report-otlp'
 import { buildCaseRecords, buildMetricsSummary, encodeJsonl } from './report-records'
 
@@ -30,21 +34,9 @@ export interface ReportRunArtifact {
 }
 
 /**
- * Minimal event envelope used by report analysis.
+ * One line of `events.jsonl`.
  */
-export interface ReportRunEvent {
-  attemptId?: string
-  caseId?: string
-  data?: unknown
-  event: string
-  experimentId?: string
-  projectId?: string
-  projectName?: string
-  runId?: string
-  taskId?: string
-  timestamp?: string
-  workspaceId?: string
-}
+export type ReportRunEvent = RunEventEnvelope
 
 export interface ReportRunSummaryRow {
   attemptId: null | string
@@ -84,23 +76,9 @@ export function readReportRunArtifact(summaryFilePath: string): ReportRunArtifac
   const events = existsSync(eventsFilePath)
     ? readFileSync(eventsFilePath, 'utf-8')
         .split('\n')
-        .filter(line => line.trim().length > 0)
-        .map((line) => {
-          const event = JSON.parse(line) as ReportRunEvent
-          return {
-            attemptId: event.attemptId,
-            caseId: event.caseId,
-            data: event.data,
-            event: event.event,
-            experimentId: event.experimentId,
-            projectId: event.projectId,
-            projectName: event.projectName,
-            runId: event.runId,
-            taskId: event.taskId,
-            timestamp: event.timestamp,
-            workspaceId: event.workspaceId,
-          } satisfies ReportRunEvent
-        })
+        .map((line, index) => ({ line, lineNumber: index + 1 }))
+        .filter(({ line }) => line.trim().length > 0)
+        .map(({ line, lineNumber }) => parseReportRunEvent(line, `${eventsFilePath}:${lineNumber}`))
     : []
 
   return {
@@ -216,12 +194,8 @@ export async function writeRunReportArtifacts(
   )
 
   const caseRecords = buildCaseRecords({
-    attemptId: identity.attemptId,
     events,
-    experimentId: identity.experimentId,
     projectName: projectId,
-    runId: identity.runId,
-    workspaceId: identity.workspaceId,
   })
   const metricsSummary = buildMetricsSummary(caseRecords, [])
   const otlp = buildLocalOtlpProjection({ records: caseRecords, runId: identity.runId })
@@ -248,6 +222,18 @@ function deriveReportProjectId(output: CliRunOutput): string {
   }
 
   return 'multi-project'
+}
+
+/**
+ * Parses one `events.jsonl` line and rejects envelopes of other report schema versions.
+ */
+function parseReportRunEvent(line: string, location: string): ReportRunEvent {
+  const result = v.safeParse(runEventEnvelopeSchema, JSON.parse(line))
+  if (!result.success) {
+    throw new Error(`Unsupported event record at ${location}: expected report schema version ${RUN_EVENT_SCHEMA_VERSION}. Reports written by older vieval versions cannot be read; re-run the eval to regenerate them.`)
+  }
+
+  return result.output
 }
 
 function sanitizeIdentitySegment(value: string): string {

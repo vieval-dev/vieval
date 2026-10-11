@@ -1,8 +1,8 @@
 import type { RunScore } from '../core/runner'
-import type { CaseOutputStream } from '../core/runner/case-output'
 import type { ScheduledTask } from '../core/runner/schedule'
 import type { TaskExecutionContext } from '../core/runner/task-context'
 import type { TelemetryRuntime } from '../core/telemetry'
+import type { RunEventEmitter } from '../events'
 
 /**
  * Value that can be returned directly or through a promise.
@@ -327,96 +327,6 @@ export interface ScopedMatrices {
 export type TaskAutoRetryDelay = ((retryIndex: number) => number) | number
 
 /**
- * Payload emitted when a task case ends.
- *
- * Use when:
- * - reporter hooks need the case position plus terminal state
- *
- * Expects:
- * - `name` is the declared DSL case label
- * - `index` is the zero-based case position within the task
- * - `total` is the total number of registered cases
- * - `state` describes the final case result
- */
-export interface TaskCaseReporterEndPayload extends TaskCaseReporterPayload {
-  /**
-   * Optional failure message when `state` is `failed`.
-   */
-  errorMessage?: string
-  /**
-   * Optional case output returned by the task case callback.
-   */
-  output?: unknown
-  /**
-   * Final case state.
-   */
-  state: TaskCaseState
-}
-
-/**
- * Payload emitted when case code writes to `process.stdout` or `process.stderr`.
- *
- * Use when:
- * - reporter hooks group process output by the case that produced it
- */
-export interface TaskCaseReporterOutputPayload {
-  /**
-   * Raw output chunk, possibly without a trailing newline.
-   */
-  content: string
-  /**
-   * Zero-based case position within the task.
-   */
-  index: number
-  /**
-   * Declared case label.
-   */
-  name: string
-  /**
-   * Process stream that received the chunk.
-   */
-  stream: CaseOutputStream
-}
-
-/**
- * Payload emitted when a task case starts.
- *
- * Use when:
- * - reporter hooks need a stable position for one case within the task
- *
- * Expects:
- * - `name` is the declared DSL case label
- * - `index` is the zero-based case position within the task
- * - `total` is the total number of registered cases
- */
-export interface TaskCaseReporterPayload {
-  /**
-   * Maximum retry count configured for this case.
-   */
-  autoRetry?: number
-  /**
-   * Zero-based case position within the task.
-   */
-  index: number
-  /**
-   * Optional case input payload registered by the task DSL.
-   */
-  input?: unknown
-  /**
-   * Declared case label.
-   */
-  name: string
-  /**
-   * Current retry attempt index, where `0` is the first try.
-   */
-  retryIndex?: number
-  /**
-   * Total number of registered cases.
-   */
-  total: number
-}
-
-/**
  * Allowed terminal outcomes for one task case.
  *
  * Use when:
@@ -549,72 +459,6 @@ export interface TaskExecutionPolicy {
 }
 
 /**
- * Payload emitted by task code for custom report events.
- *
- * Use when:
- * - reporting runtime telemetry such as inference requests, responses, or tool calls
- * - attaching modality-specific metrics without coupling task logic to CLI internals
- *
- * Expects:
- * - `event` to be a stable event name
- * - `data` to be JSON-serializable for report artifact persistence
- */
-export interface TaskReporterEventPayload {
-  /**
-   * Optional stable case id when the event maps to one case lifecycle.
-   */
-  caseId?: string
-  /**
-   * Optional custom payload persisted under event `data`.
-   */
-  data?: unknown
-  /**
-   * Event name written into report event envelopes.
-   */
-  event: string
-}
-
-/**
- * Reporter hooks invoked around each task case execution.
- *
- * Use when:
- * - a caller needs case-level lifecycle visibility from the DSL runner
- * - downstream reporters should stay decoupled from the task execution path
- *
- * Expects:
- * - hooks observe case start/end events but do not influence scoring
- */
-export interface TaskReporterHooks {
-  /**
-   * Runs after a case settles.
-   */
-  onCaseEnd?: (payload: TaskCaseReporterEndPayload) => void
-  /**
-   * Runs when case code writes to `process.stdout` or `process.stderr`.
-   *
-   * Use when:
-   * - process output should be grouped per case instead of interleaving on the terminal
-   *
-   * Expects:
-   * - output is captured only while the CLI intercepts process streams
-   * - when the hook is absent, case output goes straight to the terminal
-   */
-  onCaseOutput?: (payload: TaskCaseReporterOutputPayload) => void
-  /**
-   * Runs when a case is about to execute.
-   */
-  onCaseStart?: (payload: TaskCaseReporterPayload) => void
-  /**
-   * Runs when task code emits a custom telemetry/reporting event.
-   *
-   * Use when:
-   * - eval implementations need report artifacts beyond case lifecycle counters
-   * - model/runtime integrations emit inference, metering, or tool-call events
-   */
-  onEvent?: (payload: TaskReporterEventPayload) => void
-}
-
-/**
  * Runtime context passed into eval task `run`.
  */
 export interface TaskRunContext {
@@ -627,6 +471,18 @@ export interface TaskRunContext {
    */
   cache: TaskExecutionContext['cache']
   /**
+   * Emitter for run events, scoped to this task (and to the case inside case callbacks).
+   *
+   * Use when:
+   * - task, case, or plugin code reports activity to the terminal, the event log, and reporters
+   * - a custom project `executor` forwards `context.events` into `task.entry.task.run(...)`
+   *
+   * Expects:
+   * - emits are best-effort: they never reject and never affect task scoring
+   * - absent when a task runs outside `vieval run`; case output then goes straight to the terminal
+   */
+  events?: RunEventEmitter
+  /**
    * Configured model registrations available to model plugins.
    *
    * Use when:
@@ -634,16 +490,6 @@ export interface TaskRunContext {
    * - eval code resolves matrix-selected model axes through plugin helpers
    */
   models: TaskExecutionContext['models']
-  /**
-   * Optional reporter lifecycle hooks for task-local case events.
-   *
-   * Use when:
-   * - a caller wants visibility into each case without coupling to the CLI reporter layer
-   *
-   * Expects:
-   * - hooks are best-effort observers and should not affect task scoring
-   */
-  reporterHooks?: TaskReporterHooks
   /**
    * Optional runtime scheduling overrides supplied by CLI or host execution.
    *

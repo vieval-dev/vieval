@@ -43,6 +43,10 @@
       "types": "./dist/core/processors/results/index.d.mts",
       "default": "./dist/core/processors/results/index.mjs"
     },
+    "./events": {
+      "types": "./dist/events/index.d.mts",
+      "default": "./dist/events/index.mjs"
+    },
     "./core/inference-executors": {
       "types": "./dist/core/inference-executors/index.d.mts",
       "default": "./dist/core/inference-executors/index.mjs"
@@ -79,6 +83,7 @@
   },
   "dependencies": {
     "@henrygd/queue": "catalog:",
+    "@moeru/eventa": "catalog:",
     "@moeru/std": "catalog:",
     "@opentelemetry/api": "catalog:",
     "@pnpm/find-workspace-dir": "catalog:",
@@ -93,6 +98,7 @@
     "meow": "catalog:",
     "tinyglobby": "catalog:",
     "tinyrainbow": "catalog:",
+    "valibot": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:vitest"
   },

@@ -337,6 +337,7 @@ Concurrency flags are available on `vieval run`:
 - `vieval/plugins/chat-models`: `ChatModels`, `ChatProviders`, `chatModelFrom`, `chatProviderFrom`, `chatModelMatrix`, runtime config helpers, and chat telemetry helpers.
 - `vieval/core/runner`: collection, scheduling, task context, cache runtime, scheduler runtime, execution, and aggregation utilities.
 - `vieval/core/assertions`: assertion primitives and pipeline helpers.
+- `vieval/events`: run event definitions, payload types, and `events.jsonl` schemas.
 - `vieval/core/inference-executors`: env helpers and remote provider executors.
 - `vieval/testing/expect-extensions`: Vitest expect extensions for testing eval behavior.
 
@@ -375,6 +376,7 @@ sequenceDiagram
   participant M as src/cli/module-runtime.ts
   participant S as src/core/runner/*
   participant T as src/dsl/task.ts
+  participant B as src/core/runner/event-bus.ts
   participant P as src/cli/reporters/*
 
   U->>C: vieval run --config ...
@@ -385,14 +387,17 @@ sequenceDiagram
   R->>M: loadEvalModulesWithVitestRuntime()
   M->>T: register describeTask definitions
   R->>S: collectEvalEntries() + createRunnerSchedule()
-  R->>P: createCliReporter(isTTY)
-  R->>P: onRunStart + onTaskQueued
+  R->>B: createRunEventBus(identity)
+  R->>P: createCliReporter(isTTY), subscribe to the bus
+  R->>B: emit run.started + task.queued
   R->>S: runScheduledTasks(...)
-  S->>P: onTaskStart / onTaskEnd
-  S->>T: task.run(context)
-  T->>P: reporterHooks.onCaseStart / onCaseOutput / onCaseEnd
+  S->>B: emit task.started / task.ended
+  S->>T: task.run(context with events)
+  T->>B: emit case.started / case.output / metric.recorded / case.ended
+  B->>P: deliver events to subscribers (terminal, event log, Vitest bridge)
   S-->>R: aggregated run results
-  R->>P: onRunEnd + dispose
+  R->>B: emit run.ended
+  R->>P: dispose
   R-->>E: CliRunOutput
   E->>U: static summary or JSON
 ```
@@ -412,10 +417,32 @@ sequenceDiagram
 
 - Without a TTY (CI logs, pipes), each case's full output is printed as one block when the case ends.
 - Output written outside every case (module top level, custom executors) is printed as-is, above the live window.
-- Captured chunks are also recorded as `CaseOutput` events in `--report-out` artifacts.
+- Captured chunks are also recorded as `case.output` events in `--report-out` artifacts.
 - Child processes started with `stdio: 'inherit'` write to the file descriptors directly and are not captured. Pipe their output and write it from the case instead.
 
 See [`examples/case-output`](../../examples/case-output) for a runnable demo.
+
+### Run Events
+
+Every activity of a run is one typed event on an in-process bus (`@moeru/eventa`). The terminal reporter, the report writer (`events.jsonl`), and the Vitest compat bridge are subscribers of that bus.
+
+- Event names are `<entity>.<past-tense verb>`: `run.started`, `project.started`, `task.queued`, `task.started`, `case.started`, `case.output`, `metric.recorded`, `score.recorded`, `case.ended`, `task.ended`, `project.ended`, `run.ended`, plus `inference.*` and `tool-call.*` from `vieval/plugins/chat-models`.
+- Definitions, payload types, and Valibot schemas are exported from `vieval/events`. Every line of `events.jsonl` is an envelope with `schemaVersion: 2`, a per-run `seq`, run identity, and `projectId` / `taskId` / `caseId` when they apply.
+- Task and case code receives `context.events`, scoped to its task and case. Emits never reject and never affect scoring.
+- A custom project `executor` forwards `context.events` into `task.entry.task.run(...)`, so case progress and output reach the terminal and the report.
+- Plugins define their own events with `defineEventa` from `vieval/events`:
+
+  ```ts
+  import { defineEventa } from 'vieval/events'
+
+  const stepFinished = defineEventa<{ step: number }>('agent.step-finished')
+
+  caseOf('case', async (context) => {
+    await context.events?.emit(stepFinished, { step: 1 })
+  })
+  ```
+
+When not to use it: events are observations. Do not use them to change task results; use `recordScore` / `recordMetric` for that.
 
 ## Examples In This Repository
 

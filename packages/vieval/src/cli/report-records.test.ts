@@ -1,6 +1,32 @@
+import type { RunEventEnvelope } from '../events'
+
 import { describe, expect, it } from 'vitest'
 
 import { buildCaseRecords, buildMetricsSummary, encodeJsonl } from './report-records'
+
+let nextSeq = 0
+
+/**
+ * Creates one schema 2 envelope for `case-1` of `task-1`; `overrides` replace envelope fields.
+ */
+function envelopeOf(event: string, data: unknown, overrides: Partial<Omit<RunEventEnvelope, 'data' | 'event'>> = {}): RunEventEnvelope {
+  nextSeq += 1
+  return {
+    attemptId: 'attempt-1',
+    caseId: 'case-1',
+    data,
+    event,
+    experimentId: 'default',
+    projectId: 'project-1',
+    runId: 'run-1',
+    schemaVersion: 2,
+    seq: nextSeq,
+    taskId: 'task-1',
+    time: '2026-05-08T00:00:00.000Z',
+    workspaceId: 'workspace-1',
+    ...overrides,
+  }
+}
 
 /**
  * @example
@@ -13,51 +39,19 @@ describe('report records', () => {
    */
   it('builds a case record from case lifecycle, score, and metric events', () => {
     const records = buildCaseRecords({
-      attemptId: 'attempt-1',
       events: [
-        {
-          caseId: 'case-1',
-          data: {
-            caseName: 'Case 1',
-            input: { prompt: 'When?' },
-            retryIndex: 1,
-            startedAt: '2026-05-08T00:00:00.000Z',
-          },
-          event: 'task.case.start',
-          projectName: 'project-from-event',
-          taskId: 'task-1',
-          timestamp: '2026-05-08T00:00:00.000Z',
-        },
-        {
-          caseId: 'case-1',
-          data: { name: 'benchmark.id', value: 'locomo' },
-          event: 'task.case.metric',
-          taskId: 'task-1',
-        },
-        {
-          caseId: 'case-1',
-          data: { kind: 'exact', score: 0.75 },
-          event: 'task.case.score',
-          taskId: 'task-1',
-        },
-        {
-          caseId: 'case-1',
-          data: {
-            endedAt: '2026-05-08T00:00:01.250Z',
-            output: { answer: 'May 8' },
-            state: 'passed',
-          },
-          event: 'task.case.end',
-          taskId: 'task-1',
-          timestamp: '2026-05-08T00:00:01.250Z',
-        },
+        envelopeOf('case.started', { index: 0, input: { prompt: 'When?' }, name: 'Case 1', retryIndex: 1, total: 1 }, { projectId: 'project-from-event', time: '2026-05-08T00:00:00.000Z' }),
+        envelopeOf('metric.recorded', { name: 'benchmark.id', value: 'locomo' }),
+        envelopeOf('score.recorded', { kind: 'exact', score: 0.75 }),
+        envelopeOf('case.ended', { index: 0, name: 'Case 1', output: { answer: 'May 8' }, state: 'passed', total: 1 }, { time: '2026-05-08T00:00:01.250Z' }),
       ],
-      experimentId: 'default',
       projectName: 'locomo-lobehub',
-      runId: 'run-1',
-      workspaceId: 'agent-memory',
     })
 
+    /**
+     * @example
+     * expect(records[0]).toMatchObject({ caseName: 'Case 1', durationMs: 1250, ... })
+     */
     expect(records).toHaveLength(1)
     expect(records[0]).toMatchObject({
       attemptId: 'attempt-1',
@@ -77,27 +71,28 @@ describe('report records', () => {
       startedAt: '2026-05-08T00:00:00.000Z',
       state: 'passed',
       taskId: 'task-1',
-      workspaceId: 'agent-memory',
+      workspaceId: 'workspace-1',
     })
   })
 
   /**
    * @example
-   * it('falls back to event timestamps and ignores invalid durations') verifies current CLI event envelopes remain usable.
+   * it('uses the fallback project name and ignores invalid durations') covers events from custom project executors.
    */
-  it('falls back to event timestamps and ignores invalid durations', () => {
+  it('uses the fallback project name and ignores invalid durations', () => {
     const records = buildCaseRecords({
-      attemptId: 'attempt-1',
       events: [
-        { caseId: 'case-1', event: 'task.case.start', taskId: 'task-1', timestamp: 'not-a-date' },
-        { caseId: 'case-1', event: 'task.case.end', taskId: 'task-1', timestamp: '2026-05-08T00:00:01.000Z' },
+        envelopeOf('case.started', { index: 0, name: 'case', total: 1 }, { projectId: undefined, time: 'not-a-date' }),
+        envelopeOf('case.ended', { index: 0, name: 'case', state: 'failed', total: 1 }, { projectId: undefined, time: '2026-05-08T00:00:01.000Z' }),
       ],
-      experimentId: 'default',
-      projectName: 'project-1',
-      runId: 'run-1',
-      workspaceId: 'workspace-1',
+      projectName: 'project-fallback',
     })
 
+    /**
+     * @example
+     * expect(records[0]?.durationMs).toBe(0)
+     */
+    expect(records[0]?.projectName).toBe('project-fallback')
     expect(records[0]?.startedAt).toBe('not-a-date')
     expect(records[0]?.endedAt).toBe('2026-05-08T00:00:01.000Z')
     expect(records[0]?.durationMs).toBe(0)
@@ -106,64 +101,45 @@ describe('report records', () => {
 
   /**
    * @example
-   * it('keeps only the final retry attempt payload while preserving full case duration') verifies current CLI retry event ordering.
+   * it('skips events whose payload does not match the event schema') keeps one malformed line from breaking a report.
+   */
+  it('skips events whose payload does not match the event schema', () => {
+    const records = buildCaseRecords({
+      events: [
+        envelopeOf('case.started', { index: 0, name: 'case', total: 1 }),
+        envelopeOf('case.ended', { name: 'case' }),
+      ],
+      projectName: 'project-1',
+    })
+
+    /**
+     * @example
+     * expect(records).toEqual([])
+     */
+    expect(records).toEqual([])
+  })
+
+  /**
+   * @example
+   * it('keeps only the final retry attempt payload while preserving full case duration') verifies retry event ordering.
    */
   it('keeps only the final retry attempt payload while preserving full case duration', () => {
     const records = buildCaseRecords({
-      attemptId: 'attempt-1',
       events: [
-        {
-          caseId: 'case-1',
-          data: {
-            retryIndex: 0,
-            startedAt: '2026-05-08T00:00:00.000Z',
-          },
-          event: 'CaseStarted',
-          taskId: 'task-1',
-        },
-        {
-          caseId: 'case-1',
-          data: { kind: 'exact', score: 0.2 },
-          event: 'task.case.score',
-          taskId: 'task-1',
-        },
-        {
-          caseId: 'case-1',
-          data: { name: 'attempt.metric', value: 'failed-attempt' },
-          event: 'task.case.metric',
-          taskId: 'task-1',
-        },
-        {
-          caseId: 'case-1',
-          data: {
-            retryIndex: 1,
-            startedAt: '2026-05-08T00:00:03.000Z',
-          },
-          event: 'CaseStarted',
-          taskId: 'task-1',
-        },
-        {
-          caseId: 'case-1',
-          data: { name: 'attempt.metric', value: 'final-attempt' },
-          event: 'task.case.metric',
-          taskId: 'task-1',
-        },
-        {
-          caseId: 'case-1',
-          data: {
-            endedAt: '2026-05-08T00:00:05.000Z',
-            state: 'passed',
-          },
-          event: 'CaseEnded',
-          taskId: 'task-1',
-        },
+        envelopeOf('case.started', { autoRetry: 1, index: 0, name: 'case', retryIndex: 0, total: 1 }, { time: '2026-05-08T00:00:00.000Z' }),
+        envelopeOf('score.recorded', { kind: 'exact', score: 0.2 }),
+        envelopeOf('metric.recorded', { name: 'attempt.metric', value: 'failed-attempt' }),
+        envelopeOf('case.started', { autoRetry: 1, index: 0, name: 'case', retryIndex: 1, total: 1 }, { time: '2026-05-08T00:00:03.000Z' }),
+        envelopeOf('metric.recorded', { name: 'attempt.metric', value: 'final-attempt' }),
+        envelopeOf('case.ended', { index: 0, name: 'case', state: 'passed', total: 1 }, { time: '2026-05-08T00:00:05.000Z' }),
       ],
-      experimentId: 'default',
       projectName: 'project-1',
-      runId: 'run-1',
-      workspaceId: 'workspace-1',
     })
 
+    /**
+     * @example
+     * expect(records[0]?.metrics).toEqual({ 'attempt.metric': 'final-attempt' })
+     */
     expect(records).toHaveLength(1)
     expect(records[0]?.startedAt).toBe('2026-05-08T00:00:00.000Z')
     expect(records[0]?.endedAt).toBe('2026-05-08T00:00:05.000Z')
@@ -179,19 +155,19 @@ describe('report records', () => {
    */
   it('adds default exact scores from terminal case state', () => {
     const records = buildCaseRecords({
-      attemptId: 'attempt-1',
       events: [
-        { caseId: 'passed-case', data: { startedAt: '2026-05-08T00:00:00.000Z' }, event: 'CaseStarted', taskId: 'task-1' },
-        { caseId: 'passed-case', data: { endedAt: '2026-05-08T00:00:01.000Z', state: 'passed' }, event: 'CaseEnded', taskId: 'task-1' },
-        { caseId: 'failed-case', data: { startedAt: '2026-05-08T00:00:00.000Z' }, event: 'CaseStarted', taskId: 'task-1' },
-        { caseId: 'failed-case', data: { endedAt: '2026-05-08T00:00:01.000Z', state: 'failed' }, event: 'CaseEnded', taskId: 'task-1' },
+        envelopeOf('case.started', { index: 0, name: 'passed-case', total: 2 }, { caseId: 'passed-case' }),
+        envelopeOf('case.ended', { index: 0, name: 'passed-case', state: 'passed', total: 2 }, { caseId: 'passed-case' }),
+        envelopeOf('case.started', { index: 1, name: 'failed-case', total: 2 }, { caseId: 'failed-case' }),
+        envelopeOf('case.ended', { index: 1, name: 'failed-case', state: 'failed', total: 2 }, { caseId: 'failed-case' }),
       ],
-      experimentId: 'default',
       projectName: 'project-1',
-      runId: 'run-1',
-      workspaceId: 'workspace-1',
     })
 
+    /**
+     * @example
+     * expect(records.map(record => [record.caseId, record.scores.exact])).toEqual([['passed-case', 1], ['failed-case', 0]])
+     */
     expect(records.map(record => [record.caseId, record.scores.exact])).toEqual([
       ['passed-case', 1],
       ['failed-case', 0],

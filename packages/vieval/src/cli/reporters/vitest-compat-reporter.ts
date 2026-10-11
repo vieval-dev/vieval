@@ -1,6 +1,8 @@
-import type { CliReporterCaseEndPayload, CliReporterCaseStartPayload, CliReporterTaskEndPayload, CliReporterTaskQueuedPayload, CliReporterTaskStartPayload } from './types'
+import type { RunEventBus } from '../../core/runner/event-bus'
 
 import { pathToFileURL } from 'node:url'
+
+import { caseEnded, caseStarted, projectEnded, projectStarted, taskEnded, taskQueued, taskStarted } from '../../events'
 
 /**
  * Normalized test-case-like entity delivered to vitest-compatible reporter hooks.
@@ -43,19 +45,6 @@ export interface VievalVitestCompatReporter {
   onTestRunStart?: (specifications: readonly { moduleId: string, projectName: string }[]) => Awaitable<void>
 }
 
-/**
- * Project-scoped bridge that adapts vieval lifecycle events to vitest-style hooks.
- */
-export interface VievalVitestCompatReporterBridge {
-  onCaseEnd: (payload: CliReporterCaseEndPayload) => Promise<void>
-  onCaseStart: (payload: CliReporterCaseStartPayload) => Promise<void>
-  onRunEnd: (options: { failed: boolean }) => Promise<void>
-  onRunStart: () => Promise<void>
-  onTaskEnd: (payload: CliReporterTaskEndPayload) => Promise<void>
-  onTaskQueued: (payload: CliReporterTaskQueuedPayload) => Promise<void>
-  onTaskStart: (payload: CliReporterTaskStartPayload) => Promise<void>
-}
-
 export type VievalVitestCompatReporterReference
   = readonly [VievalVitestCompatReporterValue, unknown?]
     | VievalVitestCompatReporterValue
@@ -75,25 +64,31 @@ export type VievalVitestCompatReporterValue = string | VievalVitestCompatReporte
 type Awaitable<T> = Promise<T> | T
 
 /**
- * Creates a project-level vitest-compatible reporter bridge.
+ * Subscribes the project's vitest-compatible reporters to the run event bus.
  *
  * Use when:
  * - `vieval` should reuse vitest-like reporter callbacks without changing CLI output contracts
  *
  * Expects:
  * - references point to modules whose default export is a reporter instance or constructor
+ * - it is called before `task.queued` is emitted, so reporters see every module
+ * - `project.started` / `project.ended` are awaited by the emitter, so reporter run hooks finish in order
  *
  * Returns:
- * - `null` when no reporter references are configured
+ * - an unsubscribe function; a no-op when no reporter is configured or loadable
+ *
+ * Call stack:
+ *
+ * runVievalCli (../run)
+ *   -> {@link subscribeVitestCompatReporters}
+ *     -> project's `task.*` / `case.*` / `project.*` events
+ *       -> `onTestModule*` / `onTestCase*` / `onTestRun*` hooks
  */
-export async function createVievalVitestCompatReporterBridge(options: {
+export async function subscribeVitestCompatReporters(options: {
+  bus: RunEventBus
   projectName: string
   references: readonly VievalVitestCompatReporterReference[]
-}): Promise<null | VievalVitestCompatReporterBridge> {
-  if (options.references.length === 0) {
-    return null
-  }
-
+}): Promise<() => void> {
   const loadedReporters: VievalVitestCompatReporter[] = []
 
   for (const reference of options.references) {
@@ -113,7 +108,7 @@ export async function createVievalVitestCompatReporterBridge(options: {
   }
 
   if (loadedReporters.length === 0) {
-    return null
+    return () => {}
   }
 
   const modulesByTaskId = new Map<string, VievalVitestCompatModule>()
@@ -151,54 +146,78 @@ export async function createVievalVitestCompatReporterBridge(options: {
     return created
   }
 
-  return {
-    async onCaseEnd(payload) {
-      const taskCase = getOrCreateCase(payload.taskId, payload.caseId)
-      taskCase.state = payload.state === 'timeout' ? 'failed' : payload.state
-      await emitToReporters(loadedReporters, reporter => reporter.onTestCaseResult?.(taskCase))
-    },
+  const isOwnProject = (projectId: string | undefined): boolean => projectId === options.projectName
+  const emit = async (callback: (reporter: VievalVitestCompatReporter) => Awaitable<void> | void): Promise<void> => await emitToReporters(loadedReporters, callback)
 
-    async onCaseStart(payload) {
-      const taskCase = getOrCreateCase(payload.taskId, payload.caseId)
-      await emitToReporters(loadedReporters, reporter => reporter.onTestCaseReady?.(taskCase))
-    },
-
-    async onRunEnd(run) {
-      const modules = [...modulesByTaskId.values()]
-      const errors = run.failed
-        ? [{ message: 'vieval run failed' }]
-        : []
-      await emitToReporters(loadedReporters, reporter => reporter.onTestRunEnd?.(modules, errors, run.failed ? 'failed' : 'passed'))
-    },
-
-    async onRunStart() {
+  const unsubscribes = [
+    options.bus.on(taskQueued, async ({ projectId, taskId }) => {
+      if (!isOwnProject(projectId) || taskId == null) {
+        return
+      }
+      const module = getOrCreateModule(taskId)
+      await emit(reporter => reporter.onTestModuleQueued?.(module))
+      await emit(reporter => reporter.onTestModuleCollected?.(module))
+    }),
+    options.bus.on(projectStarted, async ({ projectId }) => {
+      if (!isOwnProject(projectId)) {
+        return
+      }
       const specifications = [...modulesByTaskId.values()].map(module => ({
         moduleId: module.id,
         projectName: module.projectName,
       }))
-      await emitToReporters(loadedReporters, reporter => reporter.onTestRunStart?.(specifications))
-    },
-
-    async onTaskEnd(payload) {
-      const module = getOrCreateModule(payload.taskId)
-      if (payload.state === 'failed') {
-        const syntheticCase = getOrCreateCase(payload.taskId, `${payload.taskId}:task`)
-        syntheticCase.state = 'failed'
-        await emitToReporters(loadedReporters, reporter => reporter.onTestCaseResult?.(syntheticCase))
+      await emit(reporter => reporter.onTestRunStart?.(specifications))
+    }),
+    options.bus.on(taskStarted, async ({ projectId, taskId }) => {
+      if (!isOwnProject(projectId) || taskId == null) {
+        return
       }
-      await emitToReporters(loadedReporters, reporter => reporter.onTestModuleEnd?.(module))
-    },
+      const module = getOrCreateModule(taskId)
+      await emit(reporter => reporter.onTestModuleStart?.(module))
+    }),
+    options.bus.on(caseStarted, async ({ caseId, projectId, taskId }) => {
+      if (!isOwnProject(projectId) || taskId == null || caseId == null) {
+        return
+      }
+      const taskCase = getOrCreateCase(taskId, caseId)
+      await emit(reporter => reporter.onTestCaseReady?.(taskCase))
+    }),
+    options.bus.on(caseEnded, async ({ caseId, data, projectId, taskId }) => {
+      if (!isOwnProject(projectId) || taskId == null || caseId == null) {
+        return
+      }
+      const taskCase = getOrCreateCase(taskId, caseId)
+      taskCase.state = data.state === 'timeout' ? 'failed' : data.state
+      await emit(reporter => reporter.onTestCaseResult?.(taskCase))
+    }),
+    options.bus.on(taskEnded, async ({ data, projectId, taskId }) => {
+      if (!isOwnProject(projectId) || taskId == null) {
+        return
+      }
+      const module = getOrCreateModule(taskId)
+      if (data.state === 'failed') {
+        const syntheticCase = getOrCreateCase(taskId, `${taskId}:task`)
+        syntheticCase.state = 'failed'
+        await emit(reporter => reporter.onTestCaseResult?.(syntheticCase))
+      }
+      await emit(reporter => reporter.onTestModuleEnd?.(module))
+    }),
+    options.bus.on(projectEnded, async ({ data, projectId }) => {
+      if (!isOwnProject(projectId)) {
+        return
+      }
+      const modules = [...modulesByTaskId.values()]
+      const errors = data.failed
+        ? [{ message: 'vieval run failed' }]
+        : []
+      await emit(reporter => reporter.onTestRunEnd?.(modules, errors, data.failed ? 'failed' : 'passed'))
+    }),
+  ]
 
-    async onTaskQueued(payload) {
-      const module = getOrCreateModule(payload.taskId)
-      await emitToReporters(loadedReporters, reporter => reporter.onTestModuleQueued?.(module))
-      await emitToReporters(loadedReporters, reporter => reporter.onTestModuleCollected?.(module))
-    },
-
-    async onTaskStart(payload) {
-      const module = getOrCreateModule(payload.taskId)
-      await emitToReporters(loadedReporters, reporter => reporter.onTestModuleStart?.(module))
-    },
+  return () => {
+    for (const unsubscribe of unsubscribes) {
+      unsubscribe()
+    }
   }
 }
 

@@ -1,17 +1,15 @@
+import type { CaseEndedData, CaseStartedData, RunEventEnvelope } from '../events'
+
+import * as v from 'valibot'
+
+import { caseEnded, caseEndedDataSchema, caseStarted, caseStartedDataSchema, metricRecorded, metricRecordedDataSchema, scoreRecorded, scoreRecordedDataSchema } from '../events'
+
 /** Arguments for building normalized case records from report events. */
 export interface BuildCaseRecordsArgs {
-  /** Default attempt id for events that do not carry one. */
-  attemptId: string
-  /** Source report events ordered by occurrence. */
-  events: readonly CaseRecordSourceEvent[]
-  /** Default experiment id for events that do not carry one. */
-  experimentId: string
-  /** Default project name for events that do not carry one. */
+  /** Run events ordered by `seq`. */
+  events: readonly RunEventEnvelope[]
+  /** Project name for events without `projectId`, for example from custom project executors. */
   projectName: string
-  /** Default run id for events that do not carry one. */
-  runId: string
-  /** Default workspace id for events that do not carry one. */
-  workspaceId: string
 }
 
 /** Scalar and array metric values persisted in case records. */
@@ -70,32 +68,6 @@ export interface CaseRecord {
   workspaceId: string
 }
 
-/** Event envelope accepted by the local report record processor. */
-export interface CaseRecordSourceEvent {
-  /** Optional attempt id override from persisted events. */
-  attemptId?: string
-  /** Optional case id from current CLI event envelopes. */
-  caseId?: string
-  /** Optional event payload from reporter hooks or lifecycle capture. */
-  data?: unknown
-  /** Event name, including `task.case.*` and current CLI lifecycle names. */
-  event: string
-  /** Optional experiment id override from persisted events. */
-  experimentId?: string
-  /** Optional project id/name from current CLI event envelopes. */
-  projectId?: string
-  /** Optional project name from metadata-rich reporter events. */
-  projectName?: string
-  /** Optional run id override from persisted events. */
-  runId?: string
-  /** Optional task id from current CLI event envelopes. */
-  taskId?: string
-  /** Optional event timestamp from current CLI event envelopes. */
-  timestamp?: string
-  /** Optional workspace id override from persisted events. */
-  workspaceId?: string
-}
-
 /** Terminal state stored for one normalized case record. */
 export type CaseRecordState = 'failed' | 'passed' | 'skipped' | 'timeout'
 
@@ -148,8 +120,8 @@ interface CaseDraft {
  * - report commands need one final record per observed case outcome
  *
  * Expects:
- * - events are ordered by occurrence where possible
- * - lifecycle events use either `task.case.start`/`task.case.end` or current CLI `CaseStarted`/`CaseEnded` names
+ * - events are schema 2 envelopes ordered by `seq`
+ * - case events carry `taskId` and `caseId`; payloads that fail their event schema are skipped
  *
  * Returns:
  * - records for cases that emitted an end lifecycle event
@@ -159,33 +131,37 @@ export function buildCaseRecords(args: BuildCaseRecordsArgs): CaseRecord[] {
   const completedKeys: string[] = []
 
   for (const event of args.events) {
-    const normalizedEvent = normalizeCaseEventName(event.event)
-    if (normalizedEvent == null) {
+    const { caseId, taskId } = event
+    if (caseId == null || taskId == null) {
       continue
     }
 
-    const ids = extractEventIds(event, args)
-    if (ids.caseId.length === 0 || ids.taskId.length === 0) {
-      continue
+    if (event.event === caseStarted.id) {
+      const data = parseData(caseStartedDataSchema, event)
+      if (data != null) {
+        applyCaseStart(getOrCreateDraft(drafts, event, args, data.name), event, data)
+      }
     }
-
-    const draft = getOrCreateDraft(drafts, ids, event, args)
-    applyIdentity(draft, ids, event, args)
-
-    if (normalizedEvent === 'start') {
-      applyCaseStart(draft, event)
+    else if (event.event === metricRecorded.id) {
+      const data = parseData(metricRecordedDataSchema, event)
+      if (data != null) {
+        getOrCreateDraft(drafts, event, args, caseId).metrics[data.name] = data.value
+      }
     }
-    else if (normalizedEvent === 'metric') {
-      applyCaseMetric(draft, event)
+    else if (event.event === scoreRecorded.id) {
+      const data = parseData(scoreRecordedDataSchema, event)
+      if (data != null) {
+        getOrCreateDraft(drafts, event, args, caseId).scores[data.kind] = data.score
+      }
     }
-    else if (normalizedEvent === 'score') {
-      applyCaseScore(draft, event)
-    }
-    else {
-      applyCaseEnd(draft, event)
-      const key = createCaseKey(ids.taskId, ids.caseId)
-      if (!completedKeys.includes(key)) {
-        completedKeys.push(key)
+    else if (event.event === caseEnded.id) {
+      const data = parseData(caseEndedDataSchema, event)
+      if (data != null) {
+        applyCaseEnd(getOrCreateDraft(drafts, event, args, data.name), event, data)
+        const key = createCaseKey(taskId, caseId)
+        if (!completedKeys.includes(key)) {
+          completedKeys.push(key)
+        }
       }
     }
   }
@@ -268,80 +244,25 @@ function addRecordScores(summary: ScoreSummary, record: CaseRecord): void {
   }
 }
 
-function applyCaseEnd(draft: CaseDraft, event: CaseRecordSourceEvent): void {
-  const data = asRecord(event.data)
-  draft.caseName = extractCaseName(event) ?? draft.caseName
-  draft.endedAt = stringFrom(data?.endedAt) ?? event.timestamp ?? draft.endedAt
-  draft.output = data != null && 'output' in data ? data.output : draft.output
-  draft.state = normalizeState(stringFrom(data?.state)) ?? 'failed'
+function applyCaseEnd(draft: CaseDraft, event: RunEventEnvelope, data: CaseEndedData): void {
+  draft.caseName = data.name
+  draft.endedAt = event.time
+  draft.output = data.output ?? draft.output
+  draft.state = data.state
   draft.scores.exact ??= draft.state === 'passed' ? 1 : 0
 }
 
-function applyCaseMetric(draft: CaseDraft, event: CaseRecordSourceEvent): void {
-  const data = asRecord(event.data)
-  const name = stringFrom(data?.name)
-  if (name == null) {
-    return
-  }
-
-  const value = data?.value
-  if (isCaseMetricValue(value)) {
-    draft.metrics[name] = value
-  }
-}
-
-function applyCaseScore(draft: CaseDraft, event: CaseRecordSourceEvent): void {
-  const data = asRecord(event.data)
-  const kind = stringFrom(data?.kind) ?? stringFrom(data?.name) ?? stringFrom(data?.['vieval.score.kind'])
-  const score = numberFrom(data?.score) ?? numberFrom(data?.value) ?? numberFrom(data?.['vieval.score.value'])
-  if (kind == null || score == null) {
-    return
-  }
-
-  draft.scores[kind] = score
-}
-
-function applyCaseStart(draft: CaseDraft, event: CaseRecordSourceEvent): void {
-  const data = asRecord(event.data)
+function applyCaseStart(draft: CaseDraft, event: RunEventEnvelope, data: CaseStartedData): void {
   draft.startCount += 1
-  draft.caseName = extractCaseName(event) ?? draft.caseName
-  draft.startedAt ??= stringFrom(data?.startedAt) ?? event.timestamp
+  draft.caseName = data.name
+  draft.startedAt ??= event.time
   draft.endedAt = undefined
-  draft.input = undefined
   draft.metrics = {}
   draft.output = undefined
   draft.scores = {}
   draft.state = undefined
-  draft.input = data != null && 'input' in data ? data.input : draft.input
-
-  const retryIndex = numberFrom(data?.retryIndex)
-  if (retryIndex != null) {
-    draft.retryCount = Math.max(draft.retryCount, retryIndex)
-    return
-  }
-
-  draft.retryCount = Math.max(draft.retryCount, draft.startCount - 1)
-}
-
-function applyIdentity(
-  draft: CaseDraft,
-  ids: ReturnType<typeof extractEventIds>,
-  event: CaseRecordSourceEvent,
-  args: BuildCaseRecordsArgs,
-): void {
-  draft.attemptId = ids.attemptId || args.attemptId
-  draft.experimentId = ids.experimentId || args.experimentId
-  draft.projectName = extractExplicitProjectName(event) ?? draft.projectName
-  draft.runId = ids.runId || args.runId
-  draft.workspaceId = ids.workspaceId || args.workspaceId
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  if (value == null || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined
-  }
-
-  return value as Record<string, unknown>
+  draft.input = data.input
+  draft.retryCount = Math.max(draft.retryCount, data.retryIndex ?? draft.startCount - 1)
 }
 
 /**
@@ -367,38 +288,6 @@ function calculateDurationMs(startedAt: string, endedAt: string): number {
 
 function createCaseKey(taskId: string, caseId: string): string {
   return `${taskId}\u0000${caseId}`
-}
-
-function extractCaseName(event: CaseRecordSourceEvent): string | undefined {
-  const data = asRecord(event.data)
-  return stringFrom(data?.caseName) ?? stringFrom(data?.name)
-}
-
-function extractEventIds(event: CaseRecordSourceEvent, args: BuildCaseRecordsArgs): {
-  attemptId: string
-  caseId: string
-  experimentId: string
-  projectName: string
-  runId: string
-  taskId: string
-  workspaceId: string
-} {
-  const data = asRecord(event.data)
-
-  return {
-    attemptId: stringFrom(data?.attemptId) ?? event.attemptId ?? args.attemptId,
-    caseId: stringFrom(data?.caseId) ?? event.caseId ?? '',
-    experimentId: stringFrom(data?.experimentId) ?? event.experimentId ?? args.experimentId,
-    projectName: stringFrom(data?.projectName) ?? event.projectName ?? event.projectId ?? args.projectName,
-    runId: stringFrom(data?.runId) ?? event.runId ?? args.runId,
-    taskId: stringFrom(data?.taskId) ?? event.taskId ?? '',
-    workspaceId: stringFrom(data?.workspaceId) ?? event.workspaceId ?? args.workspaceId,
-  }
-}
-
-function extractExplicitProjectName(event: CaseRecordSourceEvent): string | undefined {
-  const data = asRecord(event.data)
-  return stringFrom(data?.projectName) ?? event.projectName ?? event.projectId
 }
 
 function finalizeScoreSummary(summary: ScoreSummary): ScoreSummary {
@@ -441,29 +330,31 @@ function getGroupValue(record: CaseRecord, key: string): { exists: false } | { e
 
 function getOrCreateDraft(
   drafts: Map<string, CaseDraft>,
-  ids: ReturnType<typeof extractEventIds>,
-  event: CaseRecordSourceEvent,
+  event: RunEventEnvelope,
   args: BuildCaseRecordsArgs,
+  caseName: string,
 ): CaseDraft {
-  const key = createCaseKey(ids.taskId, ids.caseId)
+  const caseId = event.caseId ?? ''
+  const taskId = event.taskId ?? ''
+  const key = createCaseKey(taskId, caseId)
   const existing = drafts.get(key)
   if (existing != null) {
     return existing
   }
 
   const draft: CaseDraft = {
-    attemptId: ids.attemptId,
-    caseId: ids.caseId,
-    caseName: extractCaseName(event) ?? ids.caseId,
-    experimentId: ids.experimentId,
+    attemptId: event.attemptId,
+    caseId,
+    caseName,
+    experimentId: event.experimentId,
     metrics: {},
-    projectName: ids.projectName || args.projectName,
+    projectName: event.projectId ?? args.projectName,
     retryCount: 0,
-    runId: ids.runId,
+    runId: event.runId,
     scores: {},
     startCount: 0,
-    taskId: ids.taskId,
-    workspaceId: ids.workspaceId,
+    taskId,
+    workspaceId: event.workspaceId,
   }
   drafts.set(key, draft)
   return draft
@@ -477,40 +368,12 @@ function isCaseMetricValue(value: unknown): value is CaseMetricValue {
   return Array.isArray(value)
 }
 
-function normalizeCaseEventName(eventName: string): 'end' | 'metric' | 'score' | 'start' | undefined {
-  if (eventName === 'task.case.start' || eventName === 'CaseStarted') {
-    return 'start'
-  }
-
-  if (eventName === 'task.case.metric') {
-    return 'metric'
-  }
-
-  if (eventName === 'task.case.score') {
-    return 'score'
-  }
-
-  if (eventName === 'task.case.end' || eventName === 'CaseEnded') {
-    return 'end'
-  }
-
-  return undefined
-}
-
-function normalizeState(value: string | undefined): CaseRecordState | undefined {
-  if (value === 'failed' || value === 'passed' || value === 'skipped' || value === 'timeout') {
-    return value
-  }
-
-  return undefined
-}
-
-function numberFrom(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-function stringFrom(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined
+/**
+ * Validates the payload of one known event; malformed payloads are skipped instead of failing the whole report.
+ */
+function parseData<TSchema extends v.GenericSchema>(schema: TSchema, event: RunEventEnvelope): undefined | v.InferOutput<TSchema> {
+  const result = v.safeParse(schema, event.data)
+  return result.success ? result.output : undefined
 }
 
 function toCaseRecord(draft: CaseDraft): CaseRecord {

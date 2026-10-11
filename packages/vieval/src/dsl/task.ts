@@ -1,6 +1,7 @@
 import type { TaskConcurrencyConfig, TaskExecutionPolicy, TaskRunContext, TaskRunOutput } from '../config'
 import type { RunScoreKind } from '../core/runner'
 import type { TelemetryAttributeValue } from '../core/telemetry'
+import type { RunEventDefinition, RunEventEmitter } from '../events'
 
 import { errorMessageFrom, sleep } from '@moeru/std'
 
@@ -8,6 +9,7 @@ import { defineEval, defineTask } from '../config'
 import { runWithCaseOutput } from '../core/runner/case-output'
 import { createSchedulerQueue } from '../core/scheduler/queue'
 import { createNoopTelemetryRuntime } from '../core/telemetry'
+import { caseEnded, caseOutput, caseStarted, metricRecorded, scoreRecorded } from '../events'
 import { registerEvalDefinition } from './registry'
 
 /**
@@ -170,18 +172,6 @@ function autoRetryDelayMs(retryIndex: number): number {
   return 500 * 2 ** (retryIndex - 1)
 }
 
-/**
- * Calls one reporter hook. Hooks are best-effort observers, so their errors are swallowed.
- */
-function callReporterHook(call: () => void): void {
-  try {
-    call()
-  }
-  catch {
-    // Reporter hooks must never affect task scoring.
-  }
-}
-
 function canAttachMetricAsAttribute(value: TelemetryAttributeValue): value is boolean | number | readonly boolean[] | readonly number[] | readonly string[] | string {
   if (isTelemetryAttributeScalar(value)) {
     return true
@@ -260,14 +250,17 @@ function createCaseBuilder(registeredCases: RegisteredCase<unknown>[]): Describe
   }
 }
 
+/**
+ * Creates the stable case id carried by every case event; the CLI and reports reuse it as-is.
+ */
+function createCaseId(index: number, name: string): string {
+  return `${index}:${encodeURIComponent(name)}`
+}
+
 function createCaseTimeoutError(timeout: number): Error {
   const error = new Error(`Case timed out after ${timeout}ms.`)
   error.name = 'TimeoutError'
   return error
-}
-
-function createTaskCaseReporterId(index: number, name: string): string {
-  return `${index}:${encodeURIComponent(name)}`
 }
 
 function emitCaseOutcome(
@@ -277,14 +270,32 @@ function emitCaseOutcome(
   index: number,
   totalCases: number,
 ): void {
-  callReporterHook(() => context.reporterHooks?.onCaseEnd?.({
+  emitSafely(context.events?.scope({ caseId: createCaseId(index, taskCase.name) }), caseEnded, {
     ...(outcome.errorMessage == null ? {} : { errorMessage: outcome.errorMessage }),
     index,
     ...(outcome.output === undefined ? {} : { output: outcome.output }),
     name: taskCase.name,
     state: outcome.state,
     total: totalCases,
-  }))
+  })
+}
+
+/**
+ * Emits one run event. Subscribers are best-effort observers, so emitter errors are swallowed.
+ */
+function emitSafely<TData>(events: RunEventEmitter | undefined, definition: RunEventDefinition<TData>, data: TData): void {
+  if (events == null) {
+    return
+  }
+
+  try {
+    events.emit(definition, data).catch(() => {
+      // Run event subscribers must never affect task scoring.
+    })
+  }
+  catch {
+    // Run event subscribers must never affect task scoring.
+  }
 }
 
 async function executeRegisteredCase(
@@ -307,7 +318,7 @@ async function executeRegisteredCase(
       }
     }
 
-    callReporterHook(() => context.reporterHooks?.onCaseStart?.({
+    emitSafely(context.events?.scope({ caseId: createCaseId(index, taskCase.name) }), caseStarted, {
       ...(resolvedPolicy.autoRetry > 0
         ? {
             autoRetry: resolvedPolicy.autoRetry,
@@ -318,7 +329,7 @@ async function executeRegisteredCase(
       ...(taskCase.input === undefined ? {} : { input: taskCase.input }),
       name: taskCase.name,
       total: totalCases,
-    }))
+    })
     lastOutcome = await runCaseOnce(context, taskCase, index, resolvedPolicy.timeout)
     if (lastOutcome.state === 'passed') {
       return lastOutcome
@@ -404,7 +415,8 @@ async function runCaseOnce(
   const customScoresByKind = new Map<RunScoreKind, number>()
   const abortController = new AbortController()
   const telemetry = context.telemetry ?? createNoopTelemetryRuntime()
-  const caseId = createTaskCaseReporterId(index, taskCase.name)
+  const caseId = createCaseId(index, taskCase.name)
+  const events = context.events?.scope({ caseId })
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined
   let timedOut = false
   let settled = false
@@ -418,6 +430,7 @@ async function runCaseOnce(
     }, async () => {
       const runCase = () => taskCase.run({
         ...context,
+        events,
         matrix: {
           ...cloneCaseMatrix(context.task.matrix),
           inputs: taskCase.input,
@@ -427,14 +440,7 @@ async function runCaseOnce(
             return
           }
 
-          callReporterHook(() => context.reporterHooks?.onEvent?.({
-            caseId,
-            data: {
-              name,
-              value,
-            },
-            event: 'task.case.metric',
-          }))
+          emitSafely(events, metricRecorded, { name, value })
           telemetry.addEvent('vieval.case.metric', { name, value })
           if (canAttachMetricAsAttribute(value)) {
             telemetry.setAttributes({ [name]: value })
@@ -451,21 +457,14 @@ async function runCaseOnce(
             'vieval.score.kind': kind,
             'vieval.score.value': score,
           })
-          callReporterHook(() => context.reporterHooks?.onEvent?.({
-            caseId,
-            data: { kind, score },
-            event: 'task.case.score',
-          }))
+          emitSafely(events, scoreRecorded, { kind, score })
         },
         signal: abortController.signal,
       })
-      const hooks = context.reporterHooks
-      // Without an output hook nobody would print captured output, so the case writes to the terminal directly.
-      const runPromise = Promise.resolve(hooks?.onCaseOutput == null
+      // Without run events nobody would print captured output, so the case writes to the terminal directly.
+      const runPromise = Promise.resolve(events == null
         ? runCase()
-        : runWithCaseOutput((stream, content) => {
-            callReporterHook(() => hooks.onCaseOutput?.({ content, index, name: taskCase.name, stream }))
-          }, runCase))
+        : runWithCaseOutput((stream, content) => emitSafely(events, caseOutput, { content, stream }), runCase))
 
       if (timeout != null) {
         const timeoutPromise = new Promise<never>((_, reject) => {

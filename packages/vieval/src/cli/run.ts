@@ -1,10 +1,11 @@
-import type { TaskCaseReporterEndPayload, TaskCaseReporterOutputPayload, TaskCaseReporterPayload, TaskConcurrencyConfig, TaskReporterEventPayload, TaskReporterHooks } from '../config'
+import type { TaskConcurrencyConfig } from '../config'
 import type { AggregatedRunResults, ScheduledTask, ScheduledTaskExecutor, TaskExecutionContext } from '../core/runner'
+import type { RunEventBus } from '../core/runner/event-bus'
 import type { TelemetryRuntime } from '../core/telemetry'
+import type { RunEventEmitter, RunEventEnvelope } from '../events'
 import type { CliProjectExecutorContext, LoadVievalCliConfigOptions, NormalizedCliProjectConfig } from './config'
 import type { CliReporter, SummaryReporter, SummaryReporterCaseStartPayload, SummaryReporterTaskQueuedPayload } from './reporters'
 import type { WindowRendererTimer } from './reporters/renderers/windowed-renderer'
-import type { VievalVitestCompatReporterBridge } from './reporters/vitest-compat-reporter'
 
 import process from 'node:process'
 
@@ -17,14 +18,16 @@ import { errorMessageFrom } from '@moeru/std'
 
 import { collectEvalEntries, createFilesystemTaskCacheRuntime, createRunnerRuntimeContext, createRunnerSchedule, createSchedulerRuntime, createTaskExecutionContext, RunnerExecutionError, runScheduledTasks } from '../core/runner'
 import { createProcessOutputInterceptor } from '../core/runner/case-output'
+import { createRunEventBus } from '../core/runner/event-bus'
 import { createNoopTelemetryRuntime, createOpenTelemetryRuntime } from '../core/telemetry'
+import { caseEnded, caseOutput, caseStarted, projectEnded, projectStarted, runEnded, runStarted, taskEnded, taskQueued, taskStarted } from '../events'
 import { loadVievalCliConfig } from './config'
 import { discoverEvalFiles } from './discovery'
 import { loadEvalModulesWithVitestRuntime } from './module-runtime'
 import { writeRunReportArtifacts } from './report-artifacts'
 import { createCliReporter } from './reporters'
 import { WindowRenderer } from './reporters/renderers/windowed-renderer'
-import { createVievalVitestCompatReporterBridge } from './reporters/vitest-compat-reporter'
+import { subscribeVitestCompatReporters } from './reporters/vitest-compat-reporter'
 
 /**
  * Captures one failed case with its message for CLI and JSON debugging output.
@@ -181,30 +184,9 @@ interface CliRunIdentity {
   workspaceId: string
 }
 
-interface CliRunRecordedEventMetadata {
-  caseId?: string
-  projectName?: string
-  taskId?: string
-}
-
 type CliRunReporter = Omit<CliReporter, 'onCaseStart' | 'onTaskQueued'> & {
   onCaseStart: (payload: SummaryReporterCaseStartPayload) => void
   onTaskQueued: (payload: SummaryReporterTaskQueuedPayload) => void
-}
-
-interface CliRunReportEvent {
-  attemptId: string
-  caseId?: string
-  data: unknown
-  event: string
-  experimentId: string
-  projectId?: string
-  runId: string
-  schemaVersion: 1
-  taskId?: string
-  timestamp: string
-  version: 1
-  workspaceId: string
 }
 
 type CliTaskExecutionContext = CliProjectExecutorContext
@@ -233,14 +215,6 @@ type PreparedCliProjectResult
 interface ProcessEnvSnapshotValue {
   existed: boolean
   value: string | undefined
-}
-
-interface RunCliProjectCaseCounters {
-  failed: number
-  passed: number
-  seenCaseIds: Set<string>
-  skipped: number
-  timeout: number
 }
 
 interface RunCliReporterCounters {
@@ -423,7 +397,9 @@ export function hasRunFailures(output: CliRunOutput): boolean {
  *   -> {@link discoverEvalFiles}
  *   -> {@link collectEvalEntries}
  *   -> {@link createRunnerSchedule}
- *   -> {@link runScheduledTasks} (optional)
+ *   -> {@link createRunEventBus}
+ *     -> subscribers: {@link subscribeRunReporter}, {@link createEventRecorder}, {@link subscribeVitestCompatReporters}
+ *   -> {@link runScheduledTasks} (optional), emitting `task.*` and, through `context.events`, `case.*`
  *
  * Use when:
  * - running eval collection and scheduling from a single command
@@ -450,12 +426,12 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
     const selectedProjects = filterProjectsByName(loadedConfig.projects, options.project ?? [])
     const preparedProjects = await Promise.all(selectedProjects.map(async project => prepareProject(project)))
     const identity = createRunIdentity(options, preparedProjects)
-    const eventRecorder = createEventRecorder(identity)
-    const runReporter = createReporterWithEventCapture(
-      createRunReporter(options.reporter),
-      eventRecorder.record,
-    )
+    const bus = createRunEventBus(identity)
+    const eventRecorder = createEventRecorder(bus)
+    const runReporter = createRunReporter(options.reporter)
     reporter = runReporter
+    subscribeRunReporter(bus, runReporter)
+    const reporterCounters = subscribeTaskCounters(bus)
 
     output = await telemetry.withSpan('vieval.run', {
       'vieval.attempt.id': identity.attemptId,
@@ -485,19 +461,22 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
 
         return sum
       }, 0)
-      const reporterCounters: RunCliReporterCounters = {
-        failedTasks: 0,
-        passedTasks: 0,
-        skippedTasks: 0,
-      }
+      // Reporters must be subscribed before `task.queued`, so they see every module of their project.
+      await Promise.all(executableProjects.map(async project => await subscribeVitestCompatReporters({
+        bus,
+        projectName: project.name,
+        references: project.project.reporters,
+      })))
 
-      runReporter.onRunStart({
+      await bus.emit(runStarted, {
         totalTasks,
       })
 
       for (const project of executableProjects) {
         for (const task of project.tasks) {
-          runReporter.onTaskQueued(createTaskQueuePayload(task, project.name))
+          await bus.scope({ projectId: project.name, taskId: task.id }).emit(taskQueued, {
+            displayName: formatTaskDisplayName(task),
+          })
         }
       }
 
@@ -524,9 +503,7 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
             identity,
             options.cacheProjectName,
             telemetry,
-            runReporter,
-            reporterCounters,
-            eventRecorder.record,
+            bus,
             options,
           ))),
         }
@@ -535,7 +512,7 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
         .sort((left, right) => left.index - right.index)
         .map(item => item.summary)
 
-      runReporter.onRunEnd({
+      await bus.emit(runEnded, {
         failedTasks: reporterCounters.failedTasks,
         passedTasks: reporterCounters.passedTasks,
         skippedTasks: reporterCounters.skippedTasks + skippedSummaryTasks,
@@ -647,26 +624,20 @@ function cloneScheduledTaskMatrix(task: ScheduledTask): ScheduledTask['matrix'] 
   }
 }
 
-function createAutoTaskExecutor(
-  reporter: CliRunReporter,
-  projectName: string,
-  recordEvent: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void,
-  projectCaseCounters: RunCliProjectCaseCounters,
-  projectCaseFailures: CliProjectCaseFailure[],
-  vitestCompatReporter?: null | VievalVitestCompatReporterBridge,
-): ScheduledTaskExecutor {
+function createAutoTaskExecutor(): ScheduledTaskExecutor {
   return async (task, context) => {
     const taskDefinition = task.entry.task
     if (taskDefinition == null) {
       throw new Error(`Missing eval task definition for entry "${task.entry.id}".`)
     }
 
+    const cliContext = context as CliProjectExecutorContext
     const output = await taskDefinition.run({
       cache: context.cache,
+      events: cliContext.events,
       models: context.models,
-      reporterHooks: resolveTaskReporterHooks(task, context, reporter, projectName, recordEvent, projectCaseCounters, projectCaseFailures, vitestCompatReporter),
       task,
-      telemetry: (context as CliProjectExecutorContext).telemetry,
+      telemetry: cliContext.telemetry,
     })
 
     return {
@@ -686,13 +657,8 @@ function createCliTaskExecutionContext(
   cacheProjectName: string,
   workspaceId: string,
   telemetry: TelemetryRuntime,
-  reporter: CliRunReporter,
-  projectName: string,
-  recordEvent: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void,
-  projectCaseCounters: RunCliProjectCaseCounters,
-  projectCaseFailures: CliProjectCaseFailure[],
+  events: RunEventEmitter,
   runtimeConcurrency: TaskConcurrencyConfig | undefined,
-  vitestCompatReporter?: null | VievalVitestCompatReporterBridge,
 ): CliTaskExecutionContext {
   return {
     ...createTaskExecutionContext({
@@ -704,7 +670,7 @@ function createCliTaskExecutionContext(
       models,
       task,
     }),
-    reporterHooks: createTaskReporterHooks(task, reporter, projectName, recordEvent, projectCaseCounters, projectCaseFailures, vitestCompatReporter),
+    events,
     runtimeConcurrency,
     telemetry,
   }
@@ -740,41 +706,15 @@ function createColorPalette(enabled: boolean): CliColorPalette {
   }
 }
 
-function createEventRecorder(identity: CliRunIdentity): {
-  events: CliRunReportEvent[]
-  record: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void
-} {
-  const events: CliRunReportEvent[] = []
-  const taskProjectMap = new Map<string, string>()
-
-  return {
-    events,
-    record(event, payload, metadata): void {
-      const maybeTaskPayload = payload as { projectName?: string, taskId?: string }
-      const taskId = metadata?.taskId ?? maybeTaskPayload?.taskId
-      const caseId = metadata?.caseId ?? (payload as { caseId?: string })?.caseId
-      const projectName = metadata?.projectName ?? maybeTaskPayload?.projectName
-
-      if (taskId != null && projectName != null) {
-        taskProjectMap.set(taskId, projectName)
-      }
-
-      events.push({
-        attemptId: identity.attemptId,
-        caseId,
-        data: payload,
-        event,
-        experimentId: identity.experimentId,
-        projectId: taskId == null ? undefined : taskProjectMap.get(taskId),
-        runId: identity.runId,
-        schemaVersion: 1,
-        taskId,
-        timestamp: new Date().toISOString(),
-        version: 1,
-        workspaceId: identity.workspaceId,
-      })
-    },
-  }
+/**
+ * Keeps every run event for the report written when the run ends.
+ */
+function createEventRecorder(bus: RunEventBus): { events: RunEventEnvelope[] } {
+  const events: RunEventEnvelope[] = []
+  bus.onAny((envelope) => {
+    events.push(envelope)
+  })
+  return { events }
 }
 
 function createExperimentMatrixRows(tasks: readonly ScheduledTask[]): string[] {
@@ -860,49 +800,6 @@ function createProjectMatrixSummary(tasks: readonly ScheduledTask[]): CliProject
     evalRows: evalRows.size,
     runAxes: [...runAxes].sort(),
     runRows: runRows.size,
-  }
-}
-
-function createReporterWithEventCapture(
-  reporter: CliRunReporter,
-  recordEvent: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void,
-): CliRunReporter {
-  return {
-    dispose() {
-      reporter.dispose()
-    },
-    onCaseEnd(payload) {
-      recordEvent('CaseEnded', payload)
-      reporter.onCaseEnd(payload)
-    },
-    onCaseOutput(payload) {
-      recordEvent('CaseOutput', payload)
-      reporter.onCaseOutput(payload)
-    },
-    onCaseStart(payload) {
-      recordEvent('CaseStarted', payload)
-      reporter.onCaseStart(payload)
-    },
-    onRunEnd(payload) {
-      recordEvent('RunEnded', payload)
-      reporter.onRunEnd(payload)
-    },
-    onRunStart(payload) {
-      recordEvent('RunStarted', payload)
-      reporter.onRunStart(payload)
-    },
-    onTaskEnd(payload) {
-      recordEvent('TaskEnded', payload)
-      reporter.onTaskEnd(payload)
-    },
-    onTaskQueued(payload) {
-      recordEvent('TaskQueued', payload)
-      reporter.onTaskQueued(payload)
-    },
-    onTaskStart(payload) {
-      recordEvent('TaskStarted', payload)
-      reporter.onTaskStart(payload)
-    },
   }
 }
 
@@ -1030,144 +927,18 @@ function createScheduledTaskWithRuntimeConcurrency(
   }
 }
 
-function createTaskCaseReporterId(payload: TaskCaseReporterEndPayload | TaskCaseReporterOutputPayload | TaskCaseReporterPayload): string {
-  return `${payload.index}:${encodeURIComponent(payload.name)}`
-}
-
-function createTaskQueuePayload(task: ScheduledTask, projectName: string): SummaryReporterTaskQueuedPayload {
-  return {
-    displayName: formatTaskDisplayName(task),
-    projectName,
-    taskId: task.id,
-  }
-}
-
-function createTaskReporterHooks(
-  task: ScheduledTask,
-  reporter: CliRunReporter,
-  projectName: string,
-  recordEvent: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void,
-  projectCaseCounters?: RunCliProjectCaseCounters,
-  projectCaseFailures?: CliProjectCaseFailure[],
-  vitestCompatReporter?: null | VievalVitestCompatReporterBridge,
-): TaskReporterHooks {
-  function syncCaseTotal(total: number): void {
-    reporter.onTaskQueued({
-      taskId: task.id,
-      totalCases: total,
-    })
-  }
-
-  return {
-    onCaseEnd(payload) {
-      const caseId = createTaskCaseReporterId(payload)
-      if (projectCaseCounters != null) {
-        const projectCaseId = `${task.id}:${caseId}`
-        if (!projectCaseCounters.seenCaseIds.has(projectCaseId)) {
-          projectCaseCounters.seenCaseIds.add(projectCaseId)
-          if (payload.state === 'passed') {
-            projectCaseCounters.passed += 1
-          }
-          else if (payload.state === 'failed') {
-            projectCaseCounters.failed += 1
-          }
-          else if (payload.state === 'timeout') {
-            projectCaseCounters.timeout += 1
-          }
-          else {
-            projectCaseCounters.skipped += 1
-          }
-        }
-      }
-
-      syncCaseTotal(payload.total)
-      if ((payload.state === 'failed' || payload.state === 'timeout') && payload.errorMessage != null && projectCaseFailures != null) {
-        projectCaseFailures.push({
-          caseId,
-          caseName: payload.name,
-          errorMessage: payload.errorMessage,
-          taskId: task.id,
-        })
-      }
-      reporter.onCaseEnd({
-        caseId,
-        errorMessage: payload.errorMessage,
-        output: payload.output,
-        state: payload.state,
-        taskId: task.id,
-      })
-      void vitestCompatReporter?.onCaseEnd({
-        caseId,
-        errorMessage: payload.errorMessage,
-        state: payload.state,
-        taskId: task.id,
-      })
-    },
-    onCaseOutput(payload) {
-      reporter.onCaseOutput({
-        caseId: createTaskCaseReporterId(payload),
-        content: payload.content,
-        stream: payload.stream,
-        taskId: task.id,
-      })
-    },
-    onCaseStart(payload) {
-      const caseId = createTaskCaseReporterId(payload)
-      syncCaseTotal(payload.total)
-      reporter.onCaseStart({
-        autoRetry: payload.autoRetry,
-        caseId,
-        caseName: payload.name,
-        input: payload.input,
-        retryIndex: payload.retryIndex,
-        taskId: task.id,
-      })
-      void vitestCompatReporter?.onCaseStart({
-        caseId,
-        taskId: task.id,
-      })
-    },
-    onEvent(payload: TaskReporterEventPayload) {
-      recordEvent(payload.event, payload.data, {
-        caseId: payload.caseId,
-        projectName,
-        taskId: task.id,
-      })
-    },
-  }
-}
-
 async function executePreparedProject(
   prepared: PreparedCliProjectExecution,
   identity: CliRunIdentity,
   cacheProjectName: string | undefined,
   telemetry: TelemetryRuntime,
-  reporter: CliRunReporter,
-  counters: RunCliReporterCounters,
-  recordEvent: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void,
+  bus: RunEventBus,
   options: RunVievalCliOptions,
 ): Promise<CliProjectSummary> {
   const settledTaskIds = new Set<string>()
-  const projectCaseCounters: RunCliProjectCaseCounters = {
-    failed: 0,
-    passed: 0,
-    seenCaseIds: new Set<string>(),
-    skipped: 0,
-    timeout: 0,
-  }
-  const projectCaseFailures: CliProjectCaseFailure[] = []
-  const vitestCompatReporter = await createVievalVitestCompatReporterBridge({
-    projectName: prepared.name,
-    references: prepared.project.reporters,
-  })
-  const rawTaskExecutor = prepared.project.executor ?? createAutoTaskExecutor(
-    reporter,
-    prepared.name,
-    recordEvent,
-    projectCaseCounters,
-    projectCaseFailures,
-    vitestCompatReporter,
-  )
+  const projectEvents = bus.scope({ projectId: prepared.name })
+  const caseSummary = subscribeProjectCaseSummary(bus, prepared.name)
+  const rawTaskExecutor = prepared.project.executor ?? createAutoTaskExecutor()
   const taskExecutor: ScheduledTaskExecutor = async (task, context) => {
     const runtimeTask = createScheduledTaskWithRuntimeConcurrency(task, prepared.project, options)
     const result = await telemetry.withSpan('vieval.task', {
@@ -1184,13 +955,9 @@ async function executePreparedProject(
     }
   }
 
-  for (const task of prepared.tasks) {
-    await vitestCompatReporter?.onTaskQueued({
-      taskId: task.id,
-    })
-  }
-
-  await vitestCompatReporter?.onRunStart()
+  await projectEvents.emit(projectStarted, {
+    taskCount: prepared.tasks.length,
+  })
 
   try {
     const aggregated = await runScheduledTasks(prepared.tasks, taskExecutor, {
@@ -1202,57 +969,27 @@ async function executePreparedProject(
           cacheProjectName ?? prepared.name,
           identity.workspaceId,
           telemetry,
-          reporter,
-          prepared.name,
-          recordEvent,
-          projectCaseCounters,
-          projectCaseFailures,
+          projectEvents.scope({ taskId: task.id }),
           resolveCliRuntimeConcurrency(options),
-          vitestCompatReporter,
         )
       },
       maxConcurrency: resolveScheduledTaskConcurrency(prepared.project, options),
       onTaskEnd(task, state): void {
         settledTaskIds.add(task.id)
-        reporter.onTaskEnd({
-          state,
-          taskId: task.id,
-        })
-        void vitestCompatReporter?.onTaskEnd({
-          state,
-          taskId: task.id,
-        })
-
-        if (state === 'passed') {
-          counters.passedTasks += 1
-          return
-        }
-
-        counters.failedTasks += 1
+        void projectEvents.scope({ taskId: task.id }).emit(taskEnded, { state })
       },
       onTaskStart(task): void {
-        reporter.onTaskStart({
-          taskId: task.id,
-        })
-        void vitestCompatReporter?.onTaskStart({
-          taskId: task.id,
-        })
+        void projectEvents.scope({ taskId: task.id }).emit(taskStarted, {})
       },
     })
 
-    await vitestCompatReporter?.onRunEnd({
+    await projectEvents.emit(projectEnded, {
       failed: false,
     })
 
     return {
-      caseFailures: projectCaseFailures,
-      caseSummary: {
-        failed: projectCaseCounters.failed,
-        passed: projectCaseCounters.passed,
-        skipped: projectCaseCounters.skipped,
-        timeout: projectCaseCounters.timeout,
-        total: projectCaseCounters.seenCaseIds.size,
-      },
+      caseFailures: caseSummary.failures,
+      caseSummary: caseSummary.toSummary(),
       discoveredEvalFileCount: prepared.discoveredEvalFileCount,
       durationMs: Date.now() - prepared.startedAt,
       entryCount: prepared.entryCount,
@@ -1268,16 +1005,8 @@ async function executePreparedProject(
     const failedTaskId = getFailedTaskId(error)
 
     if (failedTaskId != null && !settledTaskIds.has(failedTaskId)) {
-      counters.failedTasks += 1
       settledTaskIds.add(failedTaskId)
-      reporter.onTaskEnd({
-        state: 'failed',
-        taskId: failedTaskId,
-      })
-      await vitestCompatReporter?.onTaskEnd({
-        state: 'failed',
-        taskId: failedTaskId,
-      })
+      await projectEvents.scope({ taskId: failedTaskId }).emit(taskEnded, { state: 'failed' })
     }
 
     for (const task of prepared.tasks) {
@@ -1285,31 +1014,17 @@ async function executePreparedProject(
         continue
       }
 
-      counters.skippedTasks += 1
       settledTaskIds.add(task.id)
-      reporter.onTaskEnd({
-        state: 'skipped',
-        taskId: task.id,
-      })
-      await vitestCompatReporter?.onTaskEnd({
-        state: 'skipped',
-        taskId: task.id,
-      })
+      await projectEvents.scope({ taskId: task.id }).emit(taskEnded, { state: 'skipped' })
     }
 
-    await vitestCompatReporter?.onRunEnd({
+    await projectEvents.emit(projectEnded, {
       failed: true,
     })
 
     return {
-      caseFailures: projectCaseFailures,
-      caseSummary: {
-        failed: projectCaseCounters.failed,
-        passed: projectCaseCounters.passed,
-        skipped: projectCaseCounters.skipped,
-        timeout: projectCaseCounters.timeout,
-        total: projectCaseCounters.seenCaseIds.size,
-      },
+      caseFailures: caseSummary.failures,
+      caseSummary: caseSummary.toSummary(),
       discoveredEvalFileCount: prepared.discoveredEvalFileCount,
       durationMs: Date.now() - prepared.startedAt,
       entryCount: prepared.entryCount,
@@ -1584,19 +1299,6 @@ function resolveTaskConcurrency(
   return resolveCappedConcurrency(project.concurrency?.task, options.taskConcurrency, 1)
 }
 
-function resolveTaskReporterHooks(
-  task: ScheduledTask,
-  context: CliProjectExecutorContext,
-  reporter: CliRunReporter,
-  projectName: string,
-  recordEvent: (event: string, payload: unknown, metadata?: CliRunRecordedEventMetadata) => void,
-  projectCaseCounters: RunCliProjectCaseCounters,
-  projectCaseFailures: CliProjectCaseFailure[],
-  vitestCompatReporter?: null | VievalVitestCompatReporterBridge,
-): TaskReporterHooks {
-  return context.reporterHooks ?? createTaskReporterHooks(task, reporter, projectName, recordEvent, projectCaseCounters, projectCaseFailures, vitestCompatReporter)
-}
-
 function resolveWorkspaceConcurrency(
   loadedConfig: Awaited<ReturnType<typeof loadVievalCliConfig>>,
   options: RunVievalCliOptions,
@@ -1624,4 +1326,132 @@ function shouldUseColor(): boolean {
   }
 
   return process.stdout.isTTY === true
+}
+
+/**
+ * Counts the case results of one project from `case.ended` events.
+ *
+ * Returns:
+ * - the failures list, filled as cases fail, and a snapshot function for the project summary
+ */
+function subscribeProjectCaseSummary(bus: RunEventBus, projectName: string): {
+  failures: CliProjectCaseFailure[]
+  toSummary: () => CliProjectCaseSummary
+} {
+  const counters = { failed: 0, passed: 0, skipped: 0, timeout: 0 }
+  const seenCaseIds = new Set<string>()
+  const failures: CliProjectCaseFailure[] = []
+
+  bus.on(caseEnded, ({ caseId, data, projectId, taskId }) => {
+    if (projectId !== projectName || taskId == null || caseId == null) {
+      return
+    }
+
+    const projectCaseId = `${taskId}:${caseId}`
+    if (!seenCaseIds.has(projectCaseId)) {
+      seenCaseIds.add(projectCaseId)
+      counters[data.state] += 1
+    }
+
+    if ((data.state === 'failed' || data.state === 'timeout') && data.errorMessage != null) {
+      failures.push({
+        caseId,
+        caseName: data.name,
+        errorMessage: data.errorMessage,
+        taskId,
+      })
+    }
+  })
+
+  return {
+    failures,
+    toSummary: () => ({ ...counters, total: seenCaseIds.size }),
+  }
+}
+
+/**
+ * Forwards run events to the terminal reporter.
+ *
+ * Use when:
+ * - the live window and case output blocks should follow the run's lifecycle
+ *
+ * Expects:
+ * - it is called before `run.started` is emitted
+ */
+function subscribeRunReporter(bus: RunEventBus, reporter: CliRunReporter): void {
+  bus.on(runStarted, ({ data }) => reporter.onRunStart(data))
+  bus.on(taskQueued, ({ data, projectId, taskId }) => {
+    if (taskId != null) {
+      reporter.onTaskQueued({ displayName: data.displayName, projectName: projectId, taskId })
+    }
+  })
+  bus.on(taskStarted, ({ taskId }) => {
+    if (taskId != null) {
+      reporter.onTaskStart({ taskId })
+    }
+  })
+  bus.on(taskEnded, ({ data, taskId }) => {
+    if (taskId != null) {
+      reporter.onTaskEnd({ state: data.state, taskId })
+    }
+  })
+  bus.on(caseStarted, ({ caseId, data, taskId }) => {
+    if (taskId == null || caseId == null) {
+      return
+    }
+    // Case totals are only known once the DSL starts running the task's cases.
+    reporter.onTaskQueued({ taskId, totalCases: data.total })
+    reporter.onCaseStart({
+      autoRetry: data.autoRetry,
+      caseId,
+      caseName: data.name,
+      input: data.input,
+      retryIndex: data.retryIndex,
+      taskId,
+    })
+  })
+  bus.on(caseOutput, ({ caseId, data, taskId }) => {
+    if (taskId != null && caseId != null) {
+      reporter.onCaseOutput({ caseId, content: data.content, stream: data.stream, taskId })
+    }
+  })
+  bus.on(caseEnded, ({ caseId, data, taskId }) => {
+    if (taskId == null || caseId == null) {
+      return
+    }
+    reporter.onTaskQueued({ taskId, totalCases: data.total })
+    reporter.onCaseEnd({
+      caseId,
+      errorMessage: data.errorMessage,
+      output: data.output,
+      state: data.state,
+      taskId,
+    })
+  })
+  bus.on(runEnded, ({ data }) => reporter.onRunEnd(data))
+}
+
+/**
+ * Counts task results of the whole run from `task.ended` events, for `run.ended` totals.
+ */
+function subscribeTaskCounters(bus: RunEventBus): RunCliReporterCounters {
+  const counters: RunCliReporterCounters = {
+    failedTasks: 0,
+    passedTasks: 0,
+    skippedTasks: 0,
+  }
+
+  bus.on(taskEnded, ({ data }) => {
+    if (data.state === 'passed') {
+      counters.passedTasks += 1
+      return
+    }
+    if (data.state === 'failed') {
+      counters.failedTasks += 1
+      return
+    }
+    counters.skippedTasks += 1
+  })
+
+  return counters
 }
