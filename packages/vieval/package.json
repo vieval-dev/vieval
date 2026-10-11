@@ -70,6 +70,9 @@
     "dist",
     "package.json"
   ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "tsdown",
     "eval:run": "node --import tsx src/bin/vieval.ts run",
