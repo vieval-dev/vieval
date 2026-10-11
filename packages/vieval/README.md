@@ -390,12 +390,32 @@ sequenceDiagram
   R->>S: runScheduledTasks(...)
   S->>P: onTaskStart / onTaskEnd
   S->>T: task.run(context)
-  T->>P: reporterHooks.onCaseStart / onCaseEnd
+  T->>P: reporterHooks.onCaseStart / onCaseOutput / onCaseEnd
   S-->>R: aggregated run results
   R->>P: onRunEnd + dispose
   R-->>E: CliRunOutput
   E->>U: static summary or JSON
 ```
+
+### Case Output
+
+`vieval run` executes cases concurrently in one process. While a run is active, the CLI intercepts `process.stdout` / `process.stderr` (and so `console.*`) and folds the output of each case, like `pnpm -r run` folds the output of each package script:
+
+- In a TTY, the live window shows the last lines of each running case under its row (at most 10, fewer when the terminal is short). When the case ends, its output leaves the window. When the run ends, the output of every case is printed once, grouped by task and in case order: a passed case shows `[N lines collapsed]` plus its last 10 lines, a failed case shows all of its output.
+
+  ```txt
+  |osworld-kubernetes| osworld [model=gpt-5.5, repeat=1] > chrome/abc
+  [32 lines collapsed]
+  │ ...last 10 lines...
+  └─ Done in 4 minutes 12 seconds
+  ```
+
+- Without a TTY (CI logs, pipes), each case's full output is printed as one block when the case ends.
+- Output written outside every case (module top level, custom executors) is printed as-is, above the live window.
+- Captured chunks are also recorded as `CaseOutput` events in `--report-out` artifacts.
+- Child processes started with `stdio: 'inherit'` write to the file descriptors directly and are not captured. Pipe their output and write it from the case instead.
+
+See [`examples/case-output`](../../examples/case-output) for a runnable demo.
 
 ## Examples In This Repository
 

@@ -1,3 +1,5 @@
+import type { CaseOutputStream } from '../../core/runner/case-output'
+
 /**
  * Reporter lifecycle contract for `vieval` CLI output.
  *
@@ -18,6 +20,10 @@ export interface CliReporter {
    * Handles case completion.
    */
   onCaseEnd: (payload: CliReporterCaseEndPayload) => void
+  /**
+   * Handles process output written by a running case.
+   */
+  onCaseOutput: (payload: CliReporterCaseOutputPayload) => void
   /**
    * Handles case start.
    */
@@ -72,6 +78,34 @@ export interface CliReporterCaseEndPayload {
    * Terminal outcome for the case.
    */
   state: CliReporterCaseState
+  /**
+   * Stable task identifier.
+   */
+  taskId: string
+}
+
+/**
+ * Payload emitted when a running case writes to `process.stdout` or `process.stderr`.
+ *
+ * Use when:
+ * - showing case output inside the case's own reporter block instead of interleaving it on the terminal
+ *
+ * Expects:
+ * - chunks arrive in write order and may end in the middle of a line
+ */
+export interface CliReporterCaseOutputPayload {
+  /**
+   * Stable case identifier within the task.
+   */
+  caseId: string
+  /**
+   * Raw output chunk.
+   */
+  content: string
+  /**
+   * Process stream that received the chunk.
+   */
+  stream: CaseOutputStream
   /**
    * Stable task identifier.
    */

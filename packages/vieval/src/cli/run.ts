@@ -1,4 +1,4 @@
-import type { TaskCaseReporterEndPayload, TaskCaseReporterPayload, TaskConcurrencyConfig, TaskReporterEventPayload, TaskReporterHooks } from '../config'
+import type { TaskCaseReporterEndPayload, TaskCaseReporterOutputPayload, TaskCaseReporterPayload, TaskConcurrencyConfig, TaskReporterEventPayload, TaskReporterHooks } from '../config'
 import type { AggregatedRunResults, ScheduledTask, ScheduledTaskExecutor, TaskExecutionContext } from '../core/runner'
 import type { TelemetryRuntime } from '../core/telemetry'
 import type { CliProjectExecutorContext, LoadVievalCliConfigOptions, NormalizedCliProjectConfig } from './config'
@@ -16,12 +16,14 @@ import c from 'tinyrainbow'
 import { errorMessageFrom } from '@moeru/std'
 
 import { collectEvalEntries, createFilesystemTaskCacheRuntime, createRunnerRuntimeContext, createRunnerSchedule, createSchedulerRuntime, createTaskExecutionContext, RunnerExecutionError, runScheduledTasks } from '../core/runner'
+import { interceptProcessOutput } from '../core/runner/case-output'
 import { createNoopTelemetryRuntime, createOpenTelemetryRuntime } from '../core/telemetry'
 import { loadVievalCliConfig } from './config'
 import { discoverEvalFiles } from './discovery'
 import { loadEvalModulesWithVitestRuntime } from './module-runtime'
 import { writeRunReportArtifacts } from './report-artifacts'
 import { createCliReporter } from './reporters'
+import { createCaseOutputCollector } from './reporters/case-output'
 import { WindowRenderer } from './reporters/renderers/windowed-renderer'
 import { createVievalVitestCompatReporterBridge } from './reporters/vitest-compat-reporter'
 
@@ -850,6 +852,10 @@ function createReporterWithEventCapture(
       recordEvent('CaseEnded', payload)
       reporter.onCaseEnd(payload)
     },
+    onCaseOutput(payload) {
+      recordEvent('CaseOutput', payload)
+      reporter.onCaseOutput(payload)
+    },
     onCaseStart(payload) {
       recordEvent('CaseStarted', payload)
       reporter.onCaseStart(payload)
@@ -893,60 +899,133 @@ function createRunIdentity(
   }
 }
 
+/**
+ * Creates the terminal reporter for one `vieval run` and takes over process output.
+ *
+ * Use when:
+ * - `runVievalCli` starts executing prepared projects
+ *
+ * Expects:
+ * - `dispose()` runs once the run settles, which restores `process.stdout` / `process.stderr`
+ *
+ * Returns:
+ * - TTY: a live window where each running case shows the tail of its output; the collapsed (pnpm style)
+ *   blocks of all finished cases are printed together when the run ends
+ * - non-TTY: each case's full output printed as one block when the case ends
+ *
+ * Call stack:
+ *
+ * {@link runVievalCli}
+ *   -> {@link createRunReporter}
+ *     -> {@link interceptProcessOutput}
+ *       -> case output (TTY): {@link SummaryReporter.onCaseOutput} -> live tail -> collapsed block at run end
+ *       -> case output (non-TTY): {@link createCaseOutputCollector} -> full block on case end
+ *       -> other output: {@link WindowRenderer.write} (TTY) or the original stream
+ */
 function createRunReporter(options: RunVievalCliReporterOptions | undefined): CliRunReporter {
+  let renderer: undefined | WindowRenderer
+  // Output written outside of a case (for example by project executors or plugins) is printed
+  // above the live window instead of tearing through it.
+  const processOutput = interceptProcessOutput({
+    onUnscopedOutput: (stream, content) => {
+      if (renderer != null) {
+        renderer.write(content)
+        return
+      }
+      writeStream(stream, content)
+    },
+  })
+  const writeOutput = options?.writeOutput ?? processOutput.writeStdout
+  const writeError = options?.writeError ?? processOutput.writeStderr
+  const getColumns = options?.getColumns ?? (() => process.stdout.columns ?? 80)
+  const getNow = options?.getNow ?? (() => Date.now())
   const getRows = options?.getRows ?? (() => process.stdout.rows)
   const reporter = createCliReporter({
-    getColumns: options?.getColumns ?? (() => process.stdout.columns ?? 80),
-    getNow: options?.getNow ?? (() => Date.now()),
+    getColumns,
+    getNow,
     getWallClockNow: options?.getWallClockNow ?? (() => Date.now()),
     isTTY: options?.isTTY ?? (process.stdout.isTTY === true),
     slowThresholdMs: options?.slowThresholdMs ?? 300,
-    writeError: options?.writeError ?? (value => process.stderr.write(value)),
-    writeOutput: options?.writeOutput ?? (value => process.stdout.write(value)),
+    writeError,
+    // Case blocks printed at run end must land above the live window, not inside it.
+    writeOutput: value => renderer == null ? writeOutput(value) : renderer.write(value),
   })
 
+  function writeStream(stream: 'stderr' | 'stdout', value: string): void {
+    if (stream === 'stderr') {
+      writeError(value)
+      return
+    }
+    writeOutput(value)
+  }
+
   if (!isSummaryReporter(reporter)) {
+    // Without a live window, case output is printed in full as one block per case when the case ends.
+    const caseOutput = createCaseOutputCollector({ getNow, write: writeOutput })
+
     return {
       ...reporter,
+      dispose() {
+        caseOutput.flush()
+        processOutput.restore()
+        reporter.dispose()
+      },
+      onCaseEnd(payload) {
+        reporter.onCaseEnd(payload)
+        caseOutput.onCaseEnd(payload)
+      },
+      onCaseOutput(payload) {
+        reporter.onCaseOutput(payload)
+        caseOutput.onCaseOutput(payload)
+      },
       onCaseStart(payload) {
         reporter.onCaseStart(payload)
+        caseOutput.onCaseStart(payload)
       },
       onTaskQueued(payload) {
         reporter.onTaskQueued(payload)
+        caseOutput.onTaskQueued(payload)
       },
     }
   }
 
   const rendererBaseOptions = {
-    getColumns: options?.getColumns ?? (() => process.stdout.columns ?? 80),
+    getColumns,
     getWindow: () => reporter.getWindowRows({
       maxRows: normalizeLiveReporterMaxRows(getRows()),
     }),
     queueRenderReset: options?.queueRenderReset,
     supportsAnsiWindowing: options?.supportsAnsiWindowing,
-    writeOutput: options?.writeOutput ?? (value => process.stdout.write(value)),
+    writeOutput,
   }
-  const renderer = options?.clearInterval != null && options.createInterval != null
+  const liveRenderer = options?.clearInterval != null && options.createInterval != null
     ? new WindowRenderer({
         ...rendererBaseOptions,
         clearInterval: options.clearInterval,
         createInterval: options.createInterval,
       })
     : new WindowRenderer(rendererBaseOptions)
+  renderer = liveRenderer
 
-  renderer.start()
+  liveRenderer.start()
 
   function scheduleRender(): void {
-    renderer.schedule()
+    liveRenderer.schedule()
   }
 
   return {
     dispose() {
+      processOutput.restore()
       reporter.dispose()
-      renderer.dispose()
+      liveRenderer.dispose()
     },
     onCaseEnd(payload) {
       reporter.onCaseEnd(payload)
+      scheduleRender()
+    },
+    onCaseOutput(payload) {
+      reporter.onCaseOutput(payload)
+      // `schedule()` renders at most once per reset window, so chatty cases do not redraw per chunk.
       scheduleRender()
     },
     onCaseStart(payload) {
@@ -1000,13 +1079,13 @@ function createScheduledTaskWithRuntimeConcurrency(
   }
 }
 
-function createTaskCaseReporterId(payload: TaskCaseReporterEndPayload | TaskCaseReporterPayload): string {
+function createTaskCaseReporterId(payload: TaskCaseReporterEndPayload | TaskCaseReporterOutputPayload | TaskCaseReporterPayload): string {
   return `${payload.index}:${encodeURIComponent(payload.name)}`
 }
 
 function createTaskQueuePayload(task: ScheduledTask, projectName: string): SummaryReporterTaskQueuedPayload {
   return {
-    displayName: task.entry.name,
+    displayName: formatTaskDisplayName(task),
     projectName,
     taskId: task.id,
   }
@@ -1070,6 +1149,14 @@ function createTaskReporterHooks(
         caseId,
         errorMessage: payload.errorMessage,
         state: payload.state,
+        taskId: task.id,
+      })
+    },
+    onCaseOutput(payload) {
+      reporter.onCaseOutput({
+        caseId: createTaskCaseReporterId(payload),
+        content: payload.content,
+        stream: payload.stream,
         taskId: task.id,
       })
     },
@@ -1310,6 +1397,26 @@ function formatHybridAverage(hybridAverage: null | number | undefined): string {
   }
 
   return hybridAverage.toFixed(3).replace(/\.?0+$/, '')
+}
+
+/**
+ * Normalizes a scheduled task into the label shown in the live window and case output headers.
+ * Matrix rows of one eval share the entry name, so the selected row values tell them apart.
+ *
+ * Before:
+ * - entry name "osworld", runRowId "model=gpt-5.5&repeat=1"
+ * - entry name "osworld", runRowId "default"
+ *
+ * After:
+ * - "osworld [model=gpt-5.5, repeat=1]"
+ * - "osworld"
+ */
+function formatTaskDisplayName(task: ScheduledTask): string {
+  const rows = [task.matrix.meta.runRowId, task.matrix.meta.evalRowId]
+    .filter(rowId => rowId !== 'default')
+    .flatMap(rowId => rowId.split('&').map(segment => decodeURIComponent(segment)))
+
+  return rows.length === 0 ? task.entry.name : `${task.entry.name} [${rows.join(', ')}]`
 }
 
 function getFailedTaskId(error: unknown): null | string {

@@ -1,0 +1,12 @@
+{
+  "name": "@vieval-examples/case-output",
+  "type": "module",
+  "private": true,
+  "description": "Concurrent Vieval cases that log to stdout/stderr, printed as one block per case.",
+  "scripts": {
+    "eval:run": "vieval run"
+  },
+  "devDependencies": {
+    "vieval": "workspace:^"
+  }
+}

@@ -676,4 +676,145 @@ describe('createSummaryReporter', () => {
      */
     expect(concurrencyRow).toContain('20 cases running')
   })
+
+  /**
+   * @example
+   * it('shows the tail of running case output and prints its collapsed block when the run ends', () => {})
+   */
+  it('shows the tail of running case output and prints its collapsed block when the run ends', () => {
+    let now = 0
+    const writes: string[] = []
+    const reporter = createSummaryReporter({
+      getColumns: () => 120,
+      getNow: () => now,
+      getWallClockNow: () => new Date(2026, 3, 15, 9, 30, 0, 0).getTime(),
+      isTTY: true,
+      slowThresholdMs: 300,
+      writeError: () => {},
+      writeOutput: value => writes.push(stripAnsi(value)),
+    })
+
+    reporter.onRunStart({ totalTasks: 1 })
+    reporter.onTaskQueued({ displayName: 'episodes', projectName: 'demo', taskId: 'task-a', totalCases: 1 })
+    reporter.onTaskStart({ taskId: 'task-a' })
+    reporter.onCaseStart({ caseId: 'case-1', caseName: 'chrome/open', taskId: 'task-a' })
+    for (let step = 1; step <= 12; step += 1) {
+      reporter.onCaseOutput({ caseId: 'case-1', content: `step ${step}\n`, stream: 'stdout', taskId: 'task-a' })
+    }
+    now = 1_000
+
+    const rows = reporter.getWindowRows().map(stripAnsi)
+
+    /**
+     * @example
+     * expect(rows).toContain('     [2 lines collapsed]')
+     */
+    expect(rows).toContain('     [2 lines collapsed]')
+    expect(rows).toContain('     │ step 3')
+    expect(rows).toContain('     │ step 12')
+    /**
+     * @example
+     * expect(rows).not.toContain('     │ step 2')
+     */
+    expect(rows).not.toContain('     │ step 2')
+
+    now = 2_000
+    reporter.onCaseEnd({ caseId: 'case-1', state: 'passed', taskId: 'task-a' })
+
+    /**
+     * @example
+     * expect(writes).toEqual([])
+     */
+    expect(writes).toEqual([])
+    /**
+     * @example
+     * expect(reporter.getWindowRows().map(stripAnsi).join('\n')).not.toContain('step 12')
+     */
+    expect(reporter.getWindowRows().map(stripAnsi).join('\n')).not.toContain('step 12')
+
+    reporter.onTaskEnd({ state: 'passed', taskId: 'task-a' })
+    reporter.onRunEnd({ failedTasks: 0, passedTasks: 1, skippedTasks: 0, totalTasks: 1 })
+
+    /**
+     * @example
+     * expect(writes).toEqual(['|demo| episodes > chrome/open\n[2 lines collapsed]\n│ step 3\n...'])
+     */
+    expect(writes).toEqual([
+      `|demo| episodes > chrome/open\n[2 lines collapsed]\n${Array.from({ length: 10 }, (_, index) => `│ step ${index + 3}\n`).join('')}└─ Done in 2 seconds\n`,
+    ])
+  })
+
+  /**
+   * @example
+   * it('shares the live window height between running cases that have output', () => {})
+   */
+  it('shares the live window height between running cases that have output', () => {
+    let now = 0
+    const reporter = createTestReporter(() => now)
+
+    reporter.onRunStart({ totalTasks: 1 })
+    reporter.onTaskQueued({ displayName: 'episodes', taskId: 'task-a', totalCases: 2 })
+    reporter.onTaskStart({ taskId: 'task-a' })
+    for (const caseId of ['case-1', 'case-2']) {
+      reporter.onCaseStart({ caseId, caseName: caseId, taskId: 'task-a' })
+      for (let step = 1; step <= 10; step += 1) {
+        reporter.onCaseOutput({ caseId, content: `${caseId} step ${step}\n`, stream: 'stdout', taskId: 'task-a' })
+      }
+    }
+    now = 1_000
+
+    const rows = reporter.getWindowRows({ maxRows: 20 })
+
+    /**
+     * @example
+     * expect(rows.length).toBeLessThanOrEqual(20)
+     */
+    expect(rows.length).toBeLessThanOrEqual(20)
+    /**
+     * @example
+     * expect(rows.map(stripAnsi).join('\n')).not.toContain('more running rows hidden')
+     */
+    expect(rows.map(stripAnsi).join('\n')).not.toContain('more running rows hidden')
+    /**
+     * @example
+     * expect(rows.map(stripAnsi)).toContain('   │ │ case-1 step 10')
+     */
+    expect(rows.map(stripAnsi)).toContain('   │ │ case-1 step 10')
+    expect(rows.map(stripAnsi)).toContain('     │ case-2 step 10')
+  })
+
+  /**
+   * @example
+   * it('prints held case blocks grouped by task and case order, and on dispose after an interrupted run', () => {})
+   */
+  it('prints held case blocks grouped by task and case order, and on dispose after an interrupted run', () => {
+    const writes: string[] = []
+    const reporter = createSummaryReporter({
+      getColumns: () => 120,
+      getNow: () => 0,
+      getWallClockNow: () => 0,
+      isTTY: true,
+      slowThresholdMs: 300,
+      writeError: () => {},
+      writeOutput: value => writes.push(stripAnsi(value).split('\n')[0] ?? ''),
+    })
+
+    reporter.onRunStart({ totalTasks: 2 })
+    reporter.onTaskQueued({ displayName: 'first', taskId: 'task-a' })
+    reporter.onTaskQueued({ displayName: 'second', taskId: 'task-b' })
+    for (const [taskId, caseId] of [['task-b', 'b1'], ['task-a', 'a1'], ['task-a', 'a2']] as const) {
+      reporter.onCaseStart({ caseId, caseName: caseId, taskId })
+      reporter.onCaseOutput({ caseId, content: `${caseId}\n`, stream: 'stdout', taskId })
+    }
+    reporter.onCaseEnd({ caseId: 'a2', state: 'passed', taskId: 'task-a' })
+    reporter.onCaseEnd({ caseId: 'b1', state: 'passed', taskId: 'task-b' })
+    reporter.onCaseEnd({ caseId: 'a1', state: 'passed', taskId: 'task-a' })
+    reporter.dispose()
+
+    /**
+     * @example
+     * expect(writes).toEqual(['first > a1', 'first > a2', 'second > b1'])
+     */
+    expect(writes).toEqual(['first > a1', 'first > a2', 'second > b1'])
+  })
 })

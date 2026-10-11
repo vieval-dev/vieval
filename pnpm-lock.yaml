@@ -305,6 +305,12 @@ importers:
         specifier: workspace:^
         version: link:../../packages/vieval
 
+  examples/case-output:
+    devDependencies:
+      vieval:
+        specifier: workspace:^
+        version: link:../../packages/vieval
+
   examples/run-matrix-multi-models:
     dependencies:
       '@moeru/std':

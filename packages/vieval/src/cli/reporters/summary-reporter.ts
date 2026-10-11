@@ -1,6 +1,7 @@
 import type {
   CliReporter,
   CliReporterCaseEndPayload,
+  CliReporterCaseOutputPayload,
   CliReporterCaseStartPayload,
   CliReporterRunEndPayload,
   CliReporterRunStartPayload,
@@ -10,9 +11,14 @@ import type {
   CliReporterTaskState,
 } from './types'
 
+// NOTICE:
+// Output line width must be measured per grapheme so CJK/emoji lines are cut to exactly one terminal row.
+// `fast-string-width` is the enforced replacement for `string-width` in this repository.
+import stringWidth from 'fast-string-width'
 import c from 'tinyrainbow'
 
-import { formatDuration as formatDateFnsDuration, intervalToDuration } from 'date-fns'
+import { CASE_OUTPUT_VISIBLE_LINES, CaseOutputLines, formatCaseOutputBlock, truncateToWidth } from './case-output'
+import { formatHumanDuration } from './format-duration'
 
 // NOTICE:
 // Adapted from Vitest's SummaryReporter state-model and live summary layout.
@@ -22,6 +28,7 @@ import { formatDuration as formatDateFnsDuration, intervalToDuration } from 'dat
 
 const POINTER = '❯'
 const TREE_NODE_END = '└'
+const TREE_NODE_LINE = '│'
 const TREE_NODE_MIDDLE = '├'
 
 /**
@@ -149,8 +156,15 @@ interface ActiveCaseState {
   caseId: string
   caseName: string
   order: number
+  output: CaseOutputLines
   retryIndex: number | undefined
   startedAt: number
+}
+
+interface FinishedCaseBlock {
+  caseOrder: number
+  taskOrder: number
+  text: string
 }
 
 interface ProgressTimingState {
@@ -186,6 +200,10 @@ interface TaskRuntimeState {
 
 class SummaryReporterStateMachine implements SummaryReporter {
   private readonly caseCounters = createCounterState()
+  /**
+   * Output blocks of finished cases, held back until the run ends so they do not scroll past the live window.
+   */
+  private finishedBlocks: FinishedCaseBlock[] = []
   private readonly options: SummaryReporterOptions
   private queueOrderCounter = 0
   private startedAtMs = 0
@@ -205,11 +223,14 @@ class SummaryReporterStateMachine implements SummaryReporter {
    *
    * Expects:
    * - repeated calls are safe
+   * - finished case output not printed yet (for example after an interrupted run) is printed here
    *
    * Returns:
    * - no direct value
    */
-  dispose(): void {}
+  dispose(): void {
+    this.printFinishedBlocks()
+  }
 
   /**
    * Builds the current live summary window rows.
@@ -224,10 +245,10 @@ class SummaryReporterStateMachine implements SummaryReporter {
    * - terminal rows in display order
    */
   getWindowRows(options?: SummaryReporterWindowRowsOptions): string[] {
-    const activeRows = this.createActiveRows()
     const footerRows = this.createFooterRows()
     const maxRows = options?.maxRows
     const footerBlock = [...footerRows, '']
+    const activeRows = this.createActiveRows(this.resolveOutputLinesPerCase(maxRows, footerBlock.length))
 
     if (maxRows == null || maxRows <= 0) {
       const activeBlock = ['', ...activeRows, ...(activeRows.length > 0 ? [''] : [])]
@@ -267,6 +288,10 @@ class SummaryReporterStateMachine implements SummaryReporter {
     }
 
     task.settledCaseIds.add(payload.caseId)
+    const endedCase = task.runningCases.get(payload.caseId)
+    if (endedCase != null) {
+      this.holdCaseOutputBlock(task, endedCase, payload.state, payload.errorMessage)
+    }
     task.runningCases.delete(payload.caseId)
     task.completedCases += 1
     this.syncTaskTotalCases(task)
@@ -288,6 +313,42 @@ class SummaryReporterStateMachine implements SummaryReporter {
     }
 
     this.caseCounters.skipped += 1
+  }
+
+  /**
+   * Handles process output written by a running case.
+   *
+   * Use when:
+   * - case output should be shown as a live tail under the case row while the case runs
+   * - the collapsed block of every finished case should be printed together once the run ends
+   *
+   * Expects:
+   * - chunks arrive in write order
+   *
+   * Returns:
+   * - no direct value
+   */
+  onCaseOutput(payload: CliReporterCaseOutputPayload): void {
+    const task = this.getOrCreateTaskState(payload.taskId)
+    const activeCase = task.runningCases.get(payload.caseId)
+
+    if (activeCase != null) {
+      activeCase.output.append(payload.stream, payload.content)
+      return
+    }
+
+    // A timed-out case may keep running after it settled; its late output is printed after the task's blocks.
+    const lateOutput = new CaseOutputLines()
+    lateOutput.append(payload.stream, payload.content)
+    this.finishedBlocks.push({
+      caseOrder: Number.POSITIVE_INFINITY,
+      taskOrder: task.queueOrder,
+      text: [
+        this.formatCaseHeader(task, payload.caseId),
+        ...lateOutput.lines.map(line => `${c.magentaBright('│')} ${line.text}`),
+        '',
+      ].join('\n'),
+    })
   }
 
   /**
@@ -318,6 +379,9 @@ class SummaryReporterStateMachine implements SummaryReporter {
 
     const existingCase = task.runningCases.get(payload.caseId)
     if (existingCase != null) {
+      if (payload.retryIndex != null && payload.retryIndex > 0 && existingCase.output.lines.length > 0) {
+        existingCase.output.appendMarker(`── retry ${payload.retryIndex}/${payload.autoRetry ?? payload.retryIndex} ──`)
+      }
       existingCase.autoRetry = payload.autoRetry
       existingCase.caseName = payload.caseName ?? payload.caseId
       existingCase.retryIndex = payload.retryIndex
@@ -330,6 +394,7 @@ class SummaryReporterStateMachine implements SummaryReporter {
       caseId: payload.caseId,
       caseName: payload.caseName ?? payload.caseId,
       order: task.caseOrderCounter,
+      output: new CaseOutputLines(),
       retryIndex: payload.retryIndex,
       startedAt: this.options.getNow(),
     })
@@ -350,6 +415,7 @@ class SummaryReporterStateMachine implements SummaryReporter {
    * - no direct value
    */
   onRunEnd(payload: CliReporterRunEndPayload): void {
+    this.printFinishedBlocks()
     this.taskCounters.total = payload.totalTasks
     this.taskCounters.passed = payload.passedTasks
     this.taskCounters.failed = payload.failedTasks
@@ -371,6 +437,7 @@ class SummaryReporterStateMachine implements SummaryReporter {
    */
   onRunStart(payload: CliReporterRunStartPayload): void {
     this.tasks.clear()
+    this.finishedBlocks = []
     this.queueOrderCounter = 0
     resetCounterState(this.taskCounters, payload.totalTasks)
     resetCounterState(this.caseCounters, 0)
@@ -400,6 +467,9 @@ class SummaryReporterStateMachine implements SummaryReporter {
     this.syncTaskTotalCases(task)
     task.state = 'finished'
     task.taskResult = payload.state
+    for (const activeCase of task.runningCases.values()) {
+      this.holdCaseOutputBlock(task, activeCase, 'stopped')
+    }
     task.runningCases.clear()
     this.taskCounters.completed += 1
 
@@ -463,7 +533,7 @@ class SummaryReporterStateMachine implements SummaryReporter {
     task.startedAt ??= this.options.getNow()
   }
 
-  private createActiveRows(): string[] {
+  private createActiveRows(outputLinesPerCase: number): string[] {
     const activeTasks = Array
       .from(this.tasks.values())
       .filter(task => task.state !== 'finished')
@@ -485,7 +555,8 @@ class SummaryReporterStateMachine implements SummaryReporter {
         .sort((left, right) => left.order - right.order)
 
       for (const [index, activeCase] of slowCases.entries()) {
-        const icon = index === slowCases.length - 1 ? TREE_NODE_END : TREE_NODE_MIDDLE
+        const isLastCase = index === slowCases.length - 1
+        const icon = isLastCase ? TREE_NODE_END : TREE_NODE_MIDDLE
         const elapsed = Math.max(0, now - activeCase.startedAt)
         rows.push(
           c.bold(c.yellow(`   ${icon} `))
@@ -493,6 +564,22 @@ class SummaryReporterStateMachine implements SummaryReporter {
           + formatRetrySuffix(activeCase)
           + c.bold(c.yellow(` ${formatDuration(elapsed)}`)),
         )
+
+        if (outputLinesPerCase <= 0) {
+          continue
+        }
+
+        // Live tail of the case output, like a running pnpm script: older lines stay hidden until the case ends.
+        const outputPrefix = isLastCase ? '     ' : `   ${c.bold(c.yellow(TREE_NODE_LINE))} `
+        const outputWidth = Math.max(1, this.options.getColumns() - stringWidth(outputPrefix) - 2)
+        const lines = activeCase.output.lines
+        const hiddenCount = Math.max(0, lines.length - outputLinesPerCase)
+        if (hiddenCount > 0) {
+          rows.push(`${outputPrefix}${c.dim(`[${hiddenCount} lines collapsed]`)}`)
+        }
+        for (const line of lines.slice(-outputLinesPerCase)) {
+          rows.push(`${outputPrefix}${c.magentaBright('│')} ${c.dim(truncateToWidth(line.text, outputWidth))}`)
+        }
       }
     }
 
@@ -531,6 +618,10 @@ class SummaryReporterStateMachine implements SummaryReporter {
     ]
   }
 
+  private formatCaseHeader(task: TaskRuntimeState, caseName: string): string {
+    return `${formatProjectBadge(task.projectName, this.options.isTTY)}${task.displayName} ${c.dim('>')} ${caseName}`
+  }
+
   private getOrCreateTaskState(taskId: string): TaskRuntimeState {
     const existing = this.tasks.get(taskId)
 
@@ -556,6 +647,63 @@ class SummaryReporterStateMachine implements SummaryReporter {
     this.queueOrderCounter += 1
     this.tasks.set(taskId, created)
     return created
+  }
+
+  private holdCaseOutputBlock(task: TaskRuntimeState, activeCase: ActiveCaseState, state: 'stopped' | CliReporterCaseEndPayload['state'], errorMessage?: string): void {
+    if (activeCase.output.lines.length === 0) {
+      return
+    }
+
+    this.finishedBlocks.push({
+      caseOrder: activeCase.order,
+      taskOrder: task.queueOrder,
+      text: formatCaseOutputBlock({
+        collapse: true,
+        colors: true,
+        durationMs: Math.max(0, this.options.getNow() - activeCase.startedAt),
+        errorMessage,
+        header: this.formatCaseHeader(task, activeCase.caseName),
+        lines: activeCase.output.lines,
+        state,
+      }),
+    })
+  }
+
+  /**
+   * Prints held case blocks grouped by task in queue order, cases in start order, then forgets them.
+   */
+  private printFinishedBlocks(): void {
+    const blocks = [...this.finishedBlocks].sort((left, right) => left.taskOrder - right.taskOrder || left.caseOrder - right.caseOrder)
+    this.finishedBlocks = []
+
+    for (const block of blocks) {
+      this.options.writeOutput(block.text)
+    }
+  }
+
+  /**
+   * Splits the rows left over by task rows and the footer between running cases that have output.
+   * Each case shows at most {@link CASE_OUTPUT_VISIBLE_LINES} lines plus one collapsed-count row.
+   */
+  private resolveOutputLinesPerCase(maxRows: number | undefined, footerRowCount: number): number {
+    const casesWithOutput = Array
+      .from(this.tasks.values())
+      .filter(task => task.state !== 'finished')
+      .flatMap(task => Array.from(task.runningCases.values()))
+      .filter(activeCase => activeCase.output.lines.length > 0 && this.options.getNow() - activeCase.startedAt >= this.options.slowThresholdMs)
+      .length
+
+    if (casesWithOutput === 0) {
+      return 0
+    }
+    if (maxRows == null || maxRows <= 0) {
+      return CASE_OUTPUT_VISIBLE_LINES
+    }
+
+    // Leading and trailing spacer rows of the active block.
+    const baseRowCount = this.createActiveRows(0).length + 2
+    const freeRows = maxRows - footerRowCount - baseRowCount
+    return Math.min(CASE_OUTPUT_VISIBLE_LINES, Math.max(0, Math.floor(freeRows / casesWithOutput) - 1))
   }
 
   private syncTaskTotalCases(task: TaskRuntimeState, reportedTotalCases?: number): void {
@@ -743,23 +891,6 @@ function formatCounterState(
 
 function formatDuration(durationMs: number): string {
   return formatHumanDuration(durationMs)
-}
-
-function formatHumanDuration(durationMs: number): string {
-  if (durationMs < 1_000) {
-    return `${Math.round(durationMs)}ms`
-  }
-
-  const formatted = formatDateFnsDuration(intervalToDuration({
-    end: durationMs,
-    start: 0,
-  }), {
-    delimiter: ' ',
-    format: ['hours', 'minutes', 'seconds'],
-    zero: false,
-  })
-
-  return formatted.length > 0 ? formatted : '0 seconds'
 }
 
 function formatProjectBadge(projectName: string | undefined, isTTY: boolean): string {

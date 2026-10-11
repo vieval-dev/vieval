@@ -1,6 +1,7 @@
 import type {
   CliReporter,
   CliReporterCaseEndPayload,
+  CliReporterCaseOutputPayload,
   CliReporterCaseStartPayload,
   CliReporterRunEndPayload,
   CliReporterRunStartPayload,
@@ -26,6 +27,7 @@ export function createNoopReporter(): CliReporter {
   return {
     dispose() {},
     onCaseEnd(_payload: CliReporterCaseEndPayload) {},
+    onCaseOutput(_payload: CliReporterCaseOutputPayload) {},
     onCaseStart(_payload: CliReporterCaseStartPayload) {},
     onRunEnd(_payload: CliReporterRunEndPayload) {},
     onRunStart(_payload: CliReporterRunStartPayload) {},
