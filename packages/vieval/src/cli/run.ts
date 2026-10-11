@@ -1,16 +1,19 @@
-import type { TaskConcurrencyConfig } from '../config'
+import type { TaskConcurrencyConfig, TaskRunStorage } from '../config'
 import type { AggregatedRunResults, ScheduledTask, ScheduledTaskExecutor, TaskExecutionContext } from '../core/runner'
 import type { RunEventBus } from '../core/runner/event-bus'
 import type { TelemetryRuntime } from '../core/telemetry'
-import type { RunEventEmitter, RunEventEnvelope } from '../events'
+import type { RunEventEmitter } from '../events'
 import type { CliProjectExecutorContext, LoadVievalCliConfigOptions, NormalizedCliProjectConfig } from './config'
+import type { ReportEventLog } from './report-log'
 import type { CliReporter, SummaryReporter, SummaryReporterCaseStartPayload, SummaryReporterTaskQueuedPayload } from './reporters'
 import type { WindowRendererTimer } from './reporters/renderers/windowed-renderer'
 
 import process from 'node:process'
 
 import { randomUUID } from 'node:crypto'
-import { resolve } from 'node:path'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
 
 import c from 'tinyrainbow'
 
@@ -24,7 +27,8 @@ import { caseEnded, caseOutput, caseStarted, projectEnded, projectStarted, runEn
 import { loadVievalCliConfig } from './config'
 import { discoverEvalFiles } from './discovery'
 import { loadEvalModulesWithVitestRuntime } from './module-runtime'
-import { writeRunReportArtifacts } from './report-artifacts'
+import { resolveRunReportDirectory, writeRunReportArtifacts } from './report-artifacts'
+import { createReportEventLog } from './report-log'
 import { createCliReporter } from './reporters'
 import { WindowRenderer } from './reporters/renderers/windowed-renderer'
 import { subscribeVitestCompatReporters } from './reporters/vitest-compat-reporter'
@@ -125,11 +129,21 @@ export interface RunVievalCliOptions extends LoadVievalCliConfigOptions {
    */
   projectConcurrency?: number
   /**
+   * Writes report artifacts (live `events.jsonl`, summaries, and case artifacts).
+   *
+   * When `false`, nothing is written and case artifacts go to a temporary directory removed at run end.
+   *
+   * @default true
+   */
+  report?: boolean
+  /**
    * Optional reporter overrides used by CLI integration tests or custom hosts.
    */
   reporter?: RunVievalCliReporterOptions
   /**
-   * Optional report output root directory.
+   * Report output root directory.
+   *
+   * @default `.vieval/reports` next to the config file, or under `cwd` without a config file
    */
   reportOut?: string
   /**
@@ -398,7 +412,7 @@ export function hasRunFailures(output: CliRunOutput): boolean {
  *   -> {@link collectEvalEntries}
  *   -> {@link createRunnerSchedule}
  *   -> {@link createRunEventBus}
- *     -> subscribers: {@link subscribeRunReporter}, {@link createEventRecorder}, {@link subscribeVitestCompatReporters}
+ *     -> subscribers: {@link subscribeRunReporter}, {@link createReportEventLog} (live `events.jsonl`), {@link subscribeVitestCompatReporters}
  *   -> {@link runScheduledTasks} (optional), emitting `task.*` and, through `context.events`, `case.*`
  *
  * Use when:
@@ -422,12 +436,36 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
   let runEndError: unknown
   let output: CliRunOutput | undefined
   let reporter: CliRunReporter | undefined
+  let eventLog: ReportEventLog | undefined
+  let temporaryArtifactsRoot: string | undefined
   try {
     const selectedProjects = filterProjectsByName(loadedConfig.projects, options.project ?? [])
     const preparedProjects = await Promise.all(selectedProjects.map(async project => prepareProject(project)))
     const identity = createRunIdentity(options, preparedProjects)
     const bus = createRunEventBus(identity)
-    const eventRecorder = createEventRecorder(bus)
+    // The report directory is fixed before execution so events and artifacts reach disk while the run is in progress.
+    const reportDirectory = options.report === false
+      ? undefined
+      : resolveRunReportDirectory(
+          options.reportOut ?? join(loadedConfig.configFilePath == null ? (options.cwd ?? process.cwd()) : dirname(loadedConfig.configFilePath), '.vieval', 'reports'),
+          identity,
+          selectedProjects.map(project => project.name),
+        )
+    if (reportDirectory != null) {
+      const log = createReportEventLog(join(reportDirectory, 'events.jsonl'))
+      eventLog = log
+      bus.onAny(envelope => log.append(envelope))
+    }
+    // With reports disabled, artifacts still need a directory for the run; it is removed when the run ends.
+    const artifactsRoot = reportDirectory == null
+      ? await mkdtemp(join(tmpdir(), 'vieval-artifacts-'))
+      : join(reportDirectory, 'artifacts')
+    temporaryArtifactsRoot = reportDirectory == null ? artifactsRoot : undefined
+    const runStorage: TaskRunStorage = {
+      artifactsRoot,
+      attemptId: identity.attemptId,
+      runId: identity.runId,
+    }
     const runReporter = createRunReporter(options.reporter)
     reporter = runReporter
     subscribeRunReporter(bus, runReporter)
@@ -504,6 +542,7 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
             options.cacheProjectName,
             telemetry,
             bus,
+            runStorage,
             options,
           ))),
         }
@@ -529,13 +568,10 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
         workspaceId: identity.workspaceId,
       }
 
-      if (options.reportOut != null) {
-        output.reportDirectory = await writeRunReportArtifacts(
-          output,
-          eventRecorder.events,
-          identity,
-          options.reportOut,
-        )
+      if (reportDirectory != null) {
+        // Summary files are derived from the log, so every buffered event must be on disk first.
+        await eventLog?.close()
+        output.reportDirectory = await writeRunReportArtifacts(output, identity, reportDirectory)
       }
 
       return output
@@ -556,6 +592,18 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
       }
     }
     reporter?.dispose()
+    // Flush the log of a failed run as well, so it keeps every event recorded before the failure.
+    try {
+      await eventLog?.close()
+    }
+    catch (error) {
+      if (runError == null) {
+        runEndError ??= error
+      }
+    }
+    if (temporaryArtifactsRoot != null) {
+      await rm(temporaryArtifactsRoot, { force: true, recursive: true })
+    }
     restoreEnvironment()
   }
 
@@ -636,6 +684,7 @@ function createAutoTaskExecutor(): ScheduledTaskExecutor {
       cache: context.cache,
       events: cliContext.events,
       models: context.models,
+      runStorage: cliContext.runStorage,
       task,
       telemetry: cliContext.telemetry,
     })
@@ -658,6 +707,7 @@ function createCliTaskExecutionContext(
   workspaceId: string,
   telemetry: TelemetryRuntime,
   events: RunEventEmitter,
+  runStorage: TaskRunStorage,
   runtimeConcurrency: TaskConcurrencyConfig | undefined,
 ): CliTaskExecutionContext {
   return {
@@ -671,6 +721,7 @@ function createCliTaskExecutionContext(
       task,
     }),
     events,
+    runStorage,
     runtimeConcurrency,
     telemetry,
   }
@@ -704,17 +755,6 @@ function createColorPalette(enabled: boolean): CliColorPalette {
     red: value => c.red(value),
     yellow: value => c.yellow(value),
   }
-}
-
-/**
- * Keeps every run event for the report written when the run ends.
- */
-function createEventRecorder(bus: RunEventBus): { events: RunEventEnvelope[] } {
-  const events: RunEventEnvelope[] = []
-  bus.onAny((envelope) => {
-    events.push(envelope)
-  })
-  return { events }
 }
 
 function createExperimentMatrixRows(tasks: readonly ScheduledTask[]): string[] {
@@ -933,6 +973,7 @@ async function executePreparedProject(
   cacheProjectName: string | undefined,
   telemetry: TelemetryRuntime,
   bus: RunEventBus,
+  runStorage: TaskRunStorage,
   options: RunVievalCliOptions,
 ): Promise<CliProjectSummary> {
   const settledTaskIds = new Set<string>()
@@ -970,6 +1011,7 @@ async function executePreparedProject(
           identity.workspaceId,
           telemetry,
           projectEvents.scope({ taskId: task.id }),
+          runStorage,
           resolveCliRuntimeConcurrency(options),
         )
       },

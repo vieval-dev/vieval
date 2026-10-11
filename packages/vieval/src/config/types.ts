@@ -491,6 +491,18 @@ export interface TaskRunContext {
    */
   models: TaskExecutionContext['models']
   /**
+   * Run identity and artifact storage supplied by `vieval run`.
+   *
+   * Use when:
+   * - case code needs the run ids or a directory for its artifacts
+   *
+   * Expects:
+   * - custom project executors forward the value they receive
+   *
+   * @default a local identity and a temporary artifacts root when the task runs outside `vieval run`
+   */
+  runStorage?: TaskRunStorage
+  /**
    * Optional runtime scheduling overrides supplied by CLI or host execution.
    *
    * Use when:
@@ -562,4 +574,24 @@ export interface TaskRunOutput {
    * Scores emitted by this task run.
    */
   scores: readonly RunScore[]
+}
+
+/**
+ * Run identity and artifact storage shared by every task of one run.
+ */
+export interface TaskRunStorage {
+  /**
+   * Directory under which each case gets its own `<taskId>/<caseId>/` artifacts directory.
+   *
+   * `vieval run` uses `<reportDirectory>/artifacts`, or a temporary directory removed at run end with `--no-report`.
+   */
+  artifactsRoot: string
+  /**
+   * Attempt id of the run.
+   */
+  attemptId: string
+  /**
+   * Run id.
+   */
+  runId: string
 }

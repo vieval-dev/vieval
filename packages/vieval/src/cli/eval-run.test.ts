@@ -13,6 +13,7 @@ describe('parseCliArguments', () => {
       json: true,
       project: ['alpha', 'beta'],
       projectConcurrency: undefined,
+      report: true,
       reportOut: undefined,
       taskConcurrency: undefined,
       workspace: undefined,
@@ -30,6 +31,7 @@ describe('parseCliArguments', () => {
       json: false,
       project: ['alpha'],
       projectConcurrency: undefined,
+      report: true,
       reportOut: undefined,
       taskConcurrency: undefined,
       workspace: undefined,
@@ -47,6 +49,7 @@ describe('parseCliArguments', () => {
       json: true,
       project: ['alpha'],
       projectConcurrency: undefined,
+      report: true,
       reportOut: undefined,
       taskConcurrency: undefined,
       workspace: undefined,
@@ -73,11 +76,24 @@ describe('parseCliArguments', () => {
       json: false,
       project: [],
       projectConcurrency: undefined,
+      report: true,
       reportOut: '.vieval/reports',
       taskConcurrency: undefined,
       workspace: 'packages/vieval',
       workspaceConcurrency: undefined,
     })
+  })
+
+  /**
+   * @example
+   * it('turns --no-report into report: false', () => {})
+   */
+  it('turns --no-report into report: false', () => {
+    /**
+     * @example
+     * expect(parseCliArguments(['run', '--no-report']).report).toBe(false)
+     */
+    expect(parseCliArguments(['run', '--no-report']).report).toBe(false)
   })
 
   it('parses concurrency caps from eval run CLI flags', () => {

@@ -507,6 +507,7 @@ describe('runVievalCli', () => {
     const output = await runVievalCli({
       configFilePath: join(fixtureProjectDirectory, 'vieval.config.json'),
       cwd: fixtureProjectDirectory,
+      report: false,
     })
 
     expect(output.projects).toHaveLength(1)
@@ -544,6 +545,7 @@ describe('runVievalCli', () => {
     const output = await runVievalCli({
       configFilePath: join(fixtureProjectDirectory, 'vieval.exec.config.cjs'),
       cwd: fixtureProjectDirectory,
+      report: false,
     })
 
     expect(output.projects).toHaveLength(1)
@@ -1161,6 +1163,7 @@ export default defineConfig({
     const output = await runVievalCli({
       configFilePath: join(fixtureProjectDirectory, 'vieval.config.json'),
       cwd: fixtureProjectDirectory,
+      report: false,
     })
     const summary = formatVievalCliRunOutput(output)
 
@@ -1270,6 +1273,7 @@ export default defineConfig({
     const output = await runVievalCli({
       configFilePath: join(taskProjectDirectory, 'vieval.config.ts'),
       cwd: taskProjectDirectory,
+      report: false,
     })
 
     expect(output.projects).toHaveLength(1)
@@ -1419,6 +1423,7 @@ export default defineConfig({
     const output = await runVievalCli({
       configFilePath: join(concurrencyCasesFromInputsProjectDirectory, 'vieval.config.ts'),
       cwd: concurrencyCasesFromInputsProjectDirectory,
+      report: false,
     })
 
     expect(output.projects[0]?.executed).toBe(true)
@@ -1429,6 +1434,7 @@ export default defineConfig({
     const output = await runVievalCli({
       configFilePath: join(concurrencyTaskProjectDirectory, 'vieval.config.ts'),
       cwd: concurrencyTaskProjectDirectory,
+      report: false,
     })
 
     expect(output.projects[0]?.executed).toBe(true)
@@ -1440,6 +1446,7 @@ export default defineConfig({
       configFilePath: join(concurrencyCliOverridesProjectDirectory, 'vieval.config.ts'),
       cwd: concurrencyCliOverridesProjectDirectory,
       projectConcurrency: 1,
+      report: false,
       taskConcurrency: 1,
       workspaceConcurrency: 1,
     })
@@ -1522,6 +1529,7 @@ describeTask('cli-case-concurrency', (task) => {
       configFilePath: join(taskProjectDirectory, 'vieval.config.ts'),
       cwd: taskProjectDirectory,
       experiment: 'baseline-exp',
+      report: false,
     })
 
     expect(output.experimentId).toBe('baseline-exp')
@@ -1597,6 +1605,7 @@ describeTask('cli-case-concurrency', (task) => {
       configFilePath: join(concurrencyExperimentMetadataProjectDirectory, 'vieval.config.ts'),
       cwd: concurrencyExperimentMetadataProjectDirectory,
       experiment: 'fixture-exp',
+      report: false,
     })
 
     expect(output.experimentId).toBe('fixture-exp')
@@ -1607,6 +1616,7 @@ describeTask('cli-case-concurrency', (task) => {
     const output = await runVievalCli({
       configFilePath: join(executionPolicyTimeoutProjectDirectory, 'vieval.config.ts'),
       cwd: executionPolicyTimeoutProjectDirectory,
+      report: false,
     })
 
     expect(output.projects[0]?.executed).toBe(true)
@@ -1624,6 +1634,7 @@ describeTask('cli-case-concurrency', (task) => {
     const output = await runVievalCli({
       configFilePath: join(executionPolicyAutoRetryProjectDirectory, 'vieval.config.ts'),
       cwd: executionPolicyAutoRetryProjectDirectory,
+      report: false,
     })
 
     expect(output.projects[0]?.executed).toBe(true)
@@ -1648,6 +1659,7 @@ describeTask('cli-case-concurrency', (task) => {
       const output = await runVievalCli({
         configFilePath: join(executionPolicyAutoAttemptProjectDirectory, 'vieval.config.ts'),
         cwd: executionPolicyAutoAttemptProjectDirectory,
+        report: false,
       })
 
       expect(output.projects[0]?.executed).toBe(true)
@@ -1685,6 +1697,7 @@ describeTask('cli-case-concurrency', (task) => {
     const output = await runVievalCli({
       configFilePath: join(taskProjectDirectory, 'vieval.config.ts'),
       cwd: taskProjectDirectory,
+      report: false,
     })
     const summary = formatVievalCliRunOutput(output)
 
@@ -2384,5 +2397,156 @@ describeTask('output-task', () => {
      * expect(stderrWrites).toEqual([])
      */
     expect(stderrWrites).toEqual([])
+  })
+
+  /**
+   * @example
+   * it('writes reports next to the config by default, with a live event log and recorded case artifacts', async () => {})
+   */
+  it('writes reports next to the config by default, with a live event log and recorded case artifacts', async () => {
+    const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
+    const projectDirectory = await createDslProject({
+      evalFiles: {
+        'artifacts.eval.ts': `
+import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+
+import { caseOf, describeTask } from '${vievalImportPath}'
+
+describeTask('artifact-task', () => {
+  caseOf('artifact-case', async (context) => {
+    await context.recordArtifact('result.json', { body: JSON.stringify(context.ids), contentType: 'application/json' })
+    const screenshotPath = join(context.artifactsDirectory, 'screen.webp')
+    await writeFile(screenshotPath, 'pixels')
+    await context.recordArtifact('screen.webp', { contentType: 'image/webp', path: screenshotPath, purpose: 'display_capture' })
+  })
+})
+`,
+      },
+      projectName: 'artifact-project',
+    })
+
+    const output = await runVievalCli({
+      attempt: 'attempt-artifacts',
+      configFilePath: join(projectDirectory, 'vieval.config.ts'),
+      cwd: projectDirectory,
+      experiment: 'artifact-experiment',
+      workspace: 'artifact-workspace',
+    })
+    const reportDirectory = join(projectDirectory, '.vieval', 'reports', 'artifact-workspace', 'artifact-project', 'artifact-experiment', 'attempt-artifacts', output.runId!)
+    const events = (await readFile(join(reportDirectory, 'events.jsonl'), 'utf-8'))
+      .trim()
+      .split('\n')
+      .map(line => JSON.parse(line) as { data: Record<string, unknown>, event: string, seq: number })
+    const artifactEvents = events.filter(event => event.event === 'artifact.recorded')
+    const caseArtifactsDirectory = join(reportDirectory, 'artifacts', artifactEvents[0]!.data.path as string, '..')
+    const ids = JSON.parse(await readFile(join(caseArtifactsDirectory, 'result.json'), 'utf-8')) as Record<string, string>
+
+    /**
+     * @example
+     * expect(output.reportDirectory).toBe(reportDirectory)
+     */
+    expect(output.reportDirectory).toBe(reportDirectory)
+    /**
+     * @example
+     * expect(events.map(event => event.seq)).toEqual([1, 2, 3, ...])
+     */
+    // The run event bus numbers events from 1, in emit order.
+    expect(events.map(event => event.seq)).toEqual(events.map((_, index) => index + 1))
+    expect(await pathExists(join(reportDirectory, 'cases.jsonl'))).toBe(true)
+    /**
+     * @example
+     * expect(artifactEvents.map(event => event.data)).toEqual([...])
+     */
+    expect(artifactEvents.map(event => event.data)).toEqual([
+      { contentType: 'application/json', name: 'result.json', path: expect.stringMatching(/\/result\.json$/), size: expect.any(Number) },
+      { contentType: 'image/webp', name: 'screen.webp', path: expect.stringMatching(/\/screen\.webp$/), purpose: 'display_capture', size: 6 },
+    ])
+    /**
+     * @example
+     * expect(ids).toEqual({ attemptId: 'attempt-artifacts', caseId: '0:artifact-case', runId: output.runId, taskId: expect.any(String) })
+     */
+    expect(ids).toEqual({ attemptId: 'attempt-artifacts', caseId: '0:artifact-case', runId: output.runId, taskId: expect.any(String) })
+  })
+
+  /**
+   * @example
+   * it('writes nothing with report: false and removes the temporary artifacts directory', async () => {})
+   */
+  it('writes nothing with report: false and removes the temporary artifacts directory', async () => {
+    const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
+    const artifactsDirectoryStateKey = '__VIEVAL_NO_REPORT_ARTIFACTS_DIRECTORY__'
+    const projectDirectory = await createDslProject({
+      evalFiles: {
+        'no-report.eval.ts': `
+import { caseOf, describeTask } from '${vievalImportPath}'
+
+describeTask('no-report-task', () => {
+  caseOf('no-report-case', async (context) => {
+    await context.recordArtifact('note.txt', { body: 'kept only during the run', contentType: 'text/plain' })
+    ;(globalThis as Record<string, unknown>)['${artifactsDirectoryStateKey}'] = context.artifactsDirectory
+  })
+})
+`,
+      },
+      projectName: 'no-report-project',
+    })
+
+    const output = await runVievalCli({
+      configFilePath: join(projectDirectory, 'vieval.config.ts'),
+      cwd: projectDirectory,
+      report: false,
+    })
+    const artifactsDirectory = (globalThis as Record<string, unknown>)[artifactsDirectoryStateKey] as string
+    delete (globalThis as Record<string, unknown>)[artifactsDirectoryStateKey]
+
+    /**
+     * @example
+     * expect(output.reportDirectory).toBeNull()
+     */
+    expect(output.reportDirectory).toBeNull()
+    expect(await pathExists(join(projectDirectory, '.vieval', 'reports'))).toBe(false)
+    /**
+     * @example
+     * expect(await pathExists(artifactsDirectory)).toBe(false)
+     */
+    expect(artifactsDirectory).toContain('vieval-artifacts-')
+    expect(await pathExists(artifactsDirectory)).toBe(false)
+  })
+
+  /**
+   * @example
+   * it('places reports under --report-out instead of the default root', async () => {})
+   */
+  it('places reports under --report-out instead of the default root', async () => {
+    const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
+    const reportOut = await mkdtemp(join(tmpdir(), 'vieval-report-root-'))
+    temporaryDirectories.push(reportOut)
+    const projectDirectory = await createDslProject({
+      evalFiles: {
+        'report-out.eval.ts': `
+import { caseOf, describeTask } from '${vievalImportPath}'
+
+describeTask('report-out-task', () => {
+  caseOf('report-out-case', () => {})
+})
+`,
+      },
+      projectName: 'report-out-project',
+    })
+
+    const output = await runVievalCli({
+      configFilePath: join(projectDirectory, 'vieval.config.ts'),
+      cwd: projectDirectory,
+      reportOut,
+    })
+
+    /**
+     * @example
+     * expect(output.reportDirectory?.startsWith(reportOut)).toBe(true)
+     */
+    expect(output.reportDirectory?.startsWith(reportOut)).toBe(true)
+    expect(await pathExists(join(output.reportDirectory!, 'events.jsonl'))).toBe(true)
+    expect(await pathExists(join(projectDirectory, '.vieval', 'reports'))).toBe(false)
   })
 })

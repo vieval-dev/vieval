@@ -196,7 +196,7 @@ export const scoreRecordedDataSchema = v.object({
 export const artifactRecordedDataSchema = v.object({
   contentType: v.string(),
   name: v.string(),
-  /** Path relative to the report directory. */
+  /** Path relative to the run's artifacts root (`<reportDirectory>/artifacts`), with `/` separators. */
   path: v.string(),
   purpose: v.optional(v.string()),
   size: v.number(),

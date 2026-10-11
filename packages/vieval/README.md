@@ -143,6 +143,37 @@ describeTask('arithmetic-quality', ({ casesFromInputs }) => {
 
 `describeEval` remains exported as an alias of `describeTask`, but new examples should prefer `describeTask` because task/case semantics are the primary runtime model.
 
+### Case ids and artifacts
+
+Every case context carries the ids of the current execution and a directory for its files:
+
+```ts
+import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+
+import { caseOf, describeTask } from 'vieval'
+
+describeTask('desktop-agent', () => {
+  caseOf('opens settings', async (context) => {
+    // { runId, attemptId, taskId, caseId }
+    console.info(context.ids)
+
+    // Write anything into the case directory; it lives in the run report.
+    const screenshotPath = join(context.artifactsDirectory, 'step-1.webp')
+    await writeFile(screenshotPath, await captureScreen())
+
+    // Announce the files worth showing. Exactly one of `path` or `body`.
+    await context.recordArtifact('step-1.webp', { contentType: 'image/webp', path: screenshotPath, purpose: 'display_capture' })
+    await context.recordArtifact('result.json', { body: JSON.stringify({ ok: true }), contentType: 'application/json' })
+  })
+})
+```
+
+- `artifactsDirectory` is `<report directory>/artifacts/<task>/<case>/`, created when read.
+- `recordArtifact` records a `path` inside that directory by reference, copies a `path` outside it in as `<name>`, and writes a `body` as `<name>`. It emits an `artifact.recorded` event whose `path` is relative to `<report directory>/artifacts`.
+- With `--no-report`, `artifactsDirectory` is a temporary directory removed when the run ends, so eval code does not need to check whether reports are on.
+- Outside `vieval run` (for example a test that calls `task.run` directly), `runId` and `attemptId` are `local` and artifacts go to a temporary directory.
+
 ## Matrix Model
 
 `vieval` expands matrix scopes in this order:
@@ -300,13 +331,19 @@ export default defineConfig({
 ## CLI
 
 ```bash
-vieval run [--config <path>] [--project <name>] [--json] [--report-out <path>]
+vieval run [--config <path>] [--project <name>] [--json] [--report-out <path> | --no-report]
 vieval compare [--config <path>] [--comparison <id>] [--output <path>] [--format table|json]
 vieval report analyze <report-directory>
 vieval report index <report-directory> [--output <path>] [--format table|json|jsonl]
 vieval report cases <report-directory> [--where <key=value>] [--group-by <key>] [--format table|json|jsonl]
 vieval report compare <left-report-directory> <right-report-directory> [--case-key <key>] [--score-kind <kind>] [--format table|json]
 ```
+
+`vieval run` writes a report for every run, by default under `.vieval/reports` next to the config file (add `.vieval/` to `.gitignore`). `--report-out <path>` changes the root, and `--no-report` writes nothing. The report directory is `<root>/<workspace>/<project>/<experiment>/<attempt>/<run>/`:
+
+- `events.jsonl` is appended while the run is in progress, so a crashed run keeps the events already flushed to disk. Each line has a `seq` that orders it within the run.
+- `run-summary.json`, `cases.jsonl`, `metrics-summary.json`, and `otlp/*.json` are derived from `events.jsonl` when the run ends.
+- `artifacts/<task>/<case>/` holds case files (see [Case ids and artifacts](#case-ids-and-artifacts)).
 
 Common workspace commands:
 
@@ -417,7 +454,7 @@ sequenceDiagram
 
 - Without a TTY (CI logs, pipes), each case's full output is printed as one block when the case ends.
 - Output written outside every case (module top level, custom executors) is printed as-is, above the live window.
-- Captured chunks are also recorded as `case.output` events in `--report-out` artifacts.
+- Captured chunks are also recorded as `case.output` events in the run report's `events.jsonl`.
 - Child processes started with `stdio: 'inherit'` write to the file descriptors directly and are not captured. Pipe their output and write it from the case instead.
 
 See [`examples/case-output`](../../examples/case-output) for a runnable demo.
