@@ -517,6 +517,12 @@ export interface TaskRunContext {
   runtimeConcurrency?: TaskConcurrencyConfig
   /**
    * Cooperative abort signal for the current execution.
+   *
+   * `vieval run` aborts it when the run is interrupted (SIGINT, SIGTERM, SIGHUP). Running cases then see
+   * their own `signal` abort, queued cases do not start, and failed cases are not retried.
+   *
+   * Expects:
+   * - custom project executors forward the value they receive
    */
   signal?: AbortSignal
   /**
