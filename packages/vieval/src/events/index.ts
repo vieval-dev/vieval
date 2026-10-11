@@ -131,6 +131,12 @@ export const runEndedDataSchema = v.object({
   totalTasks: v.number(),
 })
 
+/** Payload of {@link runInterrupted}. */
+export const runInterruptedDataSchema = v.object({
+  /** Process signal that interrupted the run, for example `SIGINT`. */
+  signal: v.string(),
+})
+
 /** Payload of {@link projectStarted}. */
 export const projectStartedDataSchema = v.object({
   taskCount: v.number(),
@@ -246,6 +252,7 @@ export type MetricRecordedData = v.InferOutput<typeof metricRecordedDataSchema>
 export type ProjectEndedData = v.InferOutput<typeof projectEndedDataSchema>
 export type ProjectStartedData = v.InferOutput<typeof projectStartedDataSchema>
 export type RunEndedData = v.InferOutput<typeof runEndedDataSchema>
+export type RunInterruptedData = v.InferOutput<typeof runInterruptedDataSchema>
 export type RunStartedData = v.InferOutput<typeof runStartedDataSchema>
 export type ScoreRecordedData = v.InferOutput<typeof scoreRecordedDataSchema>
 export type TaskEndedData = v.InferOutput<typeof taskEndedDataSchema>
@@ -257,6 +264,8 @@ export type ToolCallData = v.InferOutput<typeof toolCallDataSchema>
 export const runStarted = defineEventa<RunStartedData>('run.started')
 /** The run ended; emitted once by the CLI after every project settled. */
 export const runEnded = defineEventa<RunEndedData>('run.ended')
+/** The run received an interrupt signal; running cases are aborted and new work is not started. */
+export const runInterrupted = defineEventa<RunInterruptedData>('run.interrupted')
 /** One project started executing its tasks. */
 export const projectStarted = defineEventa<ProjectStartedData>('project.started')
 /** One project settled. */

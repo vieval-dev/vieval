@@ -345,6 +345,13 @@ vieval report compare <left-report-directory> <right-report-directory> [--case-k
 - `run-summary.json`, `cases.jsonl`, `metrics-summary.json`, and `otlp/*.json` are derived from `events.jsonl` when the run ends.
 - `artifacts/<task>/<case>/` holds case files (see [Case ids and artifacts](#case-ids-and-artifacts)).
 
+Interrupting a run (Ctrl+C, `SIGTERM`, or closing the terminal):
+
+- The first signal stops starting new tasks and cases, and aborts `context.signal` of every running case. vieval then waits for those cases to settle, so their `finally` blocks and abort listeners can release external resources (cloud machines, Pods, browsers). The report is written as usual, the summary ends with `Interrupted by SIGINT`, interrupted cases fail with `Run interrupted by <signal>.`, and the process exits with `128 + signal number` (130 for `SIGINT`).
+- A second signal exits immediately, without waiting for cleanup.
+- Cases must pass `context.signal` to their long-running work (`fetch`, child processes, timers). A case that ignores it keeps the run waiting until it finishes on its own or the second signal arrives.
+- Cleanup code should not use `context.signal` itself; it is already aborted when the cleanup runs.
+
 Common workspace commands:
 
 ```bash

@@ -4,6 +4,7 @@ import type { RunEventBus } from '../core/runner/event-bus'
 import type { TelemetryRuntime } from '../core/telemetry'
 import type { RunEventEmitter } from '../events'
 import type { CliProjectExecutorContext, LoadVievalCliConfigOptions, NormalizedCliProjectConfig } from './config'
+import type { InterruptSignal } from './interrupt'
 import type { ReportEventLog } from './report-log'
 import type { CliReporter, SummaryReporter, SummaryReporterCaseStartPayload, SummaryReporterTaskQueuedPayload } from './reporters'
 import type { WindowRendererTimer } from './reporters/renderers/windowed-renderer'
@@ -23,9 +24,10 @@ import { collectEvalEntries, createFilesystemTaskCacheRuntime, createRunnerRunti
 import { createProcessOutputInterceptor } from '../core/runner/case-output'
 import { createRunEventBus } from '../core/runner/event-bus'
 import { createNoopTelemetryRuntime, createOpenTelemetryRuntime } from '../core/telemetry'
-import { caseEnded, caseOutput, caseStarted, projectEnded, projectStarted, runEnded, runStarted, taskEnded, taskQueued, taskStarted } from '../events'
+import { caseEnded, caseOutput, caseStarted, projectEnded, projectStarted, runEnded, runInterrupted, runStarted, taskEnded, taskQueued, taskStarted } from '../events'
 import { loadVievalCliConfig } from './config'
 import { discoverEvalFiles } from './discovery'
+import { exitCodeFromSignal, listenForInterrupt } from './interrupt'
 import { loadEvalModulesWithVitestRuntime } from './module-runtime'
 import { resolveRunReportDirectory, writeRunReportArtifacts } from './report-artifacts'
 import { createReportEventLog } from './report-log'
@@ -88,6 +90,10 @@ export interface CliRunOutput {
   attemptId?: string
   configFilePath: null | string
   experimentId?: string
+  /**
+   * Signal that interrupted the run. Results then cover only the work finished before the interrupt.
+   */
+  interruptSignal?: InterruptSignal
   projects: CliProjectSummary[]
   reportDirectory?: null | string
   runId?: string
@@ -380,6 +386,9 @@ export function formatVievalCliRunOutput(output: CliRunOutput): string {
     lines.push(` ${colors.dim('Projects')}  ${colors.green(String(passedProjects))} passed (${output.projects.length})`)
   }
   lines.push(` ${colors.dim('Tasks')}     ${executedTasks} executed / ${totalTasks} scheduled`)
+  if (output.interruptSignal != null) {
+    lines.push(` ${colors.yellow('Interrupted')}  by ${output.interruptSignal}; results cover only the work finished before the interrupt`)
+  }
 
   return lines.join('\n')
 }
@@ -438,6 +447,8 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
   let reporter: CliRunReporter | undefined
   let eventLog: ReportEventLog | undefined
   let temporaryArtifactsRoot: string | undefined
+  let stopListeningForInterrupt: (() => void) | undefined
+  let interruptSignal: InterruptSignal | undefined
   try {
     const selectedProjects = filterProjectsByName(loadedConfig.projects, options.project ?? [])
     const preparedProjects = await Promise.all(selectedProjects.map(async project => prepareProject(project)))
@@ -470,6 +481,22 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
     reporter = runReporter
     subscribeRunReporter(bus, runReporter)
     const reporterCounters = subscribeTaskCounters(bus)
+    // First interrupt: stop starting work and abort running cases, so their cleanup runs before the run ends.
+    // Second interrupt: give up waiting.
+    const interruption = new AbortController()
+    stopListeningForInterrupt = listenForInterrupt({
+      onForceExit(signal) {
+        reporter?.dispose()
+        process.exit(exitCodeFromSignal(signal))
+      },
+      onInterrupt(signal) {
+        interruptSignal = signal
+        interruption.abort(new Error(`Run interrupted by ${signal}.`))
+        void bus.emit(runInterrupted, { signal })
+        // Written through the intercepted stream, so it appears above the live window.
+        process.stderr.write(`\n${signal} received: waiting for running cases to finish their cleanup. Press Ctrl+C again to exit immediately.\n`)
+      },
+    })
 
     output = await telemetry.withSpan('vieval.run', {
       'vieval.attempt.id': identity.attemptId,
@@ -543,6 +570,7 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
             telemetry,
             bus,
             runStorage,
+            interruption.signal,
             options,
           ))),
         }
@@ -563,6 +591,7 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
         configFilePath: loadedConfig.configFilePath,
         experimentId: identity.experimentId,
         projects: projectSummaries,
+        ...(interruptSignal == null ? {} : { interruptSignal }),
         reportDirectory: null,
         runId: identity.runId,
         workspaceId: identity.workspaceId,
@@ -591,6 +620,7 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
         }
       }
     }
+    stopListeningForInterrupt?.()
     reporter?.dispose()
     // Flush the log of a failed run as well, so it keeps every event recorded before the failure.
     try {
@@ -685,6 +715,7 @@ function createAutoTaskExecutor(): ScheduledTaskExecutor {
       events: cliContext.events,
       models: context.models,
       runStorage: cliContext.runStorage,
+      signal: cliContext.signal,
       task,
       telemetry: cliContext.telemetry,
     })
@@ -708,6 +739,7 @@ function createCliTaskExecutionContext(
   telemetry: TelemetryRuntime,
   events: RunEventEmitter,
   runStorage: TaskRunStorage,
+  signal: AbortSignal,
   runtimeConcurrency: TaskConcurrencyConfig | undefined,
 ): CliTaskExecutionContext {
   return {
@@ -723,6 +755,7 @@ function createCliTaskExecutionContext(
     events,
     runStorage,
     runtimeConcurrency,
+    signal,
     telemetry,
   }
 }
@@ -974,6 +1007,7 @@ async function executePreparedProject(
   telemetry: TelemetryRuntime,
   bus: RunEventBus,
   runStorage: TaskRunStorage,
+  signal: AbortSignal,
   options: RunVievalCliOptions,
 ): Promise<CliProjectSummary> {
   const settledTaskIds = new Set<string>()
@@ -1012,6 +1046,7 @@ async function executePreparedProject(
           telemetry,
           projectEvents.scope({ taskId: task.id }),
           runStorage,
+          signal,
           resolveCliRuntimeConcurrency(options),
         )
       },
@@ -1023,6 +1058,7 @@ async function executePreparedProject(
       onTaskStart(task): void {
         void projectEvents.scope({ taskId: task.id }).emit(taskStarted, {})
       },
+      signal,
     })
 
     await projectEvents.emit(projectEnded, {

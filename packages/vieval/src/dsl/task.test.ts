@@ -1329,4 +1329,100 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     expect(runResult?.scores[0]?.score).toBe(1)
   })
+
+  /**
+   * @example
+   * it('aborts running cases on interrupt, lets them clean up, and starts no queued case', async () => {})
+   */
+  it('aborts running cases on interrupt, lets them clean up, and starts no queued case', async () => {
+    const interruption = new AbortController()
+    const started = createDeferredPromise()
+    const lifecycle: string[] = []
+    const endedCases: CaseEndedData[] = []
+    const startedCases: string[] = []
+    const taskDefinition = describeTask('dsl-interrupt', () => {
+      caseOf('running', async (context) => {
+        lifecycle.push('create running')
+        started.resolve()
+        try {
+          await new Promise((_, reject) => context.signal.addEventListener('abort', () => reject(context.signal.reason), { once: true }))
+        }
+        finally {
+          lifecycle.push('delete running')
+        }
+      })
+      caseOf('queued', async () => {
+        lifecycle.push('create queued')
+      })
+    }, { autoRetry: 2, autoRetryDelay: 0, concurrency: { case: 1 } })
+
+    const runPromise = taskDefinition.task?.run({
+      cache: createTestTaskCacheRuntime(),
+      events: createTestRunEvents({
+        onCaseEnd: data => endedCases.push(data),
+        onCaseStart: data => startedCases.push(data.name),
+      }),
+      models: createTestModels(),
+      signal: interruption.signal,
+      task: {
+        entry: { description: 'd', directory: 'x', filePath: '/tmp/x.eval.ts', id: 'x', name: 'x' },
+        id: 'x',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: createScheduledTaskMatrix(),
+      },
+    })
+    await started.promise
+    interruption.abort(new Error('Run interrupted by SIGINT.'))
+    await runPromise
+
+    /**
+     * @example
+     * expect(lifecycle).toEqual(['create running', 'delete running'])
+     */
+    expect(lifecycle).toEqual(['create running', 'delete running'])
+    /**
+     * @example
+     * expect(startedCases).toEqual(['running'])
+     */
+    // The failed case is not retried and the queued case never starts.
+    expect(startedCases).toEqual(['running'])
+    /**
+     * @example
+     * expect(endedCases).toEqual([expect.objectContaining({ errorMessage: 'Run interrupted by SIGINT.', name: 'running', state: 'failed' })])
+     */
+    expect(endedCases).toEqual([expect.objectContaining({ errorMessage: 'Run interrupted by SIGINT.', name: 'running', state: 'failed' })])
+  })
+
+  /**
+   * @example
+   * it('reports a case that ignored the interrupt and returned normally as failed', async () => {})
+   */
+  it('reports a case that ignored the interrupt and returned normally as failed', async () => {
+    const interruption = new AbortController()
+    const endedCases: CaseEndedData[] = []
+    const taskDefinition = describeTask('dsl-interrupt-ignored', () => {
+      caseOf('ignores-signal', async () => {
+        interruption.abort(new Error('Run interrupted by SIGTERM.'))
+      })
+    })
+
+    await taskDefinition.task?.run({
+      cache: createTestTaskCacheRuntime(),
+      events: createTestRunEvents({ onCaseEnd: data => endedCases.push(data) }),
+      models: createTestModels(),
+      signal: interruption.signal,
+      task: {
+        entry: { description: 'd', directory: 'x', filePath: '/tmp/x.eval.ts', id: 'x', name: 'x' },
+        id: 'x',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: createScheduledTaskMatrix(),
+      },
+    })
+
+    /**
+     * @example
+     * expect(endedCases.map(data => [data.state, data.errorMessage])).toEqual([['failed', 'Run interrupted by SIGTERM.']])
+     */
+    expect(endedCases.map(data => [data.state, data.errorMessage])).toEqual([['failed', 'Run interrupted by SIGTERM.']])
+  })
 })

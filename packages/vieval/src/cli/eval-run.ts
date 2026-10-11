@@ -6,6 +6,7 @@ import { errorMessageFrom } from '@moeru/std'
 
 import packageJSON from '../../package.json'
 
+import { exitCodeFromSignal } from './interrupt'
 import { formatVievalCliRunOutput, hasRunFailures, runVievalCli } from './run'
 
 interface ParsedCliArguments {
@@ -174,16 +175,12 @@ export async function runEvalRunCli(argv: readonly string[]): Promise<void> {
       workspaceConcurrency: parsed.workspaceConcurrency,
     })
 
-    if (parsed.json) {
-      process.stdout.write(`${JSON.stringify(output, null, 2)}\n`)
-      if (hasRunFailures(output)) {
-        process.exitCode = 1
-      }
-      return
+    process.stdout.write(`${parsed.json ? JSON.stringify(output, null, 2) : formatVievalCliRunOutput(output)}\n`)
+    // An interrupted run exits like a process ended by that signal, so shells and CI see the interrupt.
+    if (output.interruptSignal != null) {
+      process.exitCode = exitCodeFromSignal(output.interruptSignal)
     }
-
-    process.stdout.write(`${formatVievalCliRunOutput(output)}\n`)
-    if (hasRunFailures(output)) {
+    else if (hasRunFailures(output)) {
       process.exitCode = 1
     }
   }

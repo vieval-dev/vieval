@@ -356,11 +356,16 @@ async function executeRegisteredCase(
   index: number,
   totalCases: number,
   taskExecutionPolicy: TaskExecutionPolicy | undefined,
-): Promise<CaseExecutionOutcome> {
+): Promise<CaseExecutionOutcome | undefined> {
   const resolvedPolicy = resolveCaseExecutionPolicy(taskCase, taskExecutionPolicy)
   let lastOutcome: CaseExecutionOutcome | undefined
 
   for (let retryIndex = 0; retryIndex <= resolvedPolicy.autoRetry; retryIndex += 1) {
+    // An interrupted run neither starts queued cases nor retries failed ones.
+    if (context.signal?.aborted === true) {
+      return lastOutcome
+    }
+
     if (retryIndex > 0) {
       const retryDelayMs = resolveAutoRetryDelay(resolvedPolicy, retryIndex)
       assertNonNegativeNumber(retryDelayMs, 'autoRetryDelay result')
@@ -472,6 +477,21 @@ async function runCaseOnce(
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined
   let timedOut = false
   let settled = false
+  // Interrupting the run aborts the case, so its own cleanup (`finally`, abort listeners) can run before the process exits.
+  const abortOnInterrupt = () => abortController.abort(context.signal?.reason)
+  context.signal?.addEventListener('abort', abortOnInterrupt, { once: true })
+  // A case that swallowed the abort and returned normally still did not finish its work.
+  const completedOutcome = (output: unknown): CaseExecutionOutcome => context.signal?.aborted === true
+    ? {
+        errorMessage: errorMessageFrom(context.signal.reason) ?? 'Run interrupted.',
+        scoresByKind: customScoresByKind,
+        state: 'failed',
+      }
+    : {
+        output,
+        scoresByKind: customScoresByKind,
+        state: 'passed',
+      }
 
   try {
     return await telemetry.withSpan('vieval.case', {
@@ -546,31 +566,26 @@ async function runCaseOnce(
 
         const output = await Promise.race([runPromise, timeoutPromise])
         settled = true
-        return {
-          output,
-          scoresByKind: customScoresByKind,
-          state: 'passed',
-        }
+        return completedOutcome(output)
       }
 
       const output = await runPromise
       settled = true
-      return {
-        output,
-        scoresByKind: customScoresByKind,
-        state: 'passed',
-      }
+      return completedOutcome(output)
     })
   }
   catch (error) {
     settled = true
+    // Abort errors raised by the interrupt carry generic messages ("The operation was aborted"); the run's reason is clearer.
+    const interruptMessage = context.signal?.aborted === true ? errorMessageFrom(context.signal.reason) : undefined
     return {
-      errorMessage: errorMessageFrom(error) ?? (timedOut && timeout != null ? `Case timed out after ${timeout}ms.` : 'Unknown case failure.'),
+      errorMessage: interruptMessage ?? errorMessageFrom(error) ?? (timedOut && timeout != null ? `Case timed out after ${timeout}ms.` : 'Unknown case failure.'),
       scoresByKind: customScoresByKind,
       state: timedOut ? 'timeout' : 'failed',
     }
   }
   finally {
+    context.signal?.removeEventListener('abort', abortOnInterrupt)
     if (timeoutHandle != null) {
       clearTimeout(timeoutHandle)
     }
@@ -682,6 +697,10 @@ export function describeTask(
             registeredCases.map(async (taskCase, index) => {
               const executeCase = async () => {
                 const outcome = await executeRegisteredCase(context, taskCase, index, totalCases, taskExecutionPolicy)
+                // Not started because the run was interrupted.
+                if (outcome == null) {
+                  return
+                }
                 emitCaseOutcome(context, taskCase, outcome, index, totalCases)
                 collectCaseOutcomeScores(outcome, scoreBucketsByKind)
               }
@@ -720,7 +739,7 @@ export function describeTask(
 
             attemptOutcomes.forEach((outcome, index) => {
               const taskCase = registeredCases[index]
-              if (taskCase == null) {
+              if (taskCase == null || outcome == null) {
                 return
               }
 
@@ -728,8 +747,8 @@ export function describeTask(
               collectCaseOutcomeScores(outcome, scoreBucketsByKind)
             })
 
-            const shouldContinue = attemptOutcomes.some((outcome, index) => {
-              if (outcome.state === 'passed') {
+            const shouldContinue = context.signal?.aborted !== true && attemptOutcomes.some((outcome, index) => {
+              if (outcome == null || outcome.state === 'passed') {
                 return false
               }
 

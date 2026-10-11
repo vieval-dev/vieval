@@ -64,6 +64,15 @@ export interface RunScheduledTasksOptions {
    * - thrown errors abort the task before executor work starts
    */
   onTaskStart?: (task: ScheduledTask) => void
+  /**
+   * Stops starting new tasks once aborted, for example when the run is interrupted.
+   *
+   * Expects:
+   * - tasks that already started keep running; they observe the abort through their own execution context
+   *
+   * @default undefined
+   */
+  signal?: AbortSignal
 }
 
 /**
@@ -121,6 +130,9 @@ export class RunnerExecutionError extends Error {
  * - callers to handle concurrency outside this helper when needed
  * - `onTaskStart` / `onTaskEnd` hooks to be synchronous lifecycle observers
  *
+ * Returns:
+ * - aggregated results of the tasks that ran; tasks not started before `signal` aborted are left out
+ *
  * Throws:
  * - `RunnerExecutionError` when task setup, hooks, or the executor throws
  */
@@ -133,7 +145,12 @@ export async function runScheduledTasks(
     return aggregateRunResults([])
   }
 
-  async function executeScheduledTask(task: ScheduledTask): Promise<RunResult> {
+  async function executeScheduledTask(task: ScheduledTask): Promise<RunResult | undefined> {
+    // An interrupted run finishes the tasks in flight but starts no new ones.
+    if (options.signal?.aborted === true) {
+      return undefined
+    }
+
     let executionContext: TaskExecutionContext
 
     try {
@@ -178,7 +195,10 @@ export async function runScheduledTasks(
   if (maxConcurrency <= 1) {
     const results: RunResult[] = []
     for (const task of tasks) {
-      results.push(await executeScheduledTask(task))
+      const result = await executeScheduledTask(task)
+      if (result != null) {
+        results.push(result)
+      }
     }
     return aggregateRunResults(results)
   }
@@ -191,7 +211,7 @@ export async function runScheduledTasks(
 
   const sortedResults = resultPairs
     .sort((left, right) => left.index - right.index)
-    .map(item => item.result)
+    .flatMap(item => item.result == null ? [] : [item.result])
 
   return aggregateRunResults(sortedResults)
 }

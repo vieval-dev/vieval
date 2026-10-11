@@ -2549,4 +2549,80 @@ describeTask('report-out-task', () => {
     expect(await pathExists(join(output.reportDirectory!, 'events.jsonl'))).toBe(true)
     expect(await pathExists(join(projectDirectory, '.vieval', 'reports'))).toBe(false)
   })
+
+  /**
+   * @example
+   * it('lets running cases clean up on SIGINT, starts no queued case, and reports the interrupt', async () => {})
+   */
+  it('lets running cases clean up on SIGINT, starts no queued case, and reports the interrupt', async () => {
+    const interruptStateKey = '__VIEVAL_INTERRUPT_STATE__'
+    const lifecycle: string[] = []
+    let markStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve
+    })
+    ;(globalThis as Record<string, unknown>)[interruptStateKey] = { lifecycle, markStarted }
+    const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
+    const projectDirectory = await createDslProject({
+      evalFiles: {
+        'interrupt.eval.ts': `
+import { caseOf, describeTask } from '${vievalImportPath}'
+
+const state = globalThis.${interruptStateKey}
+
+describeTask('interrupt-task', () => {
+  caseOf('running', async (context) => {
+    state.lifecycle.push('create running')
+    state.markStarted()
+    try {
+      await new Promise((_, reject) => context.signal.addEventListener('abort', () => reject(context.signal.reason), { once: true }))
+    }
+    finally {
+      state.lifecycle.push('delete running')
+    }
+  })
+  caseOf('queued', async () => {
+    state.lifecycle.push('create queued')
+  })
+}, { concurrency: { case: 1 } })
+`,
+      },
+      projectName: 'interrupt-project',
+    })
+
+    try {
+      const runPromise = runVievalCli({
+        configFilePath: join(projectDirectory, 'vieval.config.ts'),
+        cwd: projectDirectory,
+        report: false,
+        reporter: { isTTY: false, writeError: () => {}, writeOutput: () => {} },
+      })
+      await started
+      // NOTICE:
+      // `process.emit` invokes the CLI's signal listener without delivering a real signal to the Vitest worker,
+      // which registers no SIGINT listener of its own. Real delivery is covered by the CLI interrupt check in the PR.
+      // Removal condition: none; this is the in-process way to exercise the interrupt path.
+      process.emit('SIGINT')
+      const output = await runPromise
+
+      /**
+       * @example
+       * expect(lifecycle).toEqual(['create running', 'delete running'])
+       */
+      expect(lifecycle).toEqual(['create running', 'delete running'])
+      /**
+       * @example
+       * expect(output.interruptSignal).toBe('SIGINT')
+       */
+      expect(output.interruptSignal).toBe('SIGINT')
+      expect(output.projects[0]?.caseFailures).toEqual([expect.objectContaining({ caseName: 'running', errorMessage: 'Run interrupted by SIGINT.' })])
+      expect(formatVievalCliRunOutput(output)).toContain('Interrupted  by SIGINT')
+      // Listener removal is asserted in `interrupt.test.ts`. Here the process keeps one SIGINT listener from
+      // `signal-exit`, registered when the eval modules are loaded through Vitest; it only acts when it is the
+      // sole listener, so it restores Node's default exit once the run's listener is gone.
+    }
+    finally {
+      delete (globalThis as Record<string, unknown>)[interruptStateKey]
+    }
+  })
 })

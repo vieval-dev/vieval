@@ -246,4 +246,34 @@ describe('runScheduledTasks', () => {
     expect(result.runs[0]?.id).toBe('task-a')
     expect(result.runs[1]?.id).toBe('task-b')
   })
+
+  /**
+   * @example
+   * it('starts no new tasks once the signal aborts', async () => {})
+   */
+  it('starts no new tasks once the signal aborts', async () => {
+    const interruption = new AbortController()
+    const executed: string[] = []
+    const executor: ScheduledTaskExecutor = async (task) => {
+      executed.push(task.id)
+      // The run is interrupted while the first task is in flight.
+      interruption.abort()
+      return createSuccessfulRunResult(task)
+    }
+
+    const result = await runScheduledTasks([createScheduledTaskWithId('task-a'), createScheduledTaskWithId('task-b')], executor, {
+      signal: interruption.signal,
+    })
+
+    /**
+     * @example
+     * expect(executed).toEqual(['task-a'])
+     */
+    expect(executed).toEqual(['task-a'])
+    /**
+     * @example
+     * expect(result.overall.runCount).toBe(1)
+     */
+    expect(result.overall.runCount).toBe(1)
+  })
 })
