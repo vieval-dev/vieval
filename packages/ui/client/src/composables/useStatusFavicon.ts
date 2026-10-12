@@ -79,16 +79,17 @@ async function draw(status: FaviconStatus): Promise<string> {
   await logo.decode()
   context.drawImage(logo, 0, 0, size, size)
 
-  // Badge center and radii in the 64 px grid: a 13 px dot inside a 18 px transparent ring.
-  const [x, y] = [46, 46]
+  // Badge center and radii in the 64 px grid: a 10 px dot inside a 14 px transparent ring, tucked into the corner so
+  // the logo stays the larger part of the icon.
+  const [x, y] = [50, 50]
   context.globalCompositeOperation = 'destination-out'
   context.beginPath()
-  context.arc(x, y, 18, 0, Math.PI * 2)
+  context.arc(x, y, 14, 0, Math.PI * 2)
   context.fill()
   context.globalCompositeOperation = 'source-over'
   context.fillStyle = badgeColors[status]
   context.beginPath()
-  context.arc(x, y, 13, 0, Math.PI * 2)
+  context.arc(x, y, 10, 0, Math.PI * 2)
   context.fill()
 
   // The glyph: a check for success, a cross for failure. Pending gets a white center: a plain yellow dot (GitHub's)
@@ -96,25 +97,25 @@ async function draw(status: FaviconStatus): Promise<string> {
   if (status === 'pending') {
     context.fillStyle = '#fff'
     context.beginPath()
-    context.arc(x, y, 5, 0, Math.PI * 2)
+    context.arc(x, y, 3.5, 0, Math.PI * 2)
     context.fill()
     return canvas.toDataURL('image/png')
   }
   context.strokeStyle = '#fff'
-  context.lineWidth = 4
+  context.lineWidth = 3
   context.lineCap = 'round'
   context.lineJoin = 'round'
   context.beginPath()
   if (status === 'success') {
-    context.moveTo(x - 6, y)
-    context.lineTo(x - 1.5, y + 4.5)
-    context.lineTo(x + 6.5, y - 4.5)
+    context.moveTo(x - 4.5, y)
+    context.lineTo(x - 1, y + 3.5)
+    context.lineTo(x + 5, y - 3.5)
   }
   else {
-    context.moveTo(x - 5, y - 5)
-    context.lineTo(x + 5, y + 5)
-    context.moveTo(x + 5, y - 5)
-    context.lineTo(x - 5, y + 5)
+    context.moveTo(x - 3.5, y - 3.5)
+    context.lineTo(x + 3.5, y + 3.5)
+    context.moveTo(x + 3.5, y - 3.5)
+    context.lineTo(x - 3.5, y + 3.5)
   }
   context.stroke()
   return canvas.toDataURL('image/png')
