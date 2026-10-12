@@ -16,6 +16,7 @@ import StateView from '../components/StateView.vue'
 
 import { api } from '../api'
 import { useRunLive } from '../composables/useRunLive'
+import { useStatusFavicon } from '../composables/useStatusFavicon'
 import { formatDuration, formatScore, formatTime } from '../format'
 import { levelIcons } from '../hierarchy'
 import { href } from '../router'
@@ -27,6 +28,8 @@ import { runSwitcherOptions } from '../switcher'
 const props = defineProps<{ route: Extract<Route, { name: 'task' }>, run?: RunListItem }>()
 
 const live = useRunLive(toRef(() => props.route.runKey))
+// The tab follows the run, like the run page: a task page is one step into the same run.
+useStatusFavicon(() => live.snapshot.value?.state)
 const task = computed(() => live.snapshot.value?.tasks.find(item => item.id === props.route.taskId))
 const timeline = useQuery({
   key: () => ['runs', props.route.runKey, 'task', props.route.taskId, 'timeline'],

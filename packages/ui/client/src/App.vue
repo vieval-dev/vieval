@@ -2,6 +2,7 @@
 import type { RunListItem } from '../../src/shared/contract'
 
 import { useQuery } from '@pinia/colada'
+import { useHead } from '@unhead/vue'
 import { useDark, useToggle } from '@vueuse/core'
 import { DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle, TooltipProvider } from 'reka-ui'
 import { computed, shallowRef, useTemplateRef, watch } from 'vue'
@@ -19,6 +20,7 @@ import RunPage from './pages/RunPage.vue'
 import TaskPage from './pages/TaskPage.vue'
 
 import { api } from './api'
+import { FAVICON_KEYS } from './composables/useStatusFavicon'
 import { currentRoute, href } from './router'
 
 const route = currentRoute
@@ -61,6 +63,18 @@ const toggleScheme = useToggle(dark)
 const pageKey = computed(() => JSON.stringify({ ...route.value, tab: undefined }))
 const main = useTemplateRef<HTMLElement>('main')
 watch(pageKey, () => main.value?.scrollTo({ top: 0 }))
+
+// Every page names itself through `PageHeader`; the tab reads "<page> · Vieval", or "Vieval" while it loads.
+// The plain logo is the tab icon; run, task, and case pages replace it under the same keys with a badged one
+// (`useStatusFavicon`). `vieval-logo.svg` is `docs/content/public/vieval-logo.svg` with its embedded 1200 px gradient
+// re-encoded as a 300 px WebP (4.3 MB → 7 KB); the PNG is the docs' 96 px favicon for browsers without SVG favicons.
+useHead({
+  link: [
+    { href: './vieval-logo.svg', key: FAVICON_KEYS.svg, rel: 'icon', type: 'image/svg+xml' },
+    { href: './favicon-96x96.png', key: FAVICON_KEYS.png, rel: 'icon', sizes: '96x96', type: 'image/png' },
+  ],
+  titleTemplate: title => (title ? `${title} · Vieval` : 'Vieval'),
+})
 
 /** Sidebar drawer of narrow screens (below `md`), where the sidebar does not fit next to the page. */
 const drawerOpen = shallowRef(false)

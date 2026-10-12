@@ -68,6 +68,7 @@
     "@pinia/colada": "catalog:",
     "@proj-airi/unocss-preset-chromatic": "catalog:",
     "@tanstack/vue-virtual": "catalog:",
+    "@unhead/vue": "catalog:",
     "@unlazy/vue": "catalog:",
     "@vitejs/plugin-vue": "catalog:",
     "@vitest/browser-playwright": "catalog:vitest",

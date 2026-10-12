@@ -2,6 +2,7 @@
 import type { HierarchyLevel, HierarchyPosition } from '../hierarchy'
 import type { SwitcherOption } from '../switcher'
 
+import { useHead } from '@unhead/vue'
 import { computed } from 'vue'
 
 import Breadcrumbs from './Breadcrumbs.vue'
@@ -27,8 +28,11 @@ const props = defineProps<{
   /** Siblings of the page's own level when the catalog does not know them (tasks and cases come from the run). */
   siblings?: SwitcherOption[]
   subtitle?: string
+  /** Name of the page: the heading (unless the `title` slot replaces it) and the document title. */
   title: string
 }>()
+// The browser tab follows the page; a page still loading keeps the plain "Vieval" of the title template.
+useHead({ title: () => (props.loading ? undefined : props.title) })
 const catalog = useCatalog()
 const crumbs = computed(() => {
   const { attempt, experiment, project, runKey, workspace } = props.position

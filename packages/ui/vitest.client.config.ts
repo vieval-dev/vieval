@@ -9,6 +9,9 @@ import { defineProject } from 'vitest/config'
 /** Web UI component tests: they run in a real Chromium (Vitest browser mode) instead of a mocked DOM. */
 export default defineProject({
   plugins: [Vue(), UnoCSS({ configFile: join(import.meta.dirname, 'uno.config.ts') })],
+  // The app's static files (`client/public`, the `publicDir` of `vite.config.ts` through its `client` root), so
+  // components that load them (the logo the tab icon is drawn from) see what the app serves.
+  publicDir: join(import.meta.dirname, 'client', 'public'),
   root: import.meta.dirname,
   test: {
     browser: {

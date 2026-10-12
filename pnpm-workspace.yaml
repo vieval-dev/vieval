@@ -38,6 +38,7 @@ catalog:
   '@shikijs/transformers': 3.23.0
   '@tanstack/vue-virtual': ^3.13.41
   '@types/node': ^26.1.0
+  '@unhead/vue': ^3.4.2
   '@unlazy/vue': ^2.0.1
   '@unocss/eslint-plugin': ^66.7.4
   '@unocss/reset': ^66.7.4
