@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import type { CaseNode, CaseRound, RunSnapshot } from '../../../src/shared/contract'
+import type { CaseCounts, CaseNode, CaseRound, RunSnapshot } from '../../../src/shared/contract'
 import type { Segment } from './SegmentedControl.vue'
 
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useIntervalFn, useMediaQuery, useTimestamp } from '@vueuse/core'
 import { computed, reactive, shallowRef, useTemplateRef, watch } from 'vue'
 
+import CountsBar from './CountsBar.vue'
 import IconButton from './IconButton.vue'
 import SegmentedControl from './SegmentedControl.vue'
 import StateBadge from './StateBadge.vue'
@@ -23,8 +24,8 @@ const props = defineProps<{ snapshot: RunSnapshot }>()
 /** One visible line of the flattened tree. */
 interface Row {
   caseNode?: CaseNode
-  /** Case counts of a task row, rendered with pass/fail icons before `detail`. */
-  counts?: { failed: number, passed: number, running: number, total: number }
+  /** Case counts of a task row (total: the expected cases), drawn as the case bar before `detail`. */
+  counts?: CaseCounts
   depth: number
   detail?: string
   expandable: boolean
@@ -75,7 +76,7 @@ const rows = computed<Row[]>(() => {
       continue
     for (const task of tasks) {
       const taskKey = `t:${task.id}`
-      list.push({ counts: { failed: task.caseCounts.failed + task.caseCounts.timeout, passed: task.caseCounts.passed, running: task.caseCounts.running, total: task.caseTotal ?? task.cases.length }, depth: 1, detail: `exact ${formatScore(task.scores.exact)}`, expandable: true, href: href({ name: 'task', runKey: snapshot.runKey, taskId: task.id }), key: taskKey, kind: 'task', label: task.displayName, state: task.state })
+      list.push({ counts: { ...task.caseCounts, total: task.caseTotal ?? task.caseCounts.total }, depth: 1, detail: `exact ${formatScore(task.scores.exact)}`, expandable: true, href: href({ name: 'task', runKey: snapshot.runKey, taskId: task.id }), key: taskKey, kind: 'task', label: task.displayName, state: task.state })
       if (!open.has(taskKey))
         continue
       const pushCase = (node: CaseNode, depth: number, round: CaseRound | undefined) => {
@@ -213,12 +214,7 @@ const counts = computed(() => props.snapshot.tasks.reduce((sum, task) => sum + t
               <span v-if="rows[item.index]!.running" :class="['badge state-running']"><span class="i-mingcute-aiming-2-line" aria-hidden="true" />now</span>
             </span>
             <span :class="['md:(ml-auto pl-2) flex items-center gap-1.5 min-w-0', 'muted mono text-xs whitespace-nowrap max-md:text-[11px]']">
-              <template v-if="rows[item.index]!.counts">
-                <span :class="['inline-flex items-center gap-0.5', 'text-green-700 dark:text-green-400']" :title="`${rows[item.index]!.counts!.passed} passed`">{{ rows[item.index]!.counts!.passed }}<span class="i-mingcute-check-line" aria-label="passed" /></span>
-                <span :class="['inline-flex items-center gap-0.5', 'text-red-700 dark:text-red-400']" :title="`${rows[item.index]!.counts!.failed} failed`">{{ rows[item.index]!.counts!.failed }}<span class="i-mingcute-close-line" aria-label="failed" /></span>
-                <span v-if="rows[item.index]!.counts!.running" :class="['inline-flex items-center gap-0.5', 'text-blue-700 dark:text-blue-400']" :title="`${rows[item.index]!.counts!.running} running`">{{ rows[item.index]!.counts!.running }}<span class="i-mingcute-loading-line" aria-label="running" /></span>
-                <span>/ {{ rows[item.index]!.counts!.total }} ·</span>
-              </template>
+              <CountsBar v-if="rows[item.index]!.counts" :class="['w-24 shrink-0']" :counts="rows[item.index]!.counts!" />
               <span v-if="rows[item.index]!.runningSince" :class="['text-blue-700 dark:text-blue-300 tabular-nums']" data-testid="running-elapsed">running {{ formatDuration(Math.max(0, now - Date.parse(rows[item.index]!.runningSince!))) }}</span>
               <span :class="['truncate']">{{ rows[item.index]!.detail }}</span>
             </span>

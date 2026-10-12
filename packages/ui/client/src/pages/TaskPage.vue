@@ -89,7 +89,7 @@ const position = computed(() => ({
         <div :class="['min-w-64 max-md:(min-w-0 w-full)']">
           <div class="text-xs muted">
             Cases ({{ task.caseTotal ?? '?' }} expected)
-          </div><CountsBar :counts="task.caseCounts" labels="below" />
+          </div><CountsBar :counts="task.caseCounts" labels="hover" />
         </div>
         <div>
           <div class="text-xs muted">

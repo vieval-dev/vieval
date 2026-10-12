@@ -3,15 +3,12 @@ import type { ProjectEntry } from '../composables/useCatalog'
 
 import { computed } from 'vue'
 
-import CountsBar from '../components/CountsBar.vue'
 import PageHeader from '../components/PageHeader.vue'
-import RunEta from '../components/RunEta.vue'
-import StateBadge from '../components/StateBadge.vue'
+import ScoreCard from '../components/ScoreCard.vue'
 import StateView from '../components/StateView.vue'
 import TimeAgo from '../components/TimeAgo.vue'
 
 import { useCatalog } from '../composables/useCatalog'
-import { formatScore } from '../format'
 import { levelIcons } from '../hierarchy'
 import { formatAxisValues, mergeMatrices } from '../labels'
 import { href } from '../router'
@@ -54,39 +51,32 @@ const sections = computed(() => workspaces.value.map(workspace => ({ id: workspa
         <a :href="href({ name: 'scope', workspace: section.id })" :class="['link']">{{ section.id }}</a>
       </h2>
       <div :class="['grid gap-3']" style="grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr))">
-        <a
+        <ScoreCard
           v-for="project in section.projects"
           :key="project.id"
           :href="href({ name: 'scope', project: project.id, workspace: section.id })"
-          :class="['card flex flex-col gap-3 p-4 transition-colors hover:border-primary-400/60 hover:bg-primary-500/3']"
+          :score="project.best"
+          score-label="best exact"
+          :state="project.latest.state"
+          :counts="project.latest.counts"
+          :run="project.latest"
           data-testid="project-card"
         >
-          <span :class="['flex items-center gap-2 font-semibold text-base min-w-0']">
-            <span :class="[levelIcons.project, 'text-primary-500 shrink-0']" aria-hidden="true" />
-            <span :class="['truncate']">{{ project.id }}</span>
-          </span>
-          <span :class="['text-sm muted']">
-            {{ project.experiments.length }} experiment(s) · {{ project.runs.length }} run(s)
-          </span>
-          <span :class="['flex items-center gap-2 text-sm']">
-            <StateBadge :state="project.latest.state" />
-            <TimeAgo :time="project.latest.startedAt" :class="['muted text-xs']" />
-          </span>
-          <CountsBar :counts="project.latest.counts" labels="below" />
-          <!-- A running newest run: how far it is and when it should end, without opening it. -->
-          <RunEta v-if="project.latest.state === 'running'" :run-key="project.latest.runKey" :seq="project.latest.lastSeq" />
-          <span :class="['flex items-end justify-between gap-3']">
-            <span :class="['flex flex-wrap gap-1']">
-              <span v-for="axis in project.axes" :key="axis.axis" :class="['badge state-neutral font-normal']">
-                <span class="muted">{{ axis.axis }}</span>{{ axis.values }}
-              </span>
+          <template #title>
+            <span :class="['flex items-center gap-2 text-base min-w-0']">
+              <span :class="[levelIcons.project, 'text-primary-500 shrink-0']" aria-hidden="true" />
+              <span :class="['truncate']">{{ project.id }}</span>
             </span>
-            <span :class="['flex flex-col items-end shrink-0']">
-              <span :class="['text-xs muted']">best exact</span>
-              <span :class="['text-xl font-semibold tabular-nums']">{{ formatScore(project.best) }}</span>
+          </template>
+          <span>
+            {{ project.experiments.length }} experiment(s) · {{ project.runs.length }} run(s) · newest <TimeAgo :time="project.latest.startedAt" />
+          </span>
+          <span v-if="project.axes.length > 0" :class="['flex flex-wrap gap-1']">
+            <span v-for="axis in project.axes" :key="axis.axis" :class="['badge state-neutral font-normal']">
+              <span class="muted">{{ axis.axis }}</span>{{ axis.values }}
             </span>
           </span>
-        </a>
+        </ScoreCard>
       </div>
     </section>
   </StateView>

@@ -93,7 +93,8 @@ const rowGrid = [
               <StateBadge :state="row.latest.state" />
               <TimeAgo :time="row.latest.startedAt" :class="['text-xs muted truncate']" />
             </span>
-            <Sparkline :class="['max-md:hidden']" :values="row.trend" :label="`exact score of ${row.runs.length} runs`" :width="72" />
+            <!-- The cell stays even when the trend draws nothing (fewer than two scored runs), so later columns keep their place. -->
+            <span :class="['flex max-md:hidden']"><Sparkline :values="row.trend" :label="`exact score of ${row.runs.length} runs`" :width="72" /></span>
             <CountsBar :class="['max-md:(row-start-3 col-span-2)']" :counts="row.latest.counts" />
             <span :class="['text-right tabular-nums font-semibold max-md:(row-start-2 col-start-2)']">{{ formatScore(row.latest.exactAverage) }}</span>
             <span :class="['text-right tabular-nums muted max-md:hidden']">{{ row.attempts.length }}</span>

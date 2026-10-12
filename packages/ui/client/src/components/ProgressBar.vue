@@ -27,6 +27,12 @@ const props = defineProps<{
   /** Accessible name of the bar. */
   label: string
   segments: ProgressBarSegment[]
+  /**
+   * `md` for the run page; `sm`, as thin as `CountsBar`, for cards.
+   *
+   * @default 'md'
+   */
+  size?: 'md' | 'sm'
   /** Value reported to assistive technology, from 0 to 100. */
   value: number
 }>()
@@ -51,7 +57,7 @@ const pills = computed(() => {
     :aria-valuenow="Math.round(props.value)"
     aria-valuemin="0"
     aria-valuemax="100"
-    :class="['relative h-4 w-full overflow-hidden rounded-full', 'bg-neutral-100 dark:bg-neutral-800']"
+    :class="['relative w-full overflow-hidden rounded-full', props.size === 'sm' ? 'h-1.5' : 'h-4', 'bg-neutral-200 dark:bg-neutral-800']"
   >
     <div
       v-for="pill in pills"
@@ -61,7 +67,7 @@ const pills = computed(() => {
         'transition-[width] duration-500 ease-in-out',
         pill.class,
         // A small value still shows as a round dot rather than a sliver clipped by the track's round end.
-        pill.percent > 0 && 'min-w-4',
+        pill.percent > 0 && (props.size === 'sm' ? 'min-w-1.5' : 'min-w-4'),
       ]"
       :style="{ width: `${pill.end}%` }"
       :title="pill.title"

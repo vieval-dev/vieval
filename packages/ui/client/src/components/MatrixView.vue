@@ -4,14 +4,13 @@ import type { MatrixCell, MatrixResponse } from '../../../src/shared/contract'
 import { useQuery } from '@pinia/colada'
 import { computed, watch } from 'vue'
 
-import CountsBar from './CountsBar.vue'
+import ScoreCard from './ScoreCard.vue'
 import Sparkline from './Sparkline.vue'
-import StateBadge from './StateBadge.vue'
 import StateView from './StateView.vue'
 
 import { api } from '../api'
 import { useCatalog } from '../composables/useCatalog'
-import { formatScore, shortTaskId } from '../format'
+import { shortTaskId } from '../format'
 import { attemptLabel } from '../labels'
 import { href } from '../router'
 
@@ -31,13 +30,17 @@ const matrix = useQuery({
 const catalog = useCatalog()
 const scopeRuns = computed(() => catalog.runsIn({ experiment: props.experiment, project: props.project, workspace: props.workspace }))
 watch(() => scopeRuns.value.map(run => `${run.runKey}:${run.lastSeq}`).join(','), () => void matrix.refetch())
-
 /** Values of one cell along every axis, `run.` and `eval.` prefixed so equal axis names cannot collide. */
 function coordinates(cell: MatrixCell): Record<string, string> {
   return {
     ...Object.fromEntries(Object.entries(cell.run).map(([axis, value]) => [`run.${axis}`, value])),
     ...Object.fromEntries(Object.entries(cell.eval).map(([axis, value]) => [`eval.${axis}`, value])),
   }
+}
+
+/** The catalog entry of a cell's newest run: its event sequence drives the progress of a running cell. */
+function runOf(cell: MatrixCell) {
+  return scopeRuns.value.find(run => run.runKey === cell.latest.runKey)
 }
 const axisName = (key: string) => key.replace(/^(?:run|eval)\./, '')
 
@@ -140,34 +143,31 @@ function scoreDelta(cell: MatrixCell): number | undefined {
               {{ row.label }}
             </th>
             <td v-for="(cell, index) in row.cells" :key="grid.columns[index]!.key" :class="['align-top']">
-              <a
+              <ScoreCard
                 v-if="cell"
+                :class="['w-44 md:w-56 p-3! md:p-3.5!']"
                 :href="href({ name: 'task', runKey: cell.latest.runKey, taskId: cell.latest.taskId })"
-                :class="['flex flex-col w-44 md:w-56 rounded-xl p-3 md:p-3.5 transition-colors', 'bg-neutral-500/5 hover:bg-primary-500/8']"
-                :title="`${attemptLabel(cell.latest.attemptId)} · ${cell.latest.runKey}`"
+                :score="cell.latest.exact"
+                :state="cell.latest.state"
+                :counts="cell.latest.counts"
+                :run="runOf(cell)"
                 data-testid="matrix-cell"
               >
-                <span :class="['flex items-start gap-2']">
-                  <span :class="['flex items-baseline gap-1.5']">
-                    <span :class="['text-2xl font-semibold tabular-nums leading-none']">{{ formatScore(cell.latest.exact) }}</span>
-                    <span
-                      v-if="scoreDelta(cell) !== undefined && Math.abs(scoreDelta(cell)!) >= 0.05"
-                      :class="['inline-flex items-center text-xs font-medium tabular-nums', scoreDelta(cell)! > 0 ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400']"
-                      :title="`${scoreDelta(cell)! > 0 ? '+' : ''}${scoreDelta(cell)!.toFixed(1)} points from the run before`"
-                      data-testid="matrix-cell-delta"
-                    >
-                      <span :class="[scoreDelta(cell)! > 0 ? 'i-mingcute-arrow-up-line' : 'i-mingcute-arrow-down-line']" aria-hidden="true" />{{ Math.abs(scoreDelta(cell)!).toFixed(1) }}
-                    </span>
+                <template #score>
+                  <span
+                    v-if="scoreDelta(cell) !== undefined && Math.abs(scoreDelta(cell)!) >= 0.05"
+                    :class="['inline-flex items-center text-xs font-medium tabular-nums', scoreDelta(cell)! > 0 ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400']"
+                    :title="`${scoreDelta(cell)! > 0 ? '+' : ''}${scoreDelta(cell)!.toFixed(1)} points from the run before`"
+                    data-testid="matrix-cell-delta"
+                  >
+                    <span :class="[scoreDelta(cell)! > 0 ? 'i-mingcute-arrow-up-line' : 'i-mingcute-arrow-down-line']" aria-hidden="true" />{{ Math.abs(scoreDelta(cell)!).toFixed(1) }}
                   </span>
-                  <!-- The state of the newest run is the first thing to check, so it takes the corner. -->
-                  <StateBadge :class="['ml-auto']" :state="cell.latest.state" />
-                </span>
-                <span :class="['flex items-center gap-1.5 mt-1.5 text-xs muted min-w-0']">
+                </template>
+                <span :class="['flex items-center gap-1.5 min-w-0']" :title="`${attemptLabel(cell.latest.attemptId)} · ${cell.latest.runKey}`">
                   <span :class="['truncate']">{{ attemptLabel(cell.latest.attemptId) }} · {{ cell.history.length }} run(s)</span>
                   <Sparkline :class="['ml-auto']" :values="cell.history.map(point => point.exact)" :label="`exact score of ${cell.history.length} runs`" :width="48" :height="16" />
                 </span>
-                <CountsBar :class="['mt-2']" :counts="cell.latest.counts" labels="hover" />
-              </a>
+              </ScoreCard>
               <span v-else :class="['flex items-center justify-center w-44 md:w-56 h-24 rounded-xl text-xs muted border border-dashed border-neutral-300/60 dark:border-neutral-700/40']">not run</span>
             </td>
           </tr>
