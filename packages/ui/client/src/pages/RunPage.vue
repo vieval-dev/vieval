@@ -77,13 +77,19 @@ const score = computed(() => {
   }
   return { counts, exact: scoreRounds(snapshot.tasks.flatMap(task => task.cases.flatMap(node => node.rounds))).exact }
 })
+const label = computed(() => runLabel({ runKey: props.route.runKey, startedAt: live.snapshot.value?.startedAt }))
+/** The tab of a running run leads with its progress, so it can be followed from a background tab. */
+const documentTitle = computed(() => {
+  const ratio = live.snapshot.value?.progress.ratio
+  return live.snapshot.value?.state === 'running' && ratio != null ? `${(Math.min(1, ratio) * 100).toFixed(1)}% · ${label.value}` : label.value
+})
 const caseHref = (line: LogLine) => href({ caseId: line.caseId!, name: 'case', runKey: runKey.value, taskId: line.taskId! })
 </script>
 
 <template>
-  <PageHeader :id="props.route.runKey" :loading="!live.snapshot.value && !live.error.value" level="run" :position="position" :title="props.route.runKey">
+  <PageHeader :id="props.route.runKey" :loading="!live.snapshot.value && !live.error.value" level="run" :position="position" :title="documentTitle">
     <template #title>
-      <IdLabel :id="props.route.runKey" :label="runLabel({ runKey: props.route.runKey, startedAt: live.snapshot.value?.startedAt })" />
+      <IdLabel :id="props.route.runKey" :label="label" />
     </template>
     <template #subtitle>
       <span v-if="position.experiment" :class="['inline-flex items-center gap-1.5 mr-1 align-middle']">

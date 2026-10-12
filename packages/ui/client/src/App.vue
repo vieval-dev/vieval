@@ -2,6 +2,7 @@
 import type { RunListItem } from '../../src/shared/contract'
 
 import { useQuery } from '@pinia/colada'
+import { useHead } from '@unhead/vue'
 import { useDark, useToggle } from '@vueuse/core'
 import { DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle, TooltipProvider } from 'reka-ui'
 import { computed, shallowRef, useTemplateRef, watch } from 'vue'
@@ -61,6 +62,9 @@ const toggleScheme = useToggle(dark)
 const pageKey = computed(() => JSON.stringify({ ...route.value, tab: undefined }))
 const main = useTemplateRef<HTMLElement>('main')
 watch(pageKey, () => main.value?.scrollTo({ top: 0 }))
+
+// Every page names itself through `PageHeader`; the tab reads "<page> · Vieval", or "Vieval" while it loads.
+useHead({ titleTemplate: title => (title ? `${title} · Vieval` : 'Vieval') })
 
 /** Sidebar drawer of narrow screens (below `md`), where the sidebar does not fit next to the page. */
 const drawerOpen = shallowRef(false)

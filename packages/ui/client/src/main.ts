@@ -1,4 +1,5 @@
 import { PiniaColada } from '@pinia/colada'
+import { createHead } from '@unhead/vue/client'
 import { createPinia } from 'pinia'
 import { createApp } from 'vue'
 
@@ -18,4 +19,5 @@ import './styles.css'
 createApp(App)
   .use(createPinia())
   .use(PiniaColada, { queryOptions: queryDefaults })
+  .use(createHead())
   .mount('#app')
