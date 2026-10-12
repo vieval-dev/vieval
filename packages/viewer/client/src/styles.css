@@ -1,0 +1,78 @@
+:root {
+  /* Categorical series slots (dataviz reference palette); status colors stay reserved for states.
+     The first slot follows the theme hue: `primary-600` / `primary-400` of `@proj-airi/unocss-preset-chromatic`. */
+  --series-1: oklch(54% calc(var(--chromatic-chroma-600) * var(--chromatic-sat)) var(--chromatic-hue));
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --chart-grid: #e5e5e5;
+  --chart-text: #52514e;
+  color-scheme: light;
+}
+/*
+ * NOTICE:
+ * Light pages use the deep shades (600-800) of the theme palette for text and lines. Their chroma is 1.1-1.15 × the
+ * base chroma (`@proj-airi/unocss-preset-chromatic`), which for warm hues (the default 55, the vieval logo orange) lies
+ * outside sRGB at that lightness; browsers clip such colors channel by channel, which turns a dark orange into red that
+ * reads as "failed". Lowering the saturation of the whole palette on light pages keeps the deep shades inside sRGB
+ * (dark orange-brown instead of red). Dark pages use the light shades (200-400), which stay inside sRGB, so they keep
+ * the preset's default of 1. `:not(.dark)` outranks the preset's own `:root { --chromatic-sat: 1 }`.
+ * Remove when browsers gamut-map OKLCH colors (CSS Color 4 "css-gamut-map") instead of clipping them.
+ */
+:root:not(.dark) {
+  --chromatic-sat: 0.7;
+}
+:root.dark {
+  --series-1: oklch(74% calc(var(--chromatic-chroma-400) * var(--chromatic-sat)) var(--chromatic-hue));
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --chart-grid: #333332;
+  --chart-text: #c3c2b7;
+  color-scheme: dark;
+}
+html, body, #app { height: 100%; }
+/* The font family comes from the UnoCSS theme (`font.sans` in `uno.config.ts`) through the reset of `html`. */
+body {
+  font-size: 14px;
+  background: #fafafa;
+  color: #171717;
+}
+:root.dark body { background: #0a0a0a; color: #f5f5f5; }
+@keyframes vv-pulse { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
+.vv-pulse { animation: vv-pulse 1.4s ease-in-out infinite; }
+@keyframes vv-flash { from { background-color: oklch(62% var(--chromatic-chroma) var(--chromatic-hue) / .25) } to { background-color: transparent } }
+.vv-flash { animation: vv-flash 1.2s ease-out; }
+/* Shine of `ProgressBar`, the same sweep as airi's `Progress` (`packages/ui/src/components/misc/progress.vue`). */
+@keyframes vv-progress-shine {
+  0% { opacity: .4; transform: scale(0, 1) }
+  100% { opacity: 0; transform: scale(1, 1) }
+}
+.vv-progress-shine {
+  animation: vv-progress-shine 2s cubic-bezier(0.35, 0.08, 0.04, 0.99) infinite;
+  will-change: transform, opacity;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vv-progress-shine { animation: none; opacity: 0; }
+}
+/* Fade-out of the ThumbHash placeholder of `LazyImage` once the real image loaded. */
+@keyframes vv-fade-out { from { opacity: 1 } to { opacity: 0 } }
+.vv-fade-out { animation: vv-fade-out 750ms ease-in-out forwards; }
+@media (prefers-reduced-motion: reduce) {
+  .vv-fade-out { animation-duration: 1ms; }
+}
+/*
+ * Tooltips slide 2px in from the side they open on and fade in, like the `slide*AndFade` animations of airi's UnoCSS
+ * theme (`moeru-ai/airi`, `uno.config.ts`: 400ms, cubic-bezier(0.16, 1, 0.3, 1)). reka-ui sets `data-side` and
+ * `data-state` (`delayed-open` / `instant-open`) on `TooltipContent`. Menus and popovers use `AnimatedContent.vue`.
+ */
+@keyframes vv-slide-up-and-fade { from { opacity: 0; transform: translateY(2px) } to { opacity: 1; transform: translateY(0) } }
+@keyframes vv-slide-down-and-fade { from { opacity: 0; transform: translateY(-2px) } to { opacity: 1; transform: translateY(0) } }
+@keyframes vv-slide-left-and-fade { from { opacity: 0; transform: translateX(2px) } to { opacity: 1; transform: translateX(0) } }
+@keyframes vv-slide-right-and-fade { from { opacity: 0; transform: translateX(-2px) } to { opacity: 1; transform: translateX(0) } }
+.tooltip[data-state$="-open"] { animation-duration: 400ms; animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+.tooltip[data-state$="-open"][data-side="top"] { animation-name: vv-slide-up-and-fade; }
+.tooltip[data-state$="-open"][data-side="bottom"] { animation-name: vv-slide-down-and-fade; }
+.tooltip[data-state$="-open"][data-side="left"] { animation-name: vv-slide-left-and-fade; }
+.tooltip[data-state$="-open"][data-side="right"] { animation-name: vv-slide-right-and-fade; }
+@media (prefers-reduced-motion: reduce) {
+  .tooltip[data-state] { animation: none; }
+}

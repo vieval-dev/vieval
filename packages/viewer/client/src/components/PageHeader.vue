@@ -1,0 +1,69 @@
+<script setup lang="ts">
+import type { HierarchyLevel, HierarchyPosition } from '../hierarchy'
+
+import { computed } from 'vue'
+
+import Breadcrumbs from './Breadcrumbs.vue'
+import IdMenu from './IdMenu.vue'
+
+import { useCatalog } from '../composables/useCatalog'
+import { hierarchyCrumbs, levelIcons, levelLabels } from '../hierarchy'
+import { attemptLabel, experimentLabel, runLabel } from '../labels'
+import { switcherOptions } from '../switcher'
+
+/**
+ * Top of every page: the hierarchy breadcrumb (ending at the page's own level, which switches to its siblings), the
+ * page title with a summary, and page actions, plus "⋯ Copy ID" when the page shows an item with an id.
+ */
+const props = defineProps<{
+  /** Full id of the item the page shows; adds the overflow menu with "Copy ID". */
+  id?: string
+  /** Level the page shows; its icon precedes the title and the breadcrumb ends at it. */
+  level?: HierarchyLevel
+  position: HierarchyPosition
+  subtitle?: string
+  title: string
+}>()
+const catalog = useCatalog()
+const crumbs = computed(() => {
+  const { attempt, experiment, project, runKey, workspace } = props.position
+  const run = runKey == null ? undefined : catalog.runs.value.find(item => item.runKey === runKey)
+  return hierarchyCrumbs(props.position, {
+    attempt: attempt == null ? undefined : attemptLabel(attempt),
+    experiment: experiment == null ? undefined : experimentLabel(experiment, catalog.matrixOf({ experiment, project, workspace })).text,
+    run: run == null ? undefined : runLabel(run),
+  }, props.level)
+})
+/** Siblings of the page's own level for the breadcrumb switcher (from the shared catalog, no request). */
+const siblings = computed(() => {
+  const level = props.level
+  if (level !== 'workspace' && level !== 'project' && level !== 'experiment' && level !== 'attempt' && level !== 'run')
+    return undefined
+  return switcherOptions(props.position, catalog.runs.value)[level]
+})
+</script>
+
+<template>
+  <header :class="['flex flex-col gap-2 pb-3 mb-3 border-b border-neutral-200/50 dark:border-neutral-800/50']">
+    <Breadcrumbs :items="crumbs" :siblings="siblings" />
+    <div :class="['flex items-start gap-3 flex-wrap']">
+      <div :class="['min-w-0 flex-1']">
+        <h1 :class="['flex items-start gap-2 text-lg font-semibold break-all leading-snug']">
+          <span v-if="props.level" :class="[levelIcons[props.level], 'shrink-0 mt-1 muted']" role="img" :aria-label="levelLabels[props.level]" :title="levelLabels[props.level]" />
+          <slot name="title">
+            {{ props.title }}
+          </slot>
+        </h1>
+        <div v-if="props.subtitle || $slots.subtitle" :class="['muted text-sm']">
+          <slot name="subtitle">
+            {{ props.subtitle }}
+          </slot>
+        </div>
+      </div>
+      <div :class="['flex items-center gap-2 flex-wrap']">
+        <slot name="actions" />
+        <IdMenu v-if="props.id && props.level" :id="props.id" :kind="levelLabels[props.level].toLowerCase()" />
+      </div>
+    </div>
+  </header>
+</template>

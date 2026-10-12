@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process'
-import { readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -47,7 +48,7 @@ describe('parseTopLevelCliArguments', () => {
   })
 
   it('throws for unsupported command', () => {
-    expect(() => parseTopLevelCliArguments(['list'])).toThrow('Unsupported vieval command "list". Expected "run", "compare", or "report".')
+    expect(() => parseTopLevelCliArguments(['list'])).toThrow('Unsupported vieval command "list". Expected "run", "compare", "report", or "viewer".')
   })
 
   it('parses report command and forwards remaining argv', () => {
@@ -98,13 +99,25 @@ describe('parseTopLevelCliArguments', () => {
    * expect([]).toHaveLength(0)
    */
   it('emits an import-safe cli module and a dedicated executable shim', async () => {
-    execFileSync('pnpm', ['build'], {
-      cwd: packageDirectory,
-      stdio: 'pipe',
-    })
-
-    const bundledCliSource = await readFile(join(packageDirectory, 'dist', 'cli', 'index.mjs'), 'utf-8')
-    const bundledBinSource = await readFile(join(packageDirectory, 'dist', 'bin', 'vieval.mjs'), 'utf-8')
+    // NOTICE:
+    // The bundle is written to a temporary directory, not to `dist/`.
+    // Rebuilding `dist/` (with `clean: true`) while the workspace suite runs breaks other projects that import
+    // `vieval` from `dist/` at the same time (the viewer's `--with-viewer` test loaded a half-written package).
+    // Remove when no test imports the built package concurrently.
+    const outDirectory = await mkdtemp(join(tmpdir(), 'vieval-build-'))
+    let bundledCliSource: string
+    let bundledBinSource: string
+    try {
+      execFileSync('pnpm', ['exec', 'tsdown', '--out-dir', outDirectory], {
+        cwd: packageDirectory,
+        stdio: 'pipe',
+      })
+      bundledCliSource = await readFile(join(outDirectory, 'cli', 'index.mjs'), 'utf-8')
+      bundledBinSource = await readFile(join(outDirectory, 'bin', 'vieval.mjs'), 'utf-8')
+    }
+    finally {
+      await rm(outDirectory, { force: true, recursive: true })
+    }
 
     // ROOT CAUSE:
     //
@@ -123,5 +136,6 @@ describe('parseTopLevelCliArguments', () => {
 
     expect(directExecutionGuards).toHaveLength(0)
     expect(bundledBinSource).toContain('runTopLevelCli(process.argv.slice(2)).catch')
-  })
+    // NOTICE: a full tsdown build takes 3-8 s while the workspace suite runs in parallel; 5 s is the Vitest default.
+  }, 60_000)
 })

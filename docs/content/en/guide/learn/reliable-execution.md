@@ -39,7 +39,7 @@ The `--attempt` CLI flag is related but distinct: it assigns an `attemptId` to t
 | Workspace | Projects admitted concurrently within one CLI run. The default effective cap is `1`. | Top-level `concurrency.workspace`; `--workspace-concurrency` |
 | Project | An upper bound combined with the task cap when scheduled tasks run inside a project. | Top-level or project `concurrency.project`; `--project-concurrency` |
 | Task | Concurrent scheduled tasks inside a project. The default effective cap is `1`. | Top-level or project `concurrency.task`; `--task-concurrency` |
-| Attempt | Attempt concurrency metadata on config, projects, and tasks. `autoAttempt` execution is sequential today, so this does not make automatic attempts overlap. | Top-level, project, or task `concurrency.attempt`; `--attempt-concurrency` |
+| Attempt | Cases of one task that run at the same time within one attempt, across all case groups and on top of their case caps. Automatic attempts stay sequential; each attempt gets its own cap. | Top-level, project, or task `concurrency.attempt`; `--attempt-concurrency` |
 | Case | Concurrent DSL cases. A `casesFromInputs` group can have its own queue; otherwise cases share the task queue. | Top-level, project, or task `concurrency.case`; `casesFromInputs(..., { concurrency })`; `--case-concurrency` |
 
 For workspace, project, and task scheduling, a CLI value acts as a cap: it cannot raise a lower configured value. For attempt and case settings, the CLI runtime value takes precedence over task and project values. Project config cannot declare `workspace`, and task config contains only `attempt` and `case`.
@@ -156,10 +156,10 @@ Task aggregation and report artifacts answer related but different questions:
 - A passing case contributes its custom `exact` and `judge` scores. A failed case's custom score is not used by task aggregation.
 - Every completed auto attempt contributes another set of case outcomes to the task's aggregated score.
 - Reporter lifecycle, score, and metric events are emitted as execution happens. With `--report-out`, `events.jsonl` retains those events.
-- `cases.jsonl` is a final normalized projection keyed by task and case, so repeated retries or automatic attempts do not become independent case rows. Read raw events when the sequence matters, and read the task aggregate in `run-summary.json` when attempt-weighted scoring matters.
+- `cases.jsonl` is a final normalized projection keyed by task and case, so repeated retries or automatic attempts do not become independent case rows. For a task with automatic attempts, the record lists every attempt in `attempts`. Read raw events when the exact sequence matters (`case.started` and `case.ended` carry `attemptIndex`), and read the task aggregate in `run-summary.json` when attempt-weighted scoring matters.
 
 As described in [Assertions, Scores, and Metrics](/en/guide/learn/assertions-scores-and-metrics), a score event emitted before a later failure can remain in a persisted case record even though task aggregation counts that outcome as a failure. Diagnose state and score together.
 
-A common failure is using `autoRetry` to estimate reliability: the recovered case appears as one passing attempt. Use `autoAttempt` when earlier failures should remain in the aggregate, and remember that it reruns cases that already passed. Also avoid treating `--attempt` or `--attempt-concurrency` as a request for more automatic attempts.
+A common failure is using `autoRetry` to estimate reliability: the recovered case appears as one passing attempt. Use `autoAttempt` when earlier failures should remain in the aggregate, and remember that it reruns cases that already passed. Also avoid treating `--attempt` or `--attempt-concurrency` as a request for more automatic attempts: `--attempt` only labels the run, and `--attempt-concurrency` only limits how many cases of one attempt run at the same time.
 
 Next, retain and inspect this evidence in [Reports and Comparisons](/en/guide/learn/reports-and-comparisons).

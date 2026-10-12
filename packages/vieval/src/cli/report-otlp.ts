@@ -1,3 +1,4 @@
+import type { RunEventIdentity } from '../core/runner/event-bus'
 import type { CaseRecord } from './report-records'
 
 import { stableStringify } from './report-selectors'
@@ -7,6 +8,7 @@ export interface LocalOtlpProjection {
   /** OTLP-like log container written to `otlp/logs.json`. */
   logs: {
     resourceLogs: Array<{
+      resource: LocalOtlpResource
       scopeLogs: Array<{
         logRecords: LocalOtlpLogRecord[]
         scope: { name: string }
@@ -16,6 +18,7 @@ export interface LocalOtlpProjection {
   /** OTLP-like metric container written to `otlp/metrics.json`. */
   metrics: {
     resourceMetrics: Array<{
+      resource: LocalOtlpResource
       scopeMetrics: Array<{
         metrics: LocalOtlpMetric[]
         scope: { name: string }
@@ -25,6 +28,7 @@ export interface LocalOtlpProjection {
   /** OTLP-like trace container written to `otlp/traces.json`. */
   traces: {
     resourceSpans: Array<{
+      resource: LocalOtlpResource
       scopeSpans: Array<{
         scope: { name: string }
         spans: LocalOtlpSpan[]
@@ -67,6 +71,10 @@ interface LocalOtlpMetric {
   name: string
 }
 
+interface LocalOtlpResource {
+  attributes: LocalOtlpAttribute[]
+}
+
 interface LocalOtlpSpan {
   attributes: LocalOtlpAttribute[]
   endTimeUnixNano?: string
@@ -82,23 +90,33 @@ interface LocalOtlpSpan {
  * - future tools need trace/log/metric-shaped JSON files
  *
  * Expects:
- * - records belong to one Vieval run
+ * - records belong to the run named by `identity`
  *
  * Returns:
- * - trace, log, and metric containers shaped after OTLP JSON concepts
+ * - trace, log, and metric containers shaped after OTLP JSON concepts; every container's resource and the
+ *   `vieval.run` span carry the run identity (`vieval.{workspace,experiment,attempt,run}.id`), the same
+ *   attributes the live OpenTelemetry `vieval.run` span gets
  */
-export function buildLocalOtlpProjection(args: { records: readonly CaseRecord[], runId: string }): LocalOtlpProjection {
+export function buildLocalOtlpProjection(args: { identity: RunEventIdentity, records: readonly CaseRecord[] }): LocalOtlpProjection {
+  const runId = args.identity.runId
+  const runAttributes = toAttributes({
+    'vieval.attempt.id': args.identity.attemptId,
+    'vieval.experiment.id': args.identity.experimentId,
+    'vieval.run.id': runId,
+    'vieval.workspace.id': args.identity.workspaceId,
+  })
+  const resource: LocalOtlpResource = { attributes: runAttributes }
   const projectSpans = collectProjectNames(args.records).map(projectName => ({
     attributes: toAttributes({
       'vieval.project.name': projectName,
-      'vieval.run.id': args.runId,
+      'vieval.run.id': runId,
     }),
     name: 'vieval.project',
   }))
   const taskSpans = collectTasks(args.records).map(task => ({
     attributes: toAttributes({
       'vieval.project.name': task.projectName,
-      'vieval.run.id': args.runId,
+      'vieval.run.id': runId,
       'vieval.task.id': task.taskId,
     }),
     name: 'vieval.task',
@@ -106,6 +124,7 @@ export function buildLocalOtlpProjection(args: { records: readonly CaseRecord[],
   const caseSpans = args.records.map(record => ({
     attributes: toAttributes({
       ...record.metrics,
+      ...(record.attemptIndex == null ? {} : { 'vieval.case.attempt_index': record.attemptIndex }),
       'vieval.case.duration_ms': record.durationMs,
       'vieval.case.id': record.caseId,
       'vieval.case.name': record.caseName,
@@ -122,6 +141,7 @@ export function buildLocalOtlpProjection(args: { records: readonly CaseRecord[],
   return {
     logs: {
       resourceLogs: [{
+        resource,
         scopeLogs: [{
           logRecords: args.records.map(record => ({
             attributes: toAttributes(record.metrics),
@@ -141,6 +161,7 @@ export function buildLocalOtlpProjection(args: { records: readonly CaseRecord[],
     },
     metrics: {
       resourceMetrics: [{
+        resource,
         scopeMetrics: [{
           metrics: collectScoreKinds(args.records).map(kind => ({
             gauge: {
@@ -164,11 +185,12 @@ export function buildLocalOtlpProjection(args: { records: readonly CaseRecord[],
     },
     traces: {
       resourceSpans: [{
+        resource,
         scopeSpans: [{
           scope: { name: 'vieval' },
           spans: [
             {
-              attributes: toAttributes({ 'vieval.run.id': args.runId }),
+              attributes: runAttributes,
               name: 'vieval.run',
             },
             ...projectSpans,

@@ -1,4 +1,8 @@
+import type { RunReadyHook, ViewerHost, ViewerModule } from './viewer-host'
+
 import process from 'node:process'
+
+import { dirname, resolve } from 'node:path'
 
 import meow from 'meow'
 
@@ -8,6 +12,19 @@ import packageJSON from '../../package.json'
 
 import { exitCodeFromSignal } from './interrupt'
 import { formatVievalCliRunOutput, hasRunFailures, runVievalCli } from './run'
+import { DEFAULT_VIEWER_HOST, DEFAULT_VIEWER_PORT, importViewer } from './viewer-host'
+
+/**
+ * Process-bound dependencies of {@link runEvalRunCli}, replaceable by tests.
+ */
+export interface EvalRunCliRuntime {
+  /**
+   * Loads the optional viewer package.
+   *
+   * @default {@link importViewer}
+   */
+  importViewer?: (baseDirectory: string) => Promise<ViewerModule>
+}
 
 interface ParsedCliArguments {
   attempt?: string
@@ -21,8 +38,15 @@ interface ParsedCliArguments {
   report: boolean
   reportOut?: string
   taskConcurrency?: number
+  viewer?: ParsedViewerArguments
   workspace?: string
   workspaceConcurrency?: number
+}
+
+interface ParsedViewerArguments {
+  host: string
+  open: boolean
+  port: number
 }
 
 const evalRunHelpText = `
@@ -40,12 +64,22 @@ const evalRunHelpText = `
     --workspace-concurrency Workspace scheduling cap
     --project-concurrency   Project scheduling cap
     --task-concurrency      Task scheduling cap
-    --attempt-concurrency   Attempt scheduling cap
+    --attempt-concurrency   Cap on cases of one task running at once within one attempt
     --case-concurrency      Case scheduling cap
     --report-out Report output root directory (default: .vieval/reports next to the config file)
     --no-report  Do not write reports or case artifacts
     --json       Print machine-readable JSON output
+    --with-viewer        Serve the web viewer (package @vieval/viewer) for this run; keeps serving after
+                         the run ends until Ctrl+C
+    --viewer-port <port> Viewer port (default: ${DEFAULT_VIEWER_PORT})
+    --viewer-host <host> Viewer host (default: ${DEFAULT_VIEWER_HOST})
+    --viewer-open        Open the viewer in a browser
 `
+
+interface LoadedViewer {
+  getHost: () => undefined | ViewerHost
+  onRunReady: RunReadyHook
+}
 
 /**
  * Parses `vieval run` CLI arguments into one normalized execution payload.
@@ -101,6 +135,20 @@ export function parseCliArguments(argv: readonly string[]): ParsedCliArguments {
       taskConcurrency: {
         type: 'number',
       },
+      viewerHost: {
+        type: 'string',
+      },
+      viewerOpen: {
+        default: false,
+        type: 'boolean',
+      },
+      viewerPort: {
+        type: 'number',
+      },
+      withViewer: {
+        default: false,
+        type: 'boolean',
+      },
       workspace: {
         type: 'string',
       },
@@ -123,6 +171,15 @@ export function parseCliArguments(argv: readonly string[]): ParsedCliArguments {
     report: cli.flags.report,
     reportOut: cli.flags.reportOut,
     taskConcurrency: cli.flags.taskConcurrency,
+    ...(cli.flags.withViewer
+      ? {
+          viewer: {
+            host: cli.flags.viewerHost ?? DEFAULT_VIEWER_HOST,
+            open: cli.flags.viewerOpen,
+            port: normalizeViewerPort(cli.flags.viewerPort ?? DEFAULT_VIEWER_PORT),
+          },
+        }
+      : {}),
     workspace: cli.flags.workspace,
     workspaceConcurrency: cli.flags.workspaceConcurrency,
   }
@@ -137,9 +194,11 @@ export function parseCliArguments(argv: readonly string[]): ParsedCliArguments {
  *   -> {@link runTopLevelCli} (`./index`)
  *     -> {@link runEvalRunCli}
  *       -> {@link parseCliArguments}
- *       -> {@link runVievalCli}
+ *       -> {@link importViewer} (only with `--with-viewer`)
+ *       -> {@link runVievalCli} (with `onRunReady` attaching the viewer, only with `--with-viewer`)
  *       -> `process.stdout.write(...)` / `process.stderr.write(...)`
  *       -> `process.exitCode`
+ *       -> {@link ViewerHost.waitUntilClosed} (only with `--with-viewer`)
  *
  * Use when:
  * - the published `vieval` binary needs to execute the `run` subcommand
@@ -149,15 +208,23 @@ export function parseCliArguments(argv: readonly string[]): ParsedCliArguments {
  * - argv that belongs to the `run` subcommand only
  *
  * Returns:
- * - resolves after writing CLI output and updating `process.exitCode`
+ * - resolves after writing CLI output and updating `process.exitCode`; with `--with-viewer`, after the viewer
+ *   was closed (Ctrl+C), keeping the exit code of the run
  *
  * NOTICE:
  * - `src/cli/index.ts` is the only direct-execution entrypoint for the bundled
  *   CLI artifact. Keeping `eval-run.ts` reusable avoids duplicate top-level
  *   await guards once tsdown inlines both modules into `dist/cli/index.mjs`.
  */
-export async function runEvalRunCli(argv: readonly string[]): Promise<void> {
+export async function runEvalRunCli(argv: readonly string[], runtime: EvalRunCliRuntime = {}): Promise<void> {
   const parsed = parseCliArguments(argv)
+
+  const viewer = parsed.viewer == null
+    ? undefined
+    : await loadViewer(parsed, runtime)
+  if (viewer === null) {
+    return
+  }
 
   try {
     const output = await runVievalCli({
@@ -171,6 +238,7 @@ export async function runEvalRunCli(argv: readonly string[]): Promise<void> {
       report: parsed.report,
       reportOut: parsed.reportOut,
       taskConcurrency: parsed.taskConcurrency,
+      ...(viewer == null ? {} : { onRunReady: viewer.onRunReady }),
       workspace: parsed.workspace,
       workspaceConcurrency: parsed.workspaceConcurrency,
     })
@@ -185,9 +253,52 @@ export async function runEvalRunCli(argv: readonly string[]): Promise<void> {
     }
   }
   catch (error) {
-    const errorMessage = errorMessageFrom(error) ?? 'Unknown CLI failure.'
-    process.stderr.write(`[${packageJSON.name}] ${errorMessage}\n`)
-    process.exitCode = 1
+    writeCliError(error)
+  }
+
+  const host = viewer?.getHost()
+  if (host != null) {
+    await serveUntilClosed(host)
+  }
+}
+
+/**
+ * Loads the viewer before the run starts, so a missing package fails fast instead of after a long run.
+ *
+ * Returns:
+ * - the hook that starts the viewer on the first ready run and attaches every run to it
+ * - `null` after reporting a load failure (exit code 1)
+ */
+async function loadViewer(parsed: ParsedCliArguments, runtime: EvalRunCliRuntime): Promise<LoadedViewer | null> {
+  const options = parsed.viewer!
+  const baseDirectory = parsed.configFilePath == null ? process.cwd() : dirname(resolve(parsed.configFilePath))
+  let viewerModule: ViewerModule
+  try {
+    viewerModule = await (runtime.importViewer ?? importViewer)(baseDirectory)
+  }
+  catch (error) {
+    writeCliError(error)
+    return null
+  }
+
+  let host: undefined | ViewerHost
+  return {
+    getHost: () => host,
+    async onRunReady(context) {
+      if (host == null) {
+        // Started once the report root is known, so the viewer can also list earlier runs.
+        host = await viewerModule.startViewer({
+          host: options.host,
+          mode: 'live',
+          open: options.open,
+          port: options.port,
+          reportRoots: context.reportRoot == null ? [] : [context.reportRoot],
+        })
+        process.stderr.write(`Viewer: ${host.url}\n`)
+      }
+
+      return await host.attachRun(context)
+    },
   }
 }
 
@@ -207,4 +318,39 @@ function normalizeProjectNames(projectNames: string | string[] | undefined): str
   }
 
   return projectNames ?? []
+}
+
+function normalizeViewerPort(port: number): number {
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    throw new Error(`Invalid --viewer-port "${String(port)}". Expected an integer from 0 to 65535.`)
+  }
+
+  return port
+}
+
+/**
+ * Keeps the viewer serving after the run until Ctrl+C (or the viewer closes itself).
+ *
+ * The run's `process.exitCode` is left untouched, so CI and shells still see the run result.
+ */
+async function serveUntilClosed(host: ViewerHost): Promise<void> {
+  process.stderr.write(`Viewer: ${host.url} (press Ctrl+C to exit)\n`)
+  const close = () => {
+    void host.close()
+  }
+  process.once('SIGINT', close)
+  process.once('SIGTERM', close)
+  try {
+    await host.waitUntilClosed()
+  }
+  finally {
+    process.off('SIGINT', close)
+    process.off('SIGTERM', close)
+  }
+}
+
+function writeCliError(error: unknown): void {
+  const errorMessage = errorMessageFrom(error) ?? 'Unknown CLI failure.'
+  process.stderr.write(`[${packageJSON.name}] ${errorMessage}\n`)
+  process.exitCode = 1
 }

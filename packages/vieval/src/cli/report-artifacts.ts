@@ -7,6 +7,9 @@ import { resolve } from 'node:path'
 
 import { glob } from 'tinyglobby'
 
+import * as v from 'valibot'
+
+import { caseStarted, caseStartedDataSchema } from '../events'
 import { readReportEvents } from './report-log'
 import { buildLocalOtlpProjection } from './report-otlp'
 import { buildCaseRecords, buildMetricsSummary, encodeJsonl } from './report-records'
@@ -38,10 +41,17 @@ export type ReportRunEvent = RunEventEnvelope
 
 export interface ReportRunSummaryRow {
   attemptId: null | string
+  /**
+   * Cases (per task) that ran at least one auto attempt after the first, i.e. had a `case.started` with
+   * `attemptIndex > 0`.
+   */
+  autoAttemptedCases: number
   eventsCount: number
   executedProjects: number
   experimentId: null | string
   failedProjects: number
+  /** Highest `attemptIndex` of any `case.started`, or `null` when no task ran auto attempts. */
+  maxAttemptIndex: null | number
   projectNames: string[]
   reportDirectory: string
   runId: null | string
@@ -150,13 +160,16 @@ export function summarizeReportRunArtifact(artifact: ReportRunArtifact): ReportR
   const executedProjects = artifact.summary.projects.filter(project => project.executed).length
   const totalTasks = artifact.summary.projects.reduce((sum, project) => sum + project.taskCount, 0)
   const projectNames = artifact.summary.projects.map(project => project.name)
+  const autoAttempts = summarizeAutoAttempts(artifact.events)
 
   return {
     attemptId: artifact.summary.attemptId ?? null,
+    autoAttemptedCases: autoAttempts.autoAttemptedCases,
     eventsCount: artifact.eventsCount,
     executedProjects,
     experimentId: artifact.summary.experimentId ?? null,
     failedProjects,
+    maxAttemptIndex: autoAttempts.maxAttemptIndex,
     projectNames,
     reportDirectory: artifact.reportDirectory,
     runId: artifact.summary.runId ?? null,
@@ -204,7 +217,7 @@ export async function writeRunReportArtifacts(
     projectName: projectId,
   })
   const metricsSummary = buildMetricsSummary(caseRecords, [])
-  const otlp = buildLocalOtlpProjection({ records: caseRecords, runId: identity.runId })
+  const otlp = buildLocalOtlpProjection({ identity, records: caseRecords })
 
   await writeFile(resolve(reportDirectory, 'cases.jsonl'), encodeJsonl(caseRecords), 'utf-8')
   await writeFile(
@@ -237,4 +250,42 @@ function sanitizeIdentitySegment(value: string): string {
   }
 
   return normalized.replace(/[^\w.-]+/g, '-')
+}
+
+/**
+ * Collects auto attempt statistics from the `attemptIndex` of `case.started` events.
+ *
+ * Before:
+ * - starts of `case-a` at attempts 0 and 1, and of `case-b` at attempt 0
+ * - starts without `attemptIndex` (no task ran auto attempts, or a log written before the field existed)
+ *
+ * After:
+ * - `{ autoAttemptedCases: 1, maxAttemptIndex: 1 }`
+ * - `{ autoAttemptedCases: 0, maxAttemptIndex: null }`
+ */
+function summarizeAutoAttempts(events: readonly RunEventEnvelope[]): Pick<ReportRunSummaryRow, 'autoAttemptedCases' | 'maxAttemptIndex'> {
+  const autoAttemptedCaseKeys = new Set<string>()
+  let maxAttemptIndex: null | number = null
+
+  for (const event of events) {
+    if (event.event !== caseStarted.id) {
+      continue
+    }
+
+    const result = v.safeParse(caseStartedDataSchema, event.data)
+    const attemptIndex = result.success ? result.output.attemptIndex : undefined
+    if (attemptIndex == null) {
+      continue
+    }
+
+    maxAttemptIndex = Math.max(maxAttemptIndex ?? 0, attemptIndex)
+    if (attemptIndex > 0) {
+      autoAttemptedCaseKeys.add(`${event.taskId ?? ''}\u0000${event.caseId ?? ''}`)
+    }
+  }
+
+  return {
+    autoAttemptedCases: autoAttemptedCaseKeys.size,
+    maxAttemptIndex,
+  }
 }

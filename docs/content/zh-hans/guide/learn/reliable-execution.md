@@ -39,7 +39,7 @@ CLI 参数 `--attempt` 只为本次运行设置报告中的 `attemptId`。它不
 | 工作区 | 一次 CLI 运行最多同时执行多少个项目；默认上限为 `1`。 | 顶层 `concurrency.workspace`；`--workspace-concurrency` |
 | 项目 | 项目执行调度任务时采用的上限；它会与任务上限取较小值。 | 顶层或项目级 `concurrency.project`；`--project-concurrency` |
 | 任务 | 一个项目最多同时执行多少个调度任务；默认上限为 `1`。 | 顶层或项目级 `concurrency.task`；`--task-concurrency` |
-| 尝试 | 自动尝试目前依次执行；该值会保存在配置中，但暂不改变执行方式。 | 顶层、项目级或任务级 `concurrency.attempt`；`--attempt-concurrency` |
+| 尝试 | 一次尝试中同一任务同时运行的用例数上限。该上限跨越任务的所有用例组，并叠加在各组的用例上限之上。自动尝试仍依次执行，每次尝试单独计算上限。 | 顶层、项目级或任务级 `concurrency.attempt`；`--attempt-concurrency` |
 | 用例 | 一个任务最多同时执行多少个用例。单次 `casesFromInputs` 调用可以使用自己的队列和上限。 | 顶层、项目级或任务级 `concurrency.case`；`casesFromInputs(..., { concurrency })`；`--case-concurrency` |
 
 对于工作区、项目和任务，CLI 参数只能收紧配置中的上限，不能把较小的配置值调高。对于尝试和用例，CLI 参数会覆盖任务级或项目级的值。项目配置不能设置 `workspace`；任务配置只能设置 `attempt` 和 `case`。
@@ -174,10 +174,10 @@ CLI 默认把缓存写到项目根目录下的 `.vieval/cache`。完整路径依
 - 通过用例发出的 `exact` 和 `judge` 分数会参与任务计算；失败用例在运行中发出的自定义分数不会参与任务计算。
 - 每次完成的自动尝试都会再向任务分数加入一组用例结果。
 - 执行过程会产生生命周期、分数和指标事件。使用 `--report-out` 时，这些事件按顺序写入 `events.jsonl`。
-- `cases.jsonl` 最终为每个「任务 ID + 用例 ID」组合写一条记录，多次重试或自动尝试不会分别占一行。要查看执行顺序，请读取 `events.jsonl`；要查看包含所有尝试结果的任务分数，请读取 `run-summary.json`。
+- `cases.jsonl` 最终为每个「任务 ID + 用例 ID」组合写一条记录，多次重试或自动尝试不会分别占一行。对于启用自动尝试的任务，该记录的 `attempts` 会列出每次尝试的结果。要查看准确的执行顺序，请读取 `events.jsonl`（`case.started` 和 `case.ended` 带有 `attemptIndex`）；要查看包含所有尝试结果的任务分数，请读取 `run-summary.json`。
 
 正如[断言、分数与指标](/zh-hans/guide/learn/assertions-scores-and-metrics)所述，用例在失败前发出的分数事件可能仍会出现在报告记录中，但任务分数会把该用例计为失败。排查问题时，请同时检查用例状态和分数。
 
-不要使用 `autoRetry` 统计多次执行的通过率：重试后恢复的用例在任务分数中只算一次通过。如果希望早期失败也参与最终分数，请使用 `autoAttempt`，并注意它会重新运行已经通过的用例。`--attempt` 和 `--attempt-concurrency` 都不会增加自动尝试次数。
+不要使用 `autoRetry` 统计多次执行的通过率：重试后恢复的用例在任务分数中只算一次通过。如果希望早期失败也参与最终分数，请使用 `autoAttempt`，并注意它会重新运行已经通过的用例。`--attempt` 和 `--attempt-concurrency` 都不会增加自动尝试次数：`--attempt` 只为运行设置标签，`--attempt-concurrency` 只限制一次尝试中同时运行的用例数。
 
 下一步可在[报告与比较](/zh-hans/guide/learn/reports-and-comparisons)中保存运行记录，并检查或比较结果。

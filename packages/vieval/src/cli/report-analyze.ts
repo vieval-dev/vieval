@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import type { ReportRunArtifact } from './report-artifacts'
+import type { ReportRunArtifact, ReportRunSummaryRow } from './report-artifacts'
 
 import process from 'node:process'
 
@@ -10,11 +10,12 @@ import { errorMessageFrom } from '@moeru/std'
 
 import * as v from 'valibot'
 
-import { caseEnded, caseEndedDataSchema, taskEnded, taskEndedDataSchema } from '../events'
+import { caseEnded, caseEndedDataSchema, caseStarted, caseStartedDataSchema, taskEnded, taskEndedDataSchema } from '../events'
 import { readReportArtifacts, summarizeReportRunArtifact } from './report-artifacts'
 
 export interface ParsedReportAnalyzeCliArguments {
   attempt?: string
+  attemptIndex?: number
   caseState?: 'failed' | 'passed' | 'skipped'
   contains?: string
   errorContains?: string
@@ -41,6 +42,7 @@ const reportAnalyzeHelpText = `
     --project      Project name filter (exact)
     --experiment   Experiment id filter
     --attempt      Attempt id filter
+    --attempt-index Keep runs where at least one case ran this auto attempt (0 = first)
     --run          Run id filter
     --task-state   Keep runs containing at least one task in this state
     --case-state   Keep runs containing at least one case in this state
@@ -69,9 +71,13 @@ export interface ReportAnalyzeExperimentSummary {
     stdev: number
   }
   attemptSummaries: ReportAnalyzeAttemptSummary[]
+  /** Sum of {@link ReportRunSummaryRow.autoAttemptedCases} over the group's runs. */
+  autoAttemptedCases: number
   casePassRate?: number
   experimentId: string
   failedProjects: number
+  /** Highest {@link ReportRunSummaryRow.maxAttemptIndex} over the group's runs. */
+  maxAttemptIndex: null | number
   runCount: number
   successRate: number
   taskPassRate?: number
@@ -83,7 +89,7 @@ export interface ReportAnalyzeExperimentSummary {
 interface ReportAnalyzeOutput {
   experimentSummaries: ReportAnalyzeExperimentSummary[]
   filteredRunCount: number
-  runs: ReturnType<typeof summarizeReportRunArtifact>[]
+  runs: ReportRunSummaryRow[]
   totalRunCount: number
 }
 
@@ -97,9 +103,9 @@ interface ReportAnalyzeOutput {
  * - one summary row per `workspaceId + experimentId` group
  */
 export function buildExperimentSummaries(
-  rows: readonly ReturnType<typeof summarizeReportRunArtifact>[],
+  rows: readonly ReportRunSummaryRow[],
 ): ReportAnalyzeExperimentSummary[] {
-  const grouped = new Map<string, ReturnType<typeof summarizeReportRunArtifact>[]>()
+  const grouped = new Map<string, ReportRunSummaryRow[]>()
 
   for (const row of rows) {
     const groupKey = createExperimentGroupKey(row)
@@ -121,7 +127,7 @@ export function buildExperimentSummaries(
       const successfulRunCount = groupRows.filter(row => row.failedProjects === 0).length
       const successRate = groupRows.length === 0 ? 0 : successfulRunCount / groupRows.length
 
-      const attemptToRuns = new Map<string, ReturnType<typeof summarizeReportRunArtifact>[]>()
+      const attemptToRuns = new Map<string, ReportRunSummaryRow[]>()
       for (const row of groupRows) {
         const attemptId = row.attemptId ?? 'unknown-attempt'
         const attemptRows = attemptToRuns.get(attemptId)
@@ -156,6 +162,9 @@ export function buildExperimentSummaries(
         })
         .sort((left, right) => left.attemptId.localeCompare(right.attemptId))
 
+      const attemptIndexes = groupRows
+        .map(row => row.maxAttemptIndex)
+        .filter((attemptIndex): attemptIndex is number => attemptIndex != null)
       const attemptSuccessRates = attemptSummaries.map(summary => summary.successRate)
       const minAttemptSuccessRate = attemptSuccessRates.length === 0
         ? 0
@@ -175,8 +184,10 @@ export function buildExperimentSummaries(
           stdev: roundMetric(stdevAttemptSuccessRate),
         },
         attemptSummaries,
+        autoAttemptedCases: groupRows.reduce((sum, row) => sum + row.autoAttemptedCases, 0),
         experimentId,
         failedProjects,
+        maxAttemptIndex: attemptIndexes.length === 0 ? null : Math.max(...attemptIndexes),
         runCount: groupRows.length,
         successRate: roundMetric(successRate),
         totalEvents,
@@ -200,6 +211,9 @@ export function parseReportAnalyzeCliArguments(argv: readonly string[]): ParsedR
     flags: {
       attempt: {
         type: 'string',
+      },
+      attemptIndex: {
+        type: 'number',
       },
       caseState: {
         type: 'string',
@@ -256,6 +270,7 @@ export function parseReportAnalyzeCliArguments(argv: readonly string[]): ParsedR
 
   return {
     attempt: cli.flags.attempt,
+    ...(cli.flags.attemptIndex == null ? {} : { attemptIndex: normalizeAttemptIndexFilter(cli.flags.attemptIndex) }),
     caseState: normalizeStateFilter(cli.flags.caseState),
     contains: cli.flags.contains,
     errorContains: cli.flags.errorContains,
@@ -319,16 +334,16 @@ function computeStandardDeviation(values: readonly number[]): number {
   return Math.sqrt(variance)
 }
 
-function createExperimentGroupKey(row: ReturnType<typeof summarizeReportRunArtifact>): string {
+function createExperimentGroupKey(row: ReportRunSummaryRow): string {
   const workspaceId = row.workspaceId ?? 'unknown-workspace'
   const experimentId = row.experimentId ?? 'unknown-experiment'
   return `${workspaceId}::${experimentId}`
 }
 
 function filterAnalyzeRows(
-  rows: readonly ReturnType<typeof summarizeReportRunArtifact>[],
+  rows: readonly ReportRunSummaryRow[],
   parsed: ParsedReportAnalyzeCliArguments,
-): ReturnType<typeof summarizeReportRunArtifact>[] {
+): ReportRunSummaryRow[] {
   return rows.filter((row) => {
     if (parsed.workspace != null && row.workspaceId !== parsed.workspace) {
       return false
@@ -367,6 +382,8 @@ function formatCsvOutput(output: ReportAnalyzeOutput): string {
     'eventsCount',
     'reportDirectory',
     'projectNames',
+    'autoAttemptedCases',
+    'maxAttemptIndex',
   ].join(',')
   const rows = output.runs.map((row) => {
     const escapedProjectNames = `"${row.projectNames.join('|').replaceAll('"', '""')}"`
@@ -384,6 +401,8 @@ function formatCsvOutput(output: ReportAnalyzeOutput): string {
       row.eventsCount.toString(),
       escapedDirectory,
       escapedProjectNames,
+      row.autoAttemptedCases.toString(),
+      row.maxAttemptIndex?.toString() ?? '',
     ].join(',')
   })
 
@@ -403,6 +422,17 @@ function formatTableOutput(output: ReportAnalyzeOutput): string {
 
   const metadata = `ANALYZE vieval report: ${output.filteredRunCount}/${output.totalRunCount} runs (${output.experimentSummaries.length} experiment groups)`
   return [metadata, header, ...lines].join('\n')
+}
+
+function hasAttemptIndex(artifact: ReportRunArtifact, targetAttemptIndex: number): boolean {
+  return artifact.events.some((event) => {
+    if (event.event !== caseStarted.id) {
+      return false
+    }
+
+    const result = v.safeParse(caseStartedDataSchema, event.data)
+    return result.success && result.output.attemptIndex === targetAttemptIndex
+  })
 }
 
 function hasCaseState(artifact: ReportRunArtifact, targetState: 'failed' | 'passed' | 'skipped'): boolean {
@@ -465,6 +495,10 @@ function matchesOutcomeFilters(artifact: ReportRunArtifact, parsed: ParsedReport
     return false
   }
 
+  if (parsed.attemptIndex != null && !hasAttemptIndex(artifact, parsed.attemptIndex)) {
+    return false
+  }
+
   if (parsed.contains != null) {
     const matched = artifact.events.some(event => includesNeedle({ data: event.data, event: event.event }, parsed.contains!))
     if (!matched) {
@@ -485,6 +519,14 @@ function matchesOutcomeFilters(artifact: ReportRunArtifact, parsed: ParsedReport
   }
 
   return true
+}
+
+function normalizeAttemptIndexFilter(value: number): number {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`Unsupported attempt index filter "${String(value)}". Expected a non-negative integer.`)
+  }
+
+  return value
 }
 
 function normalizeCliArgv(argv: readonly string[]): string[] {
@@ -552,7 +594,7 @@ async function readReportAnalyzeOutput(parsed: ParsedReportAnalyzeCliArguments):
     .filter(artifact => rowByDirectory.has(artifact.reportDirectory))
     .filter(artifact => matchesOutcomeFilters(artifact, parsed))
     .map(artifact => rowByDirectory.get(artifact.reportDirectory))
-    .filter((row): row is ReturnType<typeof summarizeReportRunArtifact> => row != null)
+    .filter((row): row is ReportRunSummaryRow => row != null)
 
   return {
     experimentSummaries: buildExperimentSummaries(filteredRows),

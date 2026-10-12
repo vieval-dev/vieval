@@ -16,6 +16,7 @@ export default defineConfig(
       '.agents/**',
       '.github/**',
       'CLAUDE.md', // Skip the symbolic link
+      'plans/**', // Design notes and probe scripts, not shipped
     ],
   },
   {

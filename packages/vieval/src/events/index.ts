@@ -18,6 +18,13 @@ export { defineEventa } from '@moeru/eventa'
 
 /**
  * Schema version written to every event envelope in `events.jsonl`.
+ *
+ * Compatibility policy:
+ * - adding an optional payload field or a new event name keeps the version, so readers of version 2
+ *   keep accepting newer logs (payload schemas ignore unknown keys, and readers skip unknown events)
+ * - renaming, removing, or retyping an envelope or payload field bumps the version
+ *
+ * Optional fields added within version 2: `case.started` / `case.ended` `attemptIndex` and `autoAttempt`.
  */
 export const RUN_EVENT_SCHEMA_VERSION = 2
 
@@ -160,8 +167,22 @@ export const taskEndedDataSchema = v.object({
   state: v.picklist(['failed', 'passed', 'skipped']),
 })
 
+/**
+ * Fields that place one case run in a task's auto attempt (a full re-run of every case of the task).
+ *
+ * Present only when the task runs auto attempts (some case has `autoAttempt > 0`), so events of other
+ * tasks are unchanged.
+ */
+const caseAutoAttemptEntries = {
+  /** Zero-based auto attempt of the task this case run belongs to. */
+  attemptIndex: v.optional(v.number()),
+  /** Additional full task attempts this case allows after the first one. */
+  autoAttempt: v.optional(v.number()),
+}
+
 /** Payload of {@link caseStarted}. */
 export const caseStartedDataSchema = v.object({
+  ...caseAutoAttemptEntries,
   autoRetry: v.optional(v.number()),
   index: v.number(),
   input: v.optional(v.unknown()),
@@ -172,6 +193,7 @@ export const caseStartedDataSchema = v.object({
 
 /** Payload of {@link caseEnded}. */
 export const caseEndedDataSchema = v.object({
+  ...caseAutoAttemptEntries,
   errorMessage: v.optional(v.string()),
   index: v.number(),
   name: v.string(),
@@ -276,9 +298,12 @@ export const taskQueued = defineEventa<TaskQueuedData>('task.queued')
 export const taskStarted = defineEventa<TaskStartedData>('task.started')
 /** One task settled, or was skipped after a project failure. */
 export const taskEnded = defineEventa<TaskEndedData>('task.ended')
-/** One case attempt started; emitted again for each retry with `retryIndex`. */
+/**
+ * One case run started; emitted again for each retry with `retryIndex`, and for each auto attempt of the
+ * task with `attemptIndex`.
+ */
 export const caseStarted = defineEventa<CaseStartedData>('case.started')
-/** One case settled after all retries. */
+/** One case settled after all retries; emitted once per auto attempt with `attemptIndex`. */
 export const caseEnded = defineEventa<CaseEndedData>('case.ended')
 /** One chunk written to `process.stdout` / `process.stderr` while the case ran. */
 export const caseOutput = defineEventa<CaseOutputData>('case.output')

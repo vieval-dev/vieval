@@ -151,6 +151,89 @@ describe('report records', () => {
 
   /**
    * @example
+   * it('keeps every auto attempt of a case and counts only in-attempt retries') verifies `attemptIndex` projection.
+   */
+  it('keeps every auto attempt of a case and counts only in-attempt retries', () => {
+    const records = buildCaseRecords({
+      events: [
+        envelopeOf('case.started', { attemptIndex: 0, autoAttempt: 1, autoRetry: 1, index: 0, name: 'Case 1', retryIndex: 0, total: 1 }, { time: '2026-05-08T00:00:00.000Z' }),
+        envelopeOf('case.started', { attemptIndex: 0, autoAttempt: 1, autoRetry: 1, index: 0, name: 'Case 1', retryIndex: 1, total: 1 }, { time: '2026-05-08T00:00:01.000Z' }),
+        envelopeOf('case.ended', { attemptIndex: 0, autoAttempt: 1, errorMessage: 'boom', index: 0, name: 'Case 1', state: 'failed', total: 1 }, { time: '2026-05-08T00:00:02.000Z' }),
+        envelopeOf('case.started', { attemptIndex: 1, autoAttempt: 1, autoRetry: 1, index: 0, name: 'Case 1', retryIndex: 0, total: 1 }, { time: '2026-05-08T00:00:03.000Z' }),
+        envelopeOf('score.recorded', { kind: 'exact', score: 0.5 }),
+        envelopeOf('case.ended', { attemptIndex: 1, autoAttempt: 1, index: 0, name: 'Case 1', state: 'passed', total: 1 }, { time: '2026-05-08T00:00:03.500Z' }),
+      ],
+      projectName: 'project-1',
+    })
+
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({
+      attemptId: 'attempt-1',
+      attemptIndex: 1,
+      autoAttempt: 1,
+      durationMs: 3500,
+      retryCount: 0,
+      scores: { exact: 0.5 },
+      state: 'passed',
+    })
+    expect(records[0]?.attempts).toEqual([
+      {
+        attemptIndex: 0,
+        durationMs: 2000,
+        endedAt: '2026-05-08T00:00:02.000Z',
+        errorMessage: 'boom',
+        retryCount: 1,
+        scores: { exact: 0 },
+        startedAt: '2026-05-08T00:00:00.000Z',
+        state: 'failed',
+      },
+      {
+        attemptIndex: 1,
+        durationMs: 500,
+        endedAt: '2026-05-08T00:00:03.500Z',
+        retryCount: 0,
+        scores: { exact: 0.5 },
+        startedAt: '2026-05-08T00:00:03.000Z',
+        state: 'passed',
+      },
+    ])
+  })
+
+  /**
+   * @example
+   * it('omits auto attempt fields for logs without attemptIndex') keeps records of other tasks and older logs unchanged.
+   */
+  it('omits auto attempt fields for logs without attemptIndex', () => {
+    const records = buildCaseRecords({
+      events: [
+        envelopeOf('case.started', { index: 0, name: 'Case 1', total: 1 }),
+        envelopeOf('case.ended', { index: 0, name: 'Case 1', state: 'passed', total: 1 }),
+      ],
+      projectName: 'project-1',
+    })
+
+    expect(Object.keys(records[0]!).sort()).toEqual([
+      'attemptId',
+      'caseId',
+      'caseName',
+      'durationMs',
+      'endedAt',
+      'experimentId',
+      'metrics',
+      'projectName',
+      'retryCount',
+      'runId',
+      'schemaVersion',
+      'scores',
+      'startedAt',
+      'state',
+      'taskId',
+      'workspaceId',
+    ])
+  })
+
+  /**
+   * @example
    * it('adds default exact scores from terminal case state') keeps ordinary pass/fail cases visible in metric projections.
    */
   it('adds default exact scores from terminal case state', () => {

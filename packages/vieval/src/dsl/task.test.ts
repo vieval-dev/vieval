@@ -5,8 +5,10 @@ import type { CaseEndedData, CaseStartedData, RunEventEnvelope } from '../events
 import { errorMessageFrom } from '@moeru/std'
 import { describe, expect, it, vi } from 'vitest'
 
+import * as v from 'valibot'
+
 import { createRunEventBus } from '../core/runner/event-bus'
-import { caseEnded, caseStarted, metricRecorded, scoreRecorded } from '../events'
+import { caseEnded, caseEndedDataSchema, caseStarted, caseStartedDataSchema, metricRecorded, scoreRecorded } from '../events'
 import { caseOf, casesFromInputs, describeEval, describeTask } from './task'
 
 function createDeferredPromise() {
@@ -1255,6 +1257,240 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     expect(runs).toBe(2)
     expect(runResult?.scores[0]?.score).toBe(1)
+  })
+
+  /**
+   * it('stamps attemptIndex on every case event of a task that runs auto attempts') verifies the auto attempt event contract.
+   *
+   * @example
+   * flaky case with autoAttempt: 1 -> case.started/ended carry attemptIndex 0 then 1; a sibling case carries autoAttempt 0.
+   */
+  it('stamps attemptIndex on every case event of a task that runs auto attempts', async () => {
+    const envelopes: RunEventEnvelope[] = []
+    let flakyRuns = 0
+
+    const taskDefinition = describeTask('dsl-auto-attempt-events', () => {
+      caseOf('stable', async () => {})
+      caseOf('flaky', async () => {
+        flakyRuns += 1
+        if (flakyRuns === 1) {
+          throw new Error('first-attempt-failed')
+        }
+      }, {
+        autoAttempt: 1,
+        autoRetry: 0,
+        input: undefined,
+      })
+    })
+
+    await taskDefinition.task!.run({
+      cache: createTestTaskCacheRuntime(),
+      events: createTestRunEvents({ onAny: envelope => envelopes.push(envelope) }),
+      models: createTestModels(),
+      task: {
+        entry: {
+          description: 'd',
+          directory: 'x',
+          filePath: '/tmp/x.eval.ts',
+          id: 'x',
+          name: 'x',
+        },
+        id: 'task-auto-attempt-events',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: createScheduledTaskMatrix(),
+      },
+    })
+
+    expect(envelopes.map(toEmitted)).toEqual([
+      { caseId: '0:stable', data: { attemptIndex: 0, autoAttempt: 0, index: 0, name: 'stable', total: 2 }, event: 'case.started' },
+      { caseId: '1:flaky', data: { attemptIndex: 0, autoAttempt: 1, index: 1, name: 'flaky', total: 2 }, event: 'case.started' },
+      { caseId: '0:stable', data: { attemptIndex: 0, autoAttempt: 0, index: 0, name: 'stable', state: 'passed', total: 2 }, event: 'case.ended' },
+      { caseId: '1:flaky', data: { attemptIndex: 0, autoAttempt: 1, errorMessage: 'first-attempt-failed', index: 1, name: 'flaky', state: 'failed', total: 2 }, event: 'case.ended' },
+      { caseId: '0:stable', data: { attemptIndex: 1, autoAttempt: 0, index: 0, name: 'stable', total: 2 }, event: 'case.started' },
+      { caseId: '1:flaky', data: { attemptIndex: 1, autoAttempt: 1, index: 1, name: 'flaky', total: 2 }, event: 'case.started' },
+      { caseId: '0:stable', data: { attemptIndex: 1, autoAttempt: 0, index: 0, name: 'stable', state: 'passed', total: 2 }, event: 'case.ended' },
+      { caseId: '1:flaky', data: { attemptIndex: 1, autoAttempt: 1, index: 1, name: 'flaky', state: 'passed', total: 2 }, event: 'case.ended' },
+    ])
+    for (const envelope of envelopes) {
+      if (envelope.event === caseStarted.id) {
+        expect(v.parse(caseStartedDataSchema, envelope.data)).toEqual(envelope.data)
+      }
+      else {
+        expect(v.parse(caseEndedDataSchema, envelope.data)).toEqual(envelope.data)
+      }
+    }
+  })
+
+  /**
+   * it('keeps attemptIndex and retryIndex apart when retries run inside an auto attempt') verifies the two counters do not mix.
+   */
+  it('keeps attemptIndex and retryIndex apart when retries run inside an auto attempt', async () => {
+    const starts: CaseStartedData[] = []
+    let runs = 0
+
+    const taskDefinition = describeTask('dsl-auto-attempt-with-retry-events', () => {
+      caseOf('always-fails-first-two', async () => {
+        runs += 1
+        if (runs <= 2) {
+          throw new Error(`fail-${runs}`)
+        }
+      }, {
+        autoAttempt: 1,
+        autoRetry: 1,
+        autoRetryDelay: 0,
+        input: undefined,
+      })
+    })
+
+    await taskDefinition.task!.run({
+      cache: createTestTaskCacheRuntime(),
+      events: createTestRunEvents({ onCaseStart: data => starts.push(data) }),
+      models: createTestModels(),
+      task: {
+        entry: {
+          description: 'd',
+          directory: 'x',
+          filePath: '/tmp/x.eval.ts',
+          id: 'x',
+          name: 'x',
+        },
+        id: 'task-auto-attempt-retry-events',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: createScheduledTaskMatrix(),
+      },
+    })
+
+    expect(starts.map(start => [start.attemptIndex, start.retryIndex])).toEqual([
+      [0, 0],
+      [0, 1],
+      [1, 0],
+    ])
+  })
+
+  /**
+   * it('caps cases running at once within one attempt across case groups') verifies `concurrency.attempt`.
+   *
+   * @example
+   * two casesFromInputs groups of 2 with case cap 2 each and attempt cap 1 -> one case at a time.
+   */
+  it('caps cases running at once within one attempt across case groups', async () => {
+    let active = 0
+    let peak = 0
+
+    const taskDefinition = describeTask('dsl-attempt-concurrency', (task) => {
+      const runCase = async () => {
+        active += 1
+        peak = Math.max(peak, active)
+        await new Promise(resolve => setTimeout(resolve, 5))
+        active -= 1
+      }
+      task.casesFromInputs('left', [1, 2], runCase, { concurrency: 2 })
+      task.casesFromInputs('right', [1, 2], runCase, { concurrency: 2 })
+    }, {
+      concurrency: {
+        attempt: 1,
+      },
+    })
+
+    const runResult = await taskDefinition.task!.run({
+      cache: createTestTaskCacheRuntime(),
+      models: createTestModels(),
+      task: {
+        entry: {
+          description: 'd',
+          directory: 'x',
+          filePath: '/tmp/x.eval.ts',
+          id: 'x',
+          name: 'x',
+        },
+        id: 'task-attempt-concurrency',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: createScheduledTaskMatrix(),
+      },
+    })
+
+    expect(peak).toBe(1)
+    expect(runResult.scores[0]?.score).toBe(1)
+  })
+
+  /**
+   * it('lets the runtime attempt cap override the task attempt cap in every auto attempt') verifies `--attempt-concurrency`.
+   */
+  it('lets the runtime attempt cap override the task attempt cap in every auto attempt', async () => {
+    let active = 0
+    const peaksByAttempt: number[] = [0, 0]
+    let attemptIndex = 0
+    let flakyRuns = 0
+
+    const taskDefinition = describeTask('dsl-runtime-attempt-concurrency', (task) => {
+      task.casesFromInputs('sample', [1, 2, 3, 4], async (context) => {
+        active += 1
+        peaksByAttempt[attemptIndex] = Math.max(peaksByAttempt[attemptIndex]!, active)
+        await new Promise(resolve => setTimeout(resolve, 5))
+        active -= 1
+        if (context.matrix.inputs === 4) {
+          flakyRuns += 1
+          if (flakyRuns === 1) {
+            attemptIndex = 1
+            throw new Error('retry-on-next-attempt')
+          }
+        }
+      }, { autoAttempt: 1 })
+    }, {
+      concurrency: {
+        attempt: 4,
+      },
+    })
+
+    await taskDefinition.task!.run({
+      cache: createTestTaskCacheRuntime(),
+      models: createTestModels(),
+      runtimeConcurrency: {
+        attempt: 2,
+      },
+      task: {
+        entry: {
+          description: 'd',
+          directory: 'x',
+          filePath: '/tmp/x.eval.ts',
+          id: 'x',
+          name: 'x',
+        },
+        id: 'task-runtime-attempt-concurrency',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: createScheduledTaskMatrix(),
+      },
+    })
+
+    expect(flakyRuns).toBe(2)
+    expect(peaksByAttempt).toEqual([2, 2])
+  })
+
+  it('rejects an invalid attempt concurrency cap', async () => {
+    const taskDefinition = describeTask('dsl-invalid-attempt-concurrency', () => {
+      caseOf('case', async () => {})
+    }, {
+      concurrency: {
+        attempt: 0,
+      },
+    })
+
+    await expect(taskDefinition.task!.run({
+      cache: createTestTaskCacheRuntime(),
+      models: createTestModels(),
+      task: {
+        entry: {
+          description: 'd',
+          directory: 'x',
+          filePath: '/tmp/x.eval.ts',
+          id: 'x',
+          name: 'x',
+        },
+        id: 'task-invalid-attempt-concurrency',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: createScheduledTaskMatrix(),
+      },
+    })).rejects.toThrow('Invalid task attempt concurrency: 0')
   })
 
   it('passes an abort signal into case execution and aborts it on timeout', async () => {
