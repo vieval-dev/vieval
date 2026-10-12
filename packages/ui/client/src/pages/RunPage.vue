@@ -5,6 +5,7 @@ import type { Route } from '../router'
 
 import { computed, toRef } from 'vue'
 
+import CountsBar from '../components/CountsBar.vue'
 import ExecutionTree from '../components/ExecutionTree.vue'
 import ExperimentName from '../components/ExperimentName.vue'
 import IdLabel from '../components/IdLabel.vue'
@@ -17,10 +18,11 @@ import ScoresPanel from '../components/ScoresPanel.vue'
 import StateView from '../components/StateView.vue'
 import ViewTabs from '../components/ViewTabs.vue'
 
+import { scoreRounds } from '../../../src/shared/reduce'
 import { api } from '../api'
 import { useCatalog } from '../composables/useCatalog'
 import { useRunLive } from '../composables/useRunLive'
-import { formatDateTime } from '../format'
+import { formatDateTime, formatScore } from '../format'
 import { levelIcons } from '../hierarchy'
 import { attemptLabel, runLabel } from '../labels'
 import { href, navigate } from '../router'
@@ -60,6 +62,21 @@ const loadLogs = computed(() => {
   const key = runKey.value
   return (offset: number, limit: number) => api.logs(key, { limit, offset })
 })
+/**
+ * Exact score and case counts of the whole run from the live snapshot, so they move with the run (the catalog entry
+ * of the run is read once per page). The score follows the task scores: every settled round of every case counts.
+ */
+const score = computed(() => {
+  const snapshot = live.snapshot.value
+  if (snapshot == null)
+    return undefined
+  const counts = { failed: 0, passed: 0, running: 0, skipped: 0, timeout: 0, total: 0 }
+  for (const task of snapshot.tasks) {
+    for (const key of Object.keys(counts) as (keyof typeof counts)[])
+      counts[key] += task.caseCounts[key]
+  }
+  return { counts, exact: scoreRounds(snapshot.tasks.flatMap(task => task.cases.flatMap(node => node.rounds))).exact }
+})
 const caseHref = (line: LogLine) => href({ caseId: line.caseId!, name: 'case', runKey: runKey.value, taskId: line.taskId! })
 </script>
 
@@ -76,10 +93,10 @@ const caseHref = (line: LogLine) => href({ caseId: line.caseId!, name: 'case', r
           · {{ attemptLabel(position.attempt) }}
         </template>
       </span>
-      <template v-if="live.snapshot.value">
-        <br>started {{ formatDateTime(live.snapshot.value.startedAt) }}
-        <template v-if="live.snapshot.value.endedAt">
-          · ended {{ formatDateTime(live.snapshot.value.endedAt) }}
+      <!-- The start is the title already; only the end (or the interruption) adds a fact. -->
+      <template v-if="live.snapshot.value?.endedAt || live.snapshot.value?.interruptSignal">
+        <br><template v-if="live.snapshot.value.endedAt">
+          ended {{ formatDateTime(live.snapshot.value.endedAt) }}
         </template>
         <template v-if="live.snapshot.value.interruptSignal">
           · interrupted by {{ live.snapshot.value.interruptSignal }}
@@ -88,6 +105,14 @@ const caseHref = (line: LogLine) => href({ caseId: line.caseId!, name: 'case', r
       <RunDetails :run-id="props.route.runKey" :report-path="props.run?.reportPath" :report-root="props.run?.reportRoot" />
     </template>
     <template #actions>
+      <!-- The run's score at a glance, like a matrix cell: exact score and case counts (hover for each count). -->
+      <span v-if="score" :class="['flex flex-col gap-1 w-40 mr-2', 'max-md:(w-full mr-0)']" data-testid="run-score">
+        <span :class="['flex items-baseline gap-1.5']">
+          <span :class="['text-2xl font-semibold tabular-nums leading-none']">{{ formatScore(score.exact) }}</span>
+          <span :class="['text-xs muted']">exact</span>
+        </span>
+        <CountsBar :counts="score.counts" labels="hover" />
+      </span>
       <a v-if="position.workspace && position.project && position.experiment" :class="['btn']" :href="href({ name: 'compare', query: { experiment: position.experiment, project: position.project, view: 'attempts', workspace: position.workspace } })">
         <span class="i-mingcute-git-compare-line" aria-hidden="true" />Compare attempts
       </a>

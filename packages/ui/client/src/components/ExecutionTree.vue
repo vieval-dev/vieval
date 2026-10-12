@@ -3,7 +3,7 @@ import type { CaseNode, CaseRound, RunSnapshot } from '../../../src/shared/contr
 import type { Segment } from './SegmentedControl.vue'
 
 import { useVirtualizer } from '@tanstack/vue-virtual'
-import { useMediaQuery } from '@vueuse/core'
+import { useIntervalFn, useMediaQuery, useTimestamp } from '@vueuse/core'
 import { computed, reactive, shallowRef, useTemplateRef, watch } from 'vue'
 
 import IconButton from './IconButton.vue'
@@ -34,6 +34,8 @@ interface Row {
   label: string
   round?: CaseRound
   running?: boolean
+  /** Start of a running case (ISO); the row shows how long it has run, ticking every second. */
+  runningSince?: string
   state: string
 }
 
@@ -94,6 +96,7 @@ const rows = computed<Row[]>(() => {
           label: node.name,
           round: last,
           running: state === 'running',
+          runningSince: state === 'running' ? last?.startedAt ?? node.startedAt : undefined,
           state,
         })
         if (open.has(caseKey) && last != null) {
@@ -137,6 +140,9 @@ watch(rows, (list) => {
   if (changed.size > 0)
     flashing.value = changed
 })
+
+// Once per second: running rows show whole seconds (the default scheduler would update every frame).
+const now = useTimestamp({ scheduler: callback => useIntervalFn(callback, 1000) })
 
 /**
  * Wide screens show a row on one line; narrow screens put the counts and details under the label, so long case names
@@ -213,6 +219,7 @@ const counts = computed(() => props.snapshot.tasks.reduce((sum, task) => sum + t
                 <span v-if="rows[item.index]!.counts!.running" :class="['inline-flex items-center gap-0.5', 'text-blue-700 dark:text-blue-400']" :title="`${rows[item.index]!.counts!.running} running`">{{ rows[item.index]!.counts!.running }}<span class="i-mingcute-loading-line" aria-label="running" /></span>
                 <span>/ {{ rows[item.index]!.counts!.total }} ·</span>
               </template>
+              <span v-if="rows[item.index]!.runningSince" :class="['text-blue-700 dark:text-blue-300 tabular-nums']" data-testid="running-elapsed">running {{ formatDuration(Math.max(0, now - Date.parse(rows[item.index]!.runningSince!))) }}</span>
               <span :class="['truncate']">{{ rows[item.index]!.detail }}</span>
             </span>
           </span>

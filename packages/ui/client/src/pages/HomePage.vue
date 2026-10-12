@@ -5,6 +5,7 @@ import { computed } from 'vue'
 
 import CountsBar from '../components/CountsBar.vue'
 import PageHeader from '../components/PageHeader.vue'
+import RunEta from '../components/RunEta.vue'
 import StateBadge from '../components/StateBadge.vue'
 import StateView from '../components/StateView.vue'
 import TimeAgo from '../components/TimeAgo.vue'
@@ -71,7 +72,9 @@ const sections = computed(() => workspaces.value.map(workspace => ({ id: workspa
             <StateBadge :state="project.latest.state" />
             <TimeAgo :time="project.latest.startedAt" :class="['muted text-xs']" />
           </span>
-          <CountsBar :counts="project.latest.counts" />
+          <CountsBar :counts="project.latest.counts" labels="below" />
+          <!-- A running newest run: how far it is and when it should end, without opening it. -->
+          <RunEta v-if="project.latest.state === 'running'" :run-key="project.latest.runKey" :seq="project.latest.lastSeq" />
           <span :class="['flex items-end justify-between gap-3']">
             <span :class="['flex flex-wrap gap-1']">
               <span v-for="axis in project.axes" :key="axis.axis" :class="['badge state-neutral font-normal']">

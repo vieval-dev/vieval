@@ -20,6 +20,7 @@ import { useResource } from '../composables/useResource'
 import { useRunLive } from '../composables/useRunLive'
 import { formatDateTime, formatDuration, formatScore, formatTime, previewValue } from '../format'
 import { href, navigate } from '../router'
+import { runSwitcherOptions } from '../switcher'
 
 /**
  * One case: rounds and retries on a timeline, console output, input and output, metrics, artifacts, external
@@ -67,7 +68,7 @@ const running = computed(() => detail.data.value?.state === 'running')
 </script>
 
 <template>
-  <PageHeader :loading="detail.loading.value" level="case" :position="position" :title="detail.data.value?.name ?? props.route.caseId">
+  <PageHeader :loading="detail.loading.value" :siblings="runSwitcherOptions(live.snapshot.value, 'case', props.route.taskId)" level="case" :position="position" :title="detail.data.value?.name ?? props.route.caseId">
     <template #subtitle>
       <template v-if="detail.data.value">
         case #{{ detail.data.value.index + 1 }} of <a :class="['link']" :href="href({ name: 'task', runKey: props.route.runKey, taskId: props.route.taskId })">{{ detail.data.value.taskDisplayName }}</a>

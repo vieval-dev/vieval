@@ -59,7 +59,8 @@ const connectionText = computed(() => ({
       <span class="text-xs muted">source <b>{{ props.snapshot.source }}</b></span>
       <span class="text-xs muted">seq <b class="tabular-nums" data-testid="seq">{{ props.snapshot.seq }}</b></span>
       <span v-if="props.connection === 'open'" class="text-xs muted">{{ props.eventCount }} live events · updated {{ formatTime(new Date(props.receivedAt).toISOString()) }}</span>
-      <span v-if="props.snapshot.current.lastEvent" class="text-xs muted ml-auto">last event <b>{{ props.snapshot.current.lastEvent.event }}</b> at {{ formatTime(props.snapshot.current.lastEvent.time) }}</span>
+      <!-- Only while the run should be moving but no live stream proves it: then the last event tells whether it stalled. -->
+      <span v-if="props.snapshot.current.lastEvent && props.connection !== 'open' && (props.snapshot.state === 'running' || props.snapshot.state === 'stale')" class="text-xs muted ml-auto">last event <b>{{ props.snapshot.current.lastEvent.event }}</b> at {{ formatTime(props.snapshot.current.lastEvent.time) }}</span>
     </div>
 
     <ProgressBar

@@ -1,7 +1,8 @@
-import type { CaseCounts, RunListItem } from '../../src/shared/contract'
+import type { CaseCounts, RunListItem, RunSnapshot } from '../../src/shared/contract'
 import type { HierarchyPosition } from './hierarchy'
 import type { MatrixChip } from './labels'
 
+import { formatDuration } from './format'
 import { attemptDate, attemptLabel, experimentLabel, mergeMatrices, runLabel } from './labels'
 import { href } from './router'
 
@@ -43,6 +44,42 @@ export function filterOptions(options: readonly SwitcherOption[], query: string)
     const text = [option.label, option.id, option.detail, ...(option.chips ?? []).map(chip => `${chip.axis} ${chip.values}`)].join(' ').toLowerCase()
     return words.every(word => text.includes(word))
   })
+}
+
+/**
+ * Builds the siblings of a task or a case from the run's snapshot, for the breadcrumb switchers below the run level.
+ *
+ * Use when:
+ * - a task page (siblings: the tasks of the run) or a case page (siblings: the cases of its task) renders its header
+ *
+ * Expects:
+ * - the snapshot the page already holds (`useRunLive`); no request is made
+ *
+ * Returns:
+ * - tasks in run order, or the cases of `taskId` in case order; `undefined` without a snapshot
+ */
+export function runSwitcherOptions(snapshot: RunSnapshot | undefined, level: 'case' | 'task', taskId?: string): SwitcherOption[] | undefined {
+  if (snapshot == null)
+    return undefined
+  if (level === 'task') {
+    return snapshot.tasks.map(task => ({
+      counts: task.caseCounts,
+      exact: task.scores.exact,
+      href: href({ name: 'task', runKey: snapshot.runKey, taskId: task.id }),
+      id: task.id,
+      label: task.displayName,
+      state: task.state,
+      time: task.startedAt,
+    }))
+  }
+  return snapshot.tasks.find(task => task.id === taskId)?.cases.map(node => ({
+    detail: [`#${node.index + 1}`, node.durationMs == null ? undefined : formatDuration(node.durationMs)].filter(Boolean).join(' · '),
+    exact: node.scores.exact,
+    href: href({ caseId: node.caseId, name: 'case', runKey: snapshot.runKey, taskId: node.taskId }),
+    id: node.caseId,
+    label: node.name,
+    state: node.state,
+  }))
 }
 
 /**

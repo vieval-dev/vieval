@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { HierarchyLevel, HierarchyPosition } from '../hierarchy'
+import type { SwitcherOption } from '../switcher'
 
 import { computed } from 'vue'
 
@@ -23,6 +24,8 @@ const props = defineProps<{
   /** The page's data is still loading: title and subtitle are placeholders instead of ids and zero counts. */
   loading?: boolean
   position: HierarchyPosition
+  /** Siblings of the page's own level when the catalog does not know them (tasks and cases come from the run). */
+  siblings?: SwitcherOption[]
   subtitle?: string
   title: string
 }>()
@@ -38,6 +41,8 @@ const crumbs = computed(() => {
 })
 /** Siblings of the page's own level for the breadcrumb switcher (from the shared catalog, no request). */
 const siblings = computed(() => {
+  if (props.siblings != null)
+    return props.siblings
   const level = props.level
   if (level !== 'workspace' && level !== 'project' && level !== 'experiment' && level !== 'attempt' && level !== 'run')
     return undefined
