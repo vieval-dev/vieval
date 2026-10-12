@@ -81,6 +81,13 @@ readable names: an experiment by its matrix (`model gpt-5.5 · repeat 1–3`, or
 attempt by its start time, a run by its start time and short hash. The full id is in the tooltip; "⋯ → Copy ID" in the
 page header (and on attempt rows) copies it. Comparisons open from the *Compare* menu in the sidebar header.
 
+On screens narrower than 768 px (phones), the sidebar becomes a drawer behind the menu button of a top bar, the
+breadcrumb is one line that scrolls sideways, and list rows stack their columns (for example the run, duration, and
+cases of an attempt below its time). A run page shows progress, ETA, and expected finish right under the progress bar.
+While a view loads, a skeleton in its shape stands in for it. To follow a run from a phone, bind the viewer to an
+address the phone can reach, for example a Tailscale address or `--host 0.0.0.0` on a trusted network (binding all
+interfaces turns off the `Host` check).
+
 **Live updates.** A run in state `running` or `stale` opens the SSE stream after the snapshot's `seq`. `progress`
 events update progress, ETA, and the current position at once; other events trigger a snapshot refetch at most every
 1.5 s; `reset` and `end` refetch. Between updates the elapsed time and the ETA follow the local clock. The case and

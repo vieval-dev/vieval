@@ -110,7 +110,7 @@ function cell(row: unknown, column: string): string {
 </script>
 
 <template>
-  <StateView :error="error" :loading="loading" :empty="totalLines === 0" empty-text="Empty JSONL file" @retry="() => fetchPage(0)">
+  <StateView :error="error" :loading="loading" :empty="totalLines === 0" empty-text="Empty JSONL file" skeleton="lines" @retry="() => fetchPage(0)">
     <div :class="['flex flex-col gap-2']" data-testid="jsonl-table" :data-total-lines="totalLines" :data-rendered-start="range.start" :data-rendered-end="range.end" :data-dom-rows="virtualizer.getVirtualItems().length">
       <div :class="['flex items-center gap-2 text-xs muted']">
         <span class="i-mingcute-table-2-line" aria-hidden="true" />

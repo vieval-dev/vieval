@@ -67,7 +67,7 @@ const running = computed(() => detail.data.value?.state === 'running')
 </script>
 
 <template>
-  <PageHeader level="case" :position="position" :title="detail.data.value?.name ?? props.route.caseId">
+  <PageHeader :loading="detail.loading.value" level="case" :position="position" :title="detail.data.value?.name ?? props.route.caseId">
     <template #subtitle>
       <template v-if="detail.data.value">
         case #{{ detail.data.value.index + 1 }} of <a :class="['link']" :href="href({ name: 'task', runKey: props.route.runKey, taskId: props.route.taskId })">{{ detail.data.value.taskDisplayName }}</a>
@@ -85,7 +85,7 @@ const running = computed(() => detail.data.value?.state === 'running')
     </template>
   </PageHeader>
 
-  <StateView :error="detail.error.value" :loading="detail.loading.value" loading-text="Reading the case…" @retry="detail.reload">
+  <StateView :error="detail.error.value" :loading="detail.loading.value" loading-text="Reading the case…" skeleton="case" @retry="detail.reload">
     <template v-if="detail.data.value">
       <ViewTabs v-model="tab" :items="tabs" :href="value => href(tabRoute(value))" label="Case views">
         <div v-if="tab === 'overview'" :class="['flex flex-col gap-4']">
@@ -93,17 +93,17 @@ const running = computed(() => detail.data.value?.state === 'running')
             {{ detail.data.value.errorMessage }}
           </div>
           <section class="card">
-            <h2 class="card-title">
+            <h2 :class="['card-title flex-wrap']">
               <span class="i-mingcute-chart-horizontal-2-line" aria-hidden="true" />Rounds (auto attempts) and retries
               <span class="text-xs muted font-normal">{{ detail.data.value.rounds.length }} round(s) · {{ detail.data.value.rounds.reduce((sum, round) => sum + round.tries.length, 0) }} tries</span>
             </h2>
-            <StateView :error="timeline.error.value" :loading="timeline.loading.value" :empty="timeline.data.value?.entries.length === 0" @retry="timeline.reload">
+            <StateView :error="timeline.error.value" :loading="timeline.loading.value" :empty="timeline.data.value?.entries.length === 0" skeleton="lines" :skeleton-count="2" @retry="timeline.reload">
               <div class="p-3">
                 <CaseTimeline v-if="timeline.data.value" :timeline="timeline.data.value" />
               </div>
             </StateView>
           </section>
-          <div :class="['grid gap-4']" style="grid-template-columns: repeat(auto-fit, minmax(380px, 1fr))">
+          <div :class="['grid gap-4']" style="grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr))">
             <section class="card">
               <h2 class="card-title">
                 <span class="i-mingcute-file-import-line" aria-hidden="true" />Input
@@ -131,17 +131,18 @@ const running = computed(() => detail.data.value?.state === 'running')
               <div :class="['overflow-auto max-h-96']">
                 <table class="w-full">
                   <tbody>
-                    <tr v-for="metric in detail.data.value.metrics" :key="metric.seq" :class="['border-b border-neutral-100/70 dark:border-neutral-900']">
-                      <td :class="['td mono text-xs muted whitespace-nowrap']">
+                    <!-- Phones: name and round on one line, the value below it at full width. -->
+                    <tr v-for="metric in detail.data.value.metrics" :key="metric.seq" :class="['border-b border-neutral-100/70 dark:border-neutral-900', 'max-md:(flex flex-wrap items-baseline py-1)']">
+                      <td :class="['td mono text-xs muted whitespace-nowrap max-md:hidden']">
                         {{ formatTime(metric.time) }}
                       </td>
-                      <td :class="['td mono text-xs whitespace-nowrap']">
+                      <td :class="['td mono text-xs whitespace-nowrap', 'max-md:(flex-1 min-w-0 truncate py-0.5 font-medium)']">
                         {{ metric.name }}
                       </td>
-                      <td :class="['td mono text-xs break-all']">
+                      <td :class="['td mono text-xs break-all', 'max-md:(order-last basis-full py-0.5)']">
                         {{ previewValue(metric.value, 200) }}
                       </td>
-                      <td :class="['td mono muted text-xs']">
+                      <td :class="['td mono muted text-xs whitespace-nowrap', 'max-md:py-0.5']">
                         round {{ metric.roundIndex ?? 0 }}
                       </td>
                     </tr>

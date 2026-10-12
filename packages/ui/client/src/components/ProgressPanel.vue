@@ -71,7 +71,8 @@ const connectionText = computed(() => ({
         ...(live ? [{ class: 'bg-blue-300 dark:bg-blue-400/50', percent: runningPercent, title: `${progress.cases.running} cases running` }] : []),
       ]"
     />
-    <ProgressChart v-if="progress.history.length > 0" :elapsed-ms="elapsed" :finish-at="finishAt" :live="live" :progress="progress" />
+    <!-- Phones show the numbers (progress, ETA, expected finish) right under the bar and the chart after them. -->
+    <ProgressChart v-if="progress.history.length > 0" :class="['max-md:order-1']" :elapsed-ms="elapsed" :finish-at="finishAt" :live="live" :progress="progress" />
 
     <dl :class="['grid gap-x-6 gap-y-2 text-sm']" style="grid-template-columns: repeat(auto-fill, minmax(150px, 1fr))">
       <div>
@@ -136,15 +137,15 @@ const connectionText = computed(() => ({
         </dd>
       </div>
     </dl>
-    <p class="text-xs muted">
+    <p :class="['text-xs muted max-md:order-1']">
       {{ `ETA basis: ${basisText}${live && progress.lowerBound ? '; auto attempts were seen, so more rounds may follow (lower bound)' : ''}. Rule: elapsed ÷ settled cases × estimated cases − elapsed, and at least as long as the longest running case has run.` }}
     </p>
 
-    <div v-if="props.snapshot.current.running.length > 0" data-testid="current-position">
+    <div v-if="props.snapshot.current.running.length > 0" :class="['max-md:order-1']" data-testid="current-position">
       <div :class="['text-xs font-semibold mb-1 flex items-center gap-1']">
         <span class="i-mingcute-aiming-2-line text-blue-600" aria-hidden="true" />Current position · {{ props.snapshot.current.running.length }} running
       </div>
-      <ul :class="['grid gap-1']" style="grid-template-columns: repeat(auto-fill, minmax(320px, 1fr))">
+      <ul :class="['grid gap-1']" style="grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr))">
         <li v-for="item in props.snapshot.current.running" :key="`${item.taskId}/${item.caseId}`" :class="['flex items-center gap-2 rounded-md bg-blue-50 dark:bg-blue-950/40 px-2 py-1 text-xs']">
           <span class="i-mingcute-loading-line text-blue-600 shrink-0 animate-spin" aria-hidden="true" />
           <a :href="href({ caseId: item.caseId, name: 'case', runKey: props.snapshot.runKey, taskId: item.taskId })" :class="['link mono text-xs truncate']" :title="item.name">{{ item.name }}</a>

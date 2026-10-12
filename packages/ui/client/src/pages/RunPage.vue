@@ -64,7 +64,7 @@ const caseHref = (line: LogLine) => href({ caseId: line.caseId!, name: 'case', r
 </script>
 
 <template>
-  <PageHeader :id="props.route.runKey" level="run" :position="position" :title="props.route.runKey">
+  <PageHeader :id="props.route.runKey" :loading="!live.snapshot.value && !live.error.value" level="run" :position="position" :title="props.route.runKey">
     <template #title>
       <IdLabel :id="props.route.runKey" :label="runLabel({ runKey: props.route.runKey, startedAt: live.snapshot.value?.startedAt })" />
     </template>
@@ -94,7 +94,7 @@ const caseHref = (line: LogLine) => href({ caseId: line.caseId!, name: 'case', r
     </template>
   </PageHeader>
 
-  <StateView :error="live.error.value && !live.snapshot.value ? live.error.value : undefined" :loading="!live.snapshot.value" loading-text="Reading the run…" @retry="live.reload">
+  <StateView :error="live.error.value && !live.snapshot.value ? live.error.value : undefined" :loading="!live.snapshot.value" loading-text="Reading the run…" skeleton="run" @retry="live.reload">
     <template v-if="live.snapshot.value">
       <ProgressPanel :snapshot="live.snapshot.value" :connection="live.connection.value" :received-at="live.receivedAt.value" :event-count="live.eventCount.value" />
       <div v-if="live.error.value" role="alert" :class="['mt-2 text-xs rounded state-failed px-2 py-1']">

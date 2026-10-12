@@ -50,21 +50,28 @@ function toRow(experiment: ExperimentEntry) {
   }
 }
 const rows = computed(() => (project.value?.experiments ?? []).map(toRow))
-/** Columns of a row: name, latest run, trend, cases, exact score, attempts; the header uses the same template. */
-const rowColumns = 'minmax(14rem, 2fr) minmax(12rem, 1.2fr) 4.5rem minmax(16rem, 1.8fr) 4rem 4rem'
+/**
+ * Grid of a row. Wide screens: one line with name, latest run, trend, cases, exact score, attempts (the header uses
+ * the same columns). Narrow screens: the name on top, the latest run with the exact score below it, then the cases;
+ * the trend and the attempt count are left out (both are on the experiment page).
+ */
+const rowGrid = [
+  'grid items-center gap-x-4 gap-y-1.5 grid-cols-[minmax(0,1fr)_auto]',
+  'md:grid-cols-[minmax(14rem,2fr)_minmax(12rem,1.2fr)_4.5rem_minmax(16rem,1.8fr)_4rem_4rem]',
+]
 </script>
 
 <template>
-  <PageHeader :id="props.project" level="project" :position="{ project: props.project, workspace: props.workspace }" :title="props.project">
+  <PageHeader :id="props.project" :loading="catalog.resource.loading.value" level="project" :position="{ project: props.project, workspace: props.workspace }" :title="props.project">
     <template #subtitle>
       {{ project?.experiments.length ?? 0 }} experiment(s) · {{ project?.runs.length ?? 0 }} run(s)
     </template>
   </PageHeader>
 
-  <StateView :error="catalog.resource.error.value" :loading="catalog.resource.loading.value" :empty="project == null" empty-text="No runs in this project" empty-hint="Runs appear here once `vieval run` writes a report below the viewer's report roots." @retry="catalog.resource.reload">
+  <StateView :error="catalog.resource.error.value" :loading="catalog.resource.loading.value" :empty="project == null" empty-text="No runs in this project" empty-hint="Runs appear here once `vieval run` writes a report below the viewer's report roots." skeleton="rows" @retry="catalog.resource.reload">
     <ViewTabs v-model="tab" :items="tabs" label="Project views" :href="value => href(tabRoute(value))">
       <section v-if="tab === 'experiments'" :class="['card']">
-        <div :class="['grid items-center gap-x-4 px-3 py-1.5 border-b border-neutral-200/50 dark:border-neutral-800/50', 'text-xs font-medium muted']" :style="{ gridTemplateColumns: rowColumns }" aria-hidden="true">
+        <div :class="[...rowGrid, 'max-md:hidden px-3 py-1.5 border-b border-neutral-200/50 dark:border-neutral-800/50', 'text-xs font-medium muted']" aria-hidden="true">
           <span>Experiment</span><span>Latest run</span><span>Trend</span><span>Cases (latest)</span><span class="text-right">
             Exact
           </span><span class="text-right">
@@ -75,11 +82,10 @@ const rowColumns = 'minmax(14rem, 2fr) minmax(12rem, 1.2fr) 4.5rem minmax(16rem,
           <li
             v-for="row in rows"
             :key="row.id"
-            :class="['relative grid items-center gap-x-4 px-3 py-2 text-sm transition-colors', 'border-b last:border-b-0 border-neutral-100/70 dark:border-neutral-900 hover:bg-primary-500/5']"
-            :style="{ gridTemplateColumns: rowColumns }"
+            :class="[...rowGrid, 'relative px-3 py-2.5 md:py-2 text-sm transition-colors', 'border-b last:border-b-0 border-neutral-100/70 dark:border-neutral-900 hover:bg-primary-500/5']"
             data-testid="experiment-row"
           >
-            <span :class="['flex items-center gap-2 min-w-0']">
+            <span :class="['flex items-center gap-2 min-w-0 max-md:col-span-2']">
               <span :class="[levelIcons.experiment, 'muted shrink-0']" aria-hidden="true" />
               <ExperimentName :experiment-id="row.id" :matrix="row.matrix" :href="href({ experiment: row.id, name: 'scope', project: row.project, workspace: row.workspace })" stretch />
             </span>
@@ -87,10 +93,10 @@ const rowColumns = 'minmax(14rem, 2fr) minmax(12rem, 1.2fr) 4.5rem minmax(16rem,
               <StateBadge :state="row.latest.state" />
               <TimeAgo :time="row.latest.startedAt" :class="['text-xs muted truncate']" />
             </span>
-            <Sparkline :values="row.trend" :label="`exact score of ${row.runs.length} runs`" :width="72" />
-            <CountsBar :counts="row.latest.counts" />
-            <span :class="['text-right tabular-nums font-semibold']">{{ formatScore(row.latest.exactAverage) }}</span>
-            <span :class="['text-right tabular-nums muted']">{{ row.attempts.length }}</span>
+            <Sparkline :class="['max-md:hidden']" :values="row.trend" :label="`exact score of ${row.runs.length} runs`" :width="72" />
+            <CountsBar :class="['max-md:(row-start-3 col-span-2)']" :counts="row.latest.counts" />
+            <span :class="['text-right tabular-nums font-semibold max-md:(row-start-2 col-start-2)']">{{ formatScore(row.latest.exactAverage) }}</span>
+            <span :class="['text-right tabular-nums muted max-md:hidden']">{{ row.attempts.length }}</span>
           </li>
         </ul>
       </section>

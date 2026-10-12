@@ -104,13 +104,13 @@ const range = computed(() => {
 
 <template>
   <div :class="['flex flex-col']" data-testid="log-view">
-    <div :class="['flex items-center gap-2 px-3 py-1.5 text-xs border-b border-neutral-200/50 dark:border-neutral-800/50']">
+    <div :class="['flex items-center flex-wrap gap-2 px-3 py-1.5 text-xs border-b border-neutral-200/50 dark:border-neutral-800/50']">
       <SegmentedControl v-model="stream" :items="streams" label="Output stream" />
       <span :class="['muted ml-auto']" data-testid="log-count">showing {{ range }} of {{ visible.length }} loaded · {{ total }} lines total</span>
       <span v-if="props.follow" :class="['badge state-running']"><span class="vv-pulse i-mingcute-airdrop-line" aria-hidden="true" />following</span>
     </div>
-    <StateView :error="error" :loading="loading" :empty="total === 0" :empty-text="props.emptyText ?? 'No console output recorded'" empty-hint="vieval records console.log / console.error output written inside cases." @retry="reset">
-      <div ref="scroller" :class="['overflow-auto h-[55vh] min-h-48 bg-neutral-50 dark:bg-neutral-950 font-mono text-xs']">
+    <StateView :error="error" :loading="loading" :empty="total === 0" :empty-text="props.emptyText ?? 'No console output recorded'" empty-hint="vieval records console.log / console.error output written inside cases." skeleton="lines" @retry="reset">
+      <div ref="scroller" :class="['overflow-auto h-[55vh] max-md:h-[65vh] min-h-48 bg-neutral-50 dark:bg-neutral-950 font-mono text-xs']">
         <div :style="{ height: `${virtualizer.getTotalSize()}px`, position: 'relative', minWidth: '100%' }">
           <div
             v-for="item in virtualizer.getVirtualItems()" :key="item.index"
@@ -118,7 +118,7 @@ const range = computed(() => {
             :style="{ transform: `translateY(${item.start}px)`, height: `${item.size}px` }"
           >
             <span :class="['muted select-none w-10 text-right shrink-0']">{{ item.index + 1 }}</span>
-            <span :class="['muted select-none shrink-0']">{{ formatTime(visible[item.index]!.time) }}</span>
+            <span :class="['muted select-none shrink-0 max-md:hidden']">{{ formatTime(visible[item.index]!.time) }}</span>
             <span :class="['select-none shrink-0 w-12', visible[item.index]!.stream === 'stderr' ? 'text-red-600 dark:text-red-400' : 'muted']">{{ visible[item.index]!.stream }}</span>
             <a v-if="props.showCase && visible[item.index]!.caseId && props.caseHref" :href="props.caseHref(visible[item.index]!)" :class="['link shrink-0 max-w-56 truncate']" :title="`${shortTaskId(visible[item.index]!.taskId ?? '')} › ${visible[item.index]!.caseId}`">{{ visible[item.index]!.caseId }}</a>
             <span><span v-for="(part, index) in render(visible[item.index]!.text)" :key="index" :style="{ color: part.fg ? `rgb(${part.fg})` : undefined, background: part.bg ? `rgb(${part.bg})` : undefined, fontWeight: part.decorations?.includes('bold') ? 600 : undefined }">{{ part.content }}</span></span>

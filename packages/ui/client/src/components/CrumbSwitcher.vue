@@ -50,7 +50,7 @@ function choose(id: unknown): void {
   <PopoverRoot v-model:open="open">
     <PopoverTrigger
       :class="[
-        'inline-flex items-center gap-0.5 min-w-0 max-w-96 rounded-md px-1 -mx-1 font-medium transition-colors',
+        'inline-flex items-center gap-0.5 min-w-0 max-w-56 md:max-w-96 rounded-md px-1 -mx-1 font-medium transition-colors',
         'hover:bg-primary-500/10 data-[state=open]:bg-primary-500/15 focus-visible:(outline-2 outline-offset-1 outline-primary-500)',
       ]"
       :title="props.current"
@@ -61,7 +61,7 @@ function choose(id: unknown): void {
       <span class="i-mingcute-down-small-line muted shrink-0" aria-hidden="true" />
     </PopoverTrigger>
     <PopoverPortal>
-      <PopoverContent as-child :side-offset="6" align="start" :class="['floating w-96 overflow-hidden']">
+      <PopoverContent as-child :side-offset="6" :collision-padding="12" align="start" :class="['floating w-[min(24rem,calc(100vw-1.5rem))] overflow-hidden']">
         <AnimatedContent>
           <div :class="['px-3 py-2 text-sm font-semibold border-b border-neutral-200/50 dark:border-neutral-700/40']">
             Switch {{ levelLabels[props.level].toLowerCase() }}

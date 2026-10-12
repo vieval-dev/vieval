@@ -143,10 +143,10 @@ function showFrame(index: number): void {
       </dl>
       <ViewTabs v-model="tab" :items="tabs" label="Evidence views" in-card>
         <div class="p-3">
-          <StateView v-if="tab === 'steps'" :error="resultJson.error.value" :loading="resultJson.loading.value" :empty="steps.length === 0" empty-text="result.json has no agent steps" @retry="resultJson.reload">
+          <StateView v-if="tab === 'steps'" :error="resultJson.error.value" :loading="resultJson.loading.value" :empty="steps.length === 0" empty-text="result.json has no agent steps" skeleton="lines" :skeleton-count="8" @retry="resultJson.reload">
             <div :class="['overflow-auto max-h-[65vh]']">
               <table :class="['w-full']" data-testid="osworld-steps">
-                <thead :class="['sticky top-0 bg-white dark:bg-neutral-900']">
+                <thead :class="['sticky top-0 bg-white dark:bg-neutral-900 max-md:hidden']">
                   <tr :class="['border-b border-neutral-200/50 dark:border-neutral-800/50']">
                     <th class="th">
                       #
@@ -167,30 +167,31 @@ function showFrame(index: number): void {
                 </thead>
                 <tbody>
                   <template v-for="step in steps" :key="step.index">
-                    <tr :class="['border-b border-neutral-100/70 dark:border-neutral-900 cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800/50']" @click="openStep = openStep === step.index ? undefined : step.index">
-                      <td :class="['td mono text-xs muted']">
+                    <!-- Phones: number, command, and status on one line, then the inputs and the screenshot below. -->
+                    <tr :class="['border-b border-neutral-100/70 dark:border-neutral-900 cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800/50', 'max-md:(flex flex-wrap items-start py-1)']" @click="openStep = openStep === step.index ? undefined : step.index">
+                      <td :class="['td mono text-xs muted', 'max-md:(w-7 pr-0)']">
                         {{ step.index + 1 }}
                       </td>
-                      <td :class="['td mono text-xs']">
+                      <td :class="['td mono text-xs', 'max-md:(flex-1 min-w-0 break-all)']">
                         {{ step.command }}
                       </td>
-                      <td :class="['td mono text-xs muted max-w-64 truncate']">
+                      <td :class="['td mono text-xs muted max-w-64 truncate', 'max-md:(order-last basis-full max-w-none pl-9 pt-0)']">
                         {{ step.target }}
                       </td>
-                      <td class="td">
+                      <td :class="['td', 'max-md:text-right']">
                         <span :class="['badge', step.status === 'completed' ? 'state-passed' : step.failure ? 'state-failed' : 'state-neutral']">{{ step.status }}</span>
                         <div v-if="step.failure" :class="['text-xs text-red-700 dark:text-red-400 mt-0.5 max-w-xl']">
                           {{ previewValue(step.failure, 160) }}
                         </div>
                       </td>
-                      <td class="td">
+                      <td :class="['td', 'max-md:(order-last basis-full pl-9 pt-0)']">
                         <button v-if="step.frame >= 0" type="button" :class="['block']" :title="`Open frame ${step.frame + 1}`" @click.stop="showFrame(step.frame)">
-                          <LazyImage :location="frames[step.frame]!.location" :alt="`Screenshot of step ${step.index + 1}`" :img-class="['h-12 w-auto rounded border border-neutral-200/50 dark:border-neutral-700/40']" />
+                          <LazyImage :location="frames[step.frame]!.location" :alt="`Screenshot of step ${step.index + 1}`" :img-class="['h-12 max-md:h-24 w-auto rounded border border-neutral-200/50 dark:border-neutral-700/40']" />
                         </button>
                       </td>
                     </tr>
-                    <tr v-if="openStep === step.index">
-                      <td colspan="5" :class="['p-2 bg-neutral-50 dark:bg-neutral-950']">
+                    <tr v-if="openStep === step.index" :class="['max-md:block']">
+                      <td colspan="5" :class="['p-2 bg-neutral-50 dark:bg-neutral-950 max-md:(block overflow-x-auto)']">
                         <ObjectTree :value="step.raw" :expand-depth="2" />
                       </td>
                     </tr>
@@ -200,7 +201,7 @@ function showFrame(index: number): void {
             </div>
           </StateView>
 
-          <StateView v-else-if="tab === 'screenshots'" :error="timeline.error.value" :loading="timeline.loading.value" :empty="frames.length === 0" empty-text="No screenshots in auv-runs" @retry="timeline.reload">
+          <StateView v-else-if="tab === 'screenshots'" :error="timeline.error.value" :loading="timeline.loading.value" :empty="frames.length === 0" empty-text="No screenshots in auv-runs" skeleton="media" @retry="timeline.reload">
             <ImageSequence :frames="frames" :initial="frameIndex" />
           </StateView>
 
@@ -210,11 +211,12 @@ function showFrame(index: number): void {
             </StateView>
           </template>
 
-          <StateView v-else-if="tab === 'files'" :error="tree.error.value" :loading="tree.loading.value" :empty="files.length === 0" empty-text="The evidence directory is empty" @retry="tree.reload">
-            <div :class="['grid gap-3']" style="grid-template-columns: minmax(220px, 300px) minmax(0, 1fr)">
+          <StateView v-else-if="tab === 'files'" :error="tree.error.value" :loading="tree.loading.value" :empty="files.length === 0" empty-text="The evidence directory is empty" skeleton="lines" @retry="tree.reload">
+            <!-- Narrow screens stack the file list (shorter) above the preview. -->
+            <div :class="['grid gap-3 grid-cols-1 md:grid-cols-[minmax(220px,300px)_minmax(0,1fr)]']">
               <div :class="['flex flex-col gap-1 min-w-0']">
-                <input v-model="fileFilter" type="search" placeholder="Filter files…" :class="['rounded border border-neutral-300/60 dark:border-neutral-700/40 bg-transparent px-2 py-0.5 text-xs']">
-                <ul :class="['text-xs max-h-[65vh] overflow-auto']" aria-label="Evidence files">
+                <input v-model="fileFilter" type="search" placeholder="Filter files…" :class="['rounded border border-neutral-300/60 dark:border-neutral-700/40 bg-transparent px-2 py-0.5 text-xs max-md:py-1']">
+                <ul :class="['text-xs max-h-[65vh] max-md:max-h-48 overflow-auto']" aria-label="Evidence files">
                   <li v-for="entry in filteredFiles" :key="entry.path">
                     <button type="button" :class="['flex items-center gap-1 w-full rounded px-1.5 py-0.5 text-left', selectedFile?.path === entry.path ? 'selected' : 'hover:bg-neutral-100 dark:hover:bg-neutral-800']" :title="entry.path" @click="selectedFile = entry">
                       <span class="text-xs mono truncate"><span class="muted">{{ entry.path.split('/').slice(0, -1).map(part => part.length > 10 ? `${part.slice(0, 8)}…` : part).join('/') }}{{ entry.path.includes('/') ? '/' : '' }}</span>{{ entry.path.split('/').at(-1) }}</span>
@@ -236,7 +238,7 @@ function showFrame(index: number): void {
             </div>
           </StateView>
 
-          <StateView v-else :error="logs.error.value" :loading="logs.loading.value" :empty="logs.data.value?.total === 0" empty-text="No correlated log lines" :empty-hint="`Searched ${logs.data.value?.files.length ?? 0} log files for keys ${logs.data.value?.correlation.keys.join(', ')}`" @retry="logs.reload">
+          <StateView v-else :error="logs.error.value" :loading="logs.loading.value" skeleton="lines" :empty="logs.data.value?.total === 0" empty-text="No correlated log lines" :empty-hint="`Searched ${logs.data.value?.files.length ?? 0} log files for keys ${logs.data.value?.correlation.keys.join(', ')}`" @retry="logs.reload">
             <div class="text-xs muted mb-2" data-testid="external-logs-correlation">
               {{ logs.data.value?.total }} lines matched in {{ logs.data.value?.files.filter(file => file.matched > 0).map(file => file.path.split('/').at(-1)).join(', ') }} · pods {{ logs.data.value?.correlation.podNames.join(', ') || '—' }} · window {{ formatTime(logs.data.value?.correlation.window.from) }}–{{ formatTime(logs.data.value?.correlation.window.to) }}
             </div>

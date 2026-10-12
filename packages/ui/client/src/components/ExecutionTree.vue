@@ -3,6 +3,7 @@ import type { CaseNode, CaseRound, RunSnapshot } from '../../../src/shared/contr
 import type { Segment } from './SegmentedControl.vue'
 
 import { useVirtualizer } from '@tanstack/vue-virtual'
+import { useMediaQuery } from '@vueuse/core'
 import { computed, reactive, shallowRef, useTemplateRef, watch } from 'vue'
 
 import IconButton from './IconButton.vue'
@@ -137,13 +138,21 @@ watch(rows, (list) => {
     flashing.value = changed
 })
 
+/**
+ * Wide screens show a row on one line; narrow screens put the counts and details under the label, so long case names
+ * keep most of the width. Rows have a fixed height either way (the list is virtualized without measuring).
+ */
+const wide = useMediaQuery('(min-width: 768px)')
 const scroller = useTemplateRef<HTMLElement>('scroller')
 const virtualizer = useVirtualizer(computed(() => ({
   count: rows.value.length,
-  estimateSize: () => 28,
+  estimateSize: () => (wide.value ? 28 : 44),
   getScrollElement: () => scroller.value ?? null,
   overscan: 12,
 })))
+// NOTICE: TanStack Virtual caches sizes and does not recompute them when only `estimateSize` changes; `measure()`
+// drops the cache. Removal condition: none while the row height depends on the screen width.
+watch(wide, () => virtualizer.value.measure())
 
 function jumpToCurrent(): void {
   const index = rows.value.findIndex(row => row.running)
@@ -166,13 +175,13 @@ const counts = computed(() => props.snapshot.tasks.reduce((sum, task) => sum + t
     <h2 :class="['card-title flex-wrap']">
       <span class="i-mingcute-sitemap-line" aria-hidden="true" />Execution tree
       <span class="text-xs muted font-normal">{{ counts }} cases · {{ rows.length }} rows</span>
-      <div :class="['ml-auto flex items-center gap-1 font-normal']">
+      <div :class="['ml-auto flex items-center flex-wrap gap-1 font-normal', 'max-md:w-full']">
         <SegmentedControl v-model="filter" :items="filters" label="Show cases" />
-        <input v-model="search" type="search" placeholder="Filter cases…" :class="['rounded border border-neutral-300/60 dark:border-neutral-700/40 bg-transparent px-2 py-0.5 text-xs w-40']">
+        <input v-model="search" type="search" placeholder="Filter cases…" :class="['rounded border border-neutral-300/60 dark:border-neutral-700/40 bg-transparent px-2 py-0.5 text-xs w-40', 'max-md:(flex-1 min-w-24 py-1)']">
         <IconButton icon="i-mingcute-aiming-2-line" label="Scroll to the first running case" :disabled="!rows.some(row => row.running)" @click="jumpToCurrent" />
       </div>
     </h2>
-    <div ref="scroller" :class="['overflow-auto h-[60vh] min-h-64']">
+    <div ref="scroller" :class="['overflow-auto h-[60vh] min-h-64 max-md:h-[70vh]']">
       <div v-if="rows.length === 0" :class="['muted text-sm p-6 text-center']" data-testid="state-empty">
         {{ props.snapshot.tasks.length === 0 ? 'No task started yet.' : 'No case matches the filter.' }}
       </div>
@@ -184,24 +193,28 @@ const counts = computed(() => props.snapshot.tasks.reduce((sum, task) => sum + t
             rows[item.index]!.running ? 'border-blue-500/60 bg-blue-50 dark:bg-blue-950/40' : 'border-transparent hover:bg-neutral-50 dark:hover:bg-neutral-800/50',
             flashing.has(rows[item.index]!.key) && 'vv-flash',
           ]"
-          :style="{ height: `${item.size}px`, transform: `translateY(${item.start}px)`, paddingLeft: `${8 + rows[item.index]!.depth * 18}px` }"
+          :style="{ height: `${item.size}px`, transform: `translateY(${item.start}px)`, paddingLeft: `${(wide ? 8 : 4) + rows[item.index]!.depth * (wide ? 18 : 10)}px` }"
           :data-kind="rows[item.index]!.kind" :data-state="rows[item.index]!.state"
         >
           <button v-if="rows[item.index]!.expandable" type="button" :class="['i-mingcute-right-line shrink-0 muted transition-transform', open.has(rows[item.index]!.key) && 'rotate-90']" :aria-label="`Toggle ${rows[item.index]!.label}`" @click="toggle(rows[item.index]!.key)" />
           <span v-else class="shrink-0 w-[1.1em]" />
-          <span :class="[levelIcons[rows[item.index]!.kind], 'shrink-0 muted']" :title="levelLabels[rows[item.index]!.kind]" aria-hidden="true" />
+          <span :class="[levelIcons[rows[item.index]!.kind], 'shrink-0 muted max-md:hidden']" :title="levelLabels[rows[item.index]!.kind]" aria-hidden="true" />
           <StateBadge :state="rows[item.index]!.state" icon-only />
-          <a v-if="rows[item.index]!.href" :href="rows[item.index]!.href" :class="['link truncate', rows[item.index]!.kind !== 'case' && 'font-medium']" :title="rows[item.index]!.label">{{ rows[item.index]!.label }}</a>
-          <span v-else :class="['truncate']">{{ rows[item.index]!.label }}</span>
-          <span v-if="rows[item.index]!.running" :class="['badge state-running']"><span class="i-mingcute-aiming-2-line" aria-hidden="true" />now</span>
-          <span :class="['ml-auto pl-2 flex items-center gap-1.5', 'muted mono text-xs whitespace-nowrap']">
-            <template v-if="rows[item.index]!.counts">
-              <span :class="['inline-flex items-center gap-0.5', 'text-green-700 dark:text-green-400']" :title="`${rows[item.index]!.counts!.passed} passed`">{{ rows[item.index]!.counts!.passed }}<span class="i-mingcute-check-line" aria-label="passed" /></span>
-              <span :class="['inline-flex items-center gap-0.5', 'text-red-700 dark:text-red-400']" :title="`${rows[item.index]!.counts!.failed} failed`">{{ rows[item.index]!.counts!.failed }}<span class="i-mingcute-close-line" aria-label="failed" /></span>
-              <span v-if="rows[item.index]!.counts!.running" :class="['inline-flex items-center gap-0.5', 'text-blue-700 dark:text-blue-400']" :title="`${rows[item.index]!.counts!.running} running`">{{ rows[item.index]!.counts!.running }}<span class="i-mingcute-loading-line" aria-label="running" /></span>
-              <span>/ {{ rows[item.index]!.counts!.total }} ·</span>
-            </template>
-            <span>{{ rows[item.index]!.detail }}</span>
+          <span :class="['flex-1 min-w-0 flex md:items-center max-md:(flex-col justify-center gap-0.5)']">
+            <span :class="['flex items-center gap-1.5 min-w-0']">
+              <a v-if="rows[item.index]!.href" :href="rows[item.index]!.href" :class="['link truncate', rows[item.index]!.kind !== 'case' && 'font-medium']" :title="rows[item.index]!.label">{{ rows[item.index]!.label }}</a>
+              <span v-else :class="['truncate']">{{ rows[item.index]!.label }}</span>
+              <span v-if="rows[item.index]!.running" :class="['badge state-running']"><span class="i-mingcute-aiming-2-line" aria-hidden="true" />now</span>
+            </span>
+            <span :class="['md:(ml-auto pl-2) flex items-center gap-1.5 min-w-0', 'muted mono text-xs whitespace-nowrap max-md:text-[11px]']">
+              <template v-if="rows[item.index]!.counts">
+                <span :class="['inline-flex items-center gap-0.5', 'text-green-700 dark:text-green-400']" :title="`${rows[item.index]!.counts!.passed} passed`">{{ rows[item.index]!.counts!.passed }}<span class="i-mingcute-check-line" aria-label="passed" /></span>
+                <span :class="['inline-flex items-center gap-0.5', 'text-red-700 dark:text-red-400']" :title="`${rows[item.index]!.counts!.failed} failed`">{{ rows[item.index]!.counts!.failed }}<span class="i-mingcute-close-line" aria-label="failed" /></span>
+                <span v-if="rows[item.index]!.counts!.running" :class="['inline-flex items-center gap-0.5', 'text-blue-700 dark:text-blue-400']" :title="`${rows[item.index]!.counts!.running} running`">{{ rows[item.index]!.counts!.running }}<span class="i-mingcute-loading-line" aria-label="running" /></span>
+                <span>/ {{ rows[item.index]!.counts!.total }} ·</span>
+              </template>
+              <span :class="['truncate']">{{ rows[item.index]!.detail }}</span>
+            </span>
           </span>
         </div>
       </div>

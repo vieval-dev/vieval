@@ -56,12 +56,12 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
 
 <template>
   <div :class="['flex flex-col gap-4']">
-    <StateView :error="scores.error.value" :loading="scores.loading.value" @retry="scores.reload">
+    <StateView :error="scores.error.value" :loading="scores.loading.value" skeleton="panel" @retry="scores.reload">
       <section :class="['card']">
         <h2 class="card-title">
           <span class="i-mingcute-target-line" aria-hidden="true" />Scores
         </h2>
-        <dl :class="['flex gap-8 px-3 py-2 text-sm']">
+        <dl :class="['flex flex-wrap gap-x-8 gap-y-2 px-3 py-2 text-sm']">
           <div v-for="kind in (['exact', 'judge', 'hybrid'] as const)" :key="kind">
             <dt class="text-xs muted">
               {{ kind }} (events)
@@ -82,7 +82,7 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
       </section>
 
       <section :class="['card']" data-testid="matrix-rows">
-        <h2 class="card-title">
+        <h2 :class="['card-title flex-wrap']">
           <span class="i-mingcute-layout-grid-line" aria-hidden="true" />Matrix rows (tasks)
           <a :class="['btn text-xs ml-auto font-normal']" :href="href({ name: 'compare', query: { run: runKey, view: 'matrix' } })"><span class="i-mingcute-git-compare-line" aria-hidden="true" />Compare cases across rows</a>
         </h2>
@@ -149,12 +149,12 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
       </section>
     </StateView>
 
-    <StateView :error="metrics.error.value" :loading="metrics.loading.value" :empty="metrics.data.value?.numeric.length === 0 && metrics.data.value?.nonNumeric.length === 0" empty-text="No metrics recorded" empty-hint="Cases record metrics with context.recordMetric(name, value)." @retry="metrics.reload">
+    <StateView :error="metrics.error.value" :loading="metrics.loading.value" :empty="metrics.data.value?.numeric.length === 0 && metrics.data.value?.nonNumeric.length === 0" empty-text="No metrics recorded" empty-hint="Cases record metrics with context.recordMetric(name, value)." skeleton="panel" @retry="metrics.reload">
       <section v-if="numeric.length > 0" :class="['card']" data-testid="metric-charts">
         <h2 class="card-title">
           <span class="i-mingcute-chart-line-line" aria-hidden="true" />Numeric metrics <span class="text-xs muted font-normal">in recording order</span>
         </h2>
-        <div :class="['grid gap-4 p-3']" style="grid-template-columns: repeat(auto-fill, minmax(340px, 1fr))">
+        <div :class="['grid gap-4 p-3']" style="grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr))">
           <div v-for="metric in numeric" :key="metric.name">
             <LineChart :name="metric.name" :points="metric.points" />
             <div class="text-xs muted tabular-nums">
@@ -186,7 +186,7 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
                 <a
                   v-if="entry.taskId && entry.caseId"
                   :href="href({ caseId: entry.caseId, name: 'case', runKey, taskId: entry.taskId })"
-                  :class="['link mono shrink-0 max-w-64 truncate']"
+                  :class="['link mono shrink-0 max-w-64 max-md:max-w-32 truncate']"
                   :title="entry.caseId"
                 >{{ entry.caseId }}</a>
                 <span v-else :class="['mono muted shrink-0']">run</span>

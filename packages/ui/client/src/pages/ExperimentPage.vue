@@ -61,8 +61,15 @@ const attempts = computed(() => {
   return [...byAttempt.entries()].map(([id, list]) => ({ date: attemptDate(id), id, label: attemptLabel(id), runs: list }))
 })
 
-/** Columns of a row: select, attempt, run, duration, cases, exact score, menu; the header uses the same template. */
-const rowColumns = '1rem minmax(14rem, 1.6fr) minmax(9rem, 1fr) 5rem minmax(12rem, 2fr) 4rem 1.75rem'
+/**
+ * Grid of a run row. Wide screens: one line with select, attempt, run, duration, cases, exact score, menu (the header
+ * uses the same columns). Narrow screens: select, attempt, exact score, and menu on the first line, the run and its
+ * duration below the attempt, then the cases.
+ */
+const rowGrid = [
+  'grid items-center gap-x-3 gap-y-1.5 grid-cols-[1rem_minmax(0,1fr)_auto_1.75rem]',
+  'md:(gap-x-4 grid-cols-[1rem_minmax(14rem,1.6fr)_minmax(9rem,1fr)_5rem_minmax(12rem,2fr)_4rem_1.75rem])',
+]
 const selected = shallowRef<string[]>([])
 function duration(run: { endedAt?: string, startedAt?: string }): number | undefined {
   return run.startedAt == null || run.endedAt == null ? undefined : Date.parse(run.endedAt) - Date.parse(run.startedAt)
@@ -81,7 +88,7 @@ watch([() => props.attempt, () => attempts.value.length], async ([attempt]) => {
 </script>
 
 <template>
-  <PageHeader :id="props.experiment" level="experiment" :position="{ attempt: props.attempt, experiment: props.experiment, project: props.project, workspace: props.workspace }" :title="title">
+  <PageHeader :id="props.experiment" :loading="catalog.resource.loading.value" level="experiment" :position="{ attempt: props.attempt, experiment: props.experiment, project: props.project, workspace: props.workspace }" :title="title">
     <template #title>
       <ExperimentName :experiment-id="props.experiment" :matrix="matrix" />
     </template>
@@ -89,21 +96,22 @@ watch([() => props.attempt, () => attempts.value.length], async ([attempt]) => {
       {{ attempts.length }} attempt(s) · {{ runs.length }} run(s)
     </template>
     <template #actions>
-      <Sparkline :values="trend" :label="`exact score of ${runs.length} runs`" :width="140" :height="32" />
+      <!-- Phones need the width for the name; every attempt row below shows its score. -->
+      <Sparkline :class="['max-md:hidden']" :values="trend" :label="`exact score of ${runs.length} runs`" :width="140" :height="32" />
     </template>
   </PageHeader>
 
-  <StateView :error="catalog.resource.error.value" :loading="catalog.resource.loading.value" :empty="runs.length === 0" empty-text="No runs in this experiment" empty-hint="Runs appear here once `vieval run` writes a report below the viewer's report roots." @retry="catalog.resource.reload">
+  <StateView :error="catalog.resource.error.value" :loading="catalog.resource.loading.value" :empty="runs.length === 0" empty-text="No runs in this experiment" empty-hint="Runs appear here once `vieval run` writes a report below the viewer's report roots." skeleton="rows" @retry="catalog.resource.reload">
     <ViewTabs v-model="tab" :items="tabs" label="Experiment views" :href="value => href(tabRoute(value))">
       <template v-if="tab === 'attempts'">
-        <div :class="['flex items-center gap-2 mb-2 text-xs muted']">
+        <div :class="['flex items-center flex-wrap gap-2 mb-2 text-xs muted']">
           Newest first. Select two or more runs to compare them case by case.
           <button type="button" :class="['btn ml-auto text-xs']" :disabled="selected.length < 2" @click="navigate({ name: 'compare', query: { runs: selected.join(','), view: 'runs' } })">
             <span :class="levelIcons.comparison" aria-hidden="true" />Compare {{ selected.length }} runs
           </button>
         </div>
         <section :class="['card']">
-          <div :class="['grid items-center gap-x-4 px-3 py-1.5 border-b border-neutral-200/50 dark:border-neutral-800/50', 'text-xs font-medium muted']" :style="{ gridTemplateColumns: rowColumns }" aria-hidden="true">
+          <div :class="[...rowGrid, 'max-md:hidden px-3 py-1.5 border-b border-neutral-200/50 dark:border-neutral-800/50', 'text-xs font-medium muted']" aria-hidden="true">
             <span /><span>Attempt</span><span>Run</span><span>Duration</span><span>Cases</span><span class="text-right">
               Exact
             </span><span />
@@ -119,8 +127,7 @@ watch([() => props.attempt, () => attempts.value.length], async ([attempt]) => {
               <div
                 v-for="(run, index) in entry.runs"
                 :key="run.runKey"
-                :class="['relative grid items-center gap-x-4 px-3 text-sm transition-colors hover:bg-primary-500/5', index === 0 ? 'py-2' : 'pb-2 pt-0']"
-                :style="{ gridTemplateColumns: rowColumns }"
+                :class="[...rowGrid, 'relative px-3 text-sm transition-colors hover:bg-primary-500/5', index === 0 ? 'py-2.5 md:py-2' : 'pb-2.5 md:pb-2 pt-0']"
               >
                 <input type="checkbox" :checked="selected.includes(run.runKey)" :aria-label="`Select ${run.runKey} for comparison`" :class="['relative z-1 accent-[var(--series-1)]']" @change="toggle(run.runKey)">
                 <!-- The attempt (its time) once per attempt; further runs of the same attempt are sub-rows. -->
@@ -130,15 +137,16 @@ watch([() => props.attempt, () => attempts.value.length], async ([attempt]) => {
                   <TimeAgo v-if="entry.date" :time="entry.date" relative-only :class="['text-xs muted truncate']" />
                 </span>
                 <span v-else :class="['text-xs muted pl-6']">another run of this attempt</span>
-                <span :class="['flex items-center gap-2 min-w-0']">
+                <span :class="['flex items-center gap-2 min-w-0 max-md:(row-start-2 col-start-2)']">
                   <StateBadge :state="run.state" />
                   <a v-if="index > 0" :href="href({ name: 'run', runKey: run.runKey })" :class="['link mono text-xs stretched-link']" :title="run.runKey">{{ shortRunHash(run.runKey) }}</a>
                   <span v-else :class="['mono text-xs muted']" :title="run.runKey">{{ shortRunHash(run.runKey) }}</span>
                 </span>
-                <span :class="['text-xs muted tabular-nums whitespace-nowrap']">{{ formatDuration(duration(run)) }}</span>
-                <CountsBar :counts="run.counts" />
-                <span :class="['text-right tabular-nums font-semibold']">{{ formatScore(run.exactAverage) }}</span>
-                <IdMenu :id="run.runKey" kind="run" />
+                <span :class="['text-xs muted tabular-nums whitespace-nowrap max-md:(row-start-2 col-start-3 col-span-2 text-right)']">{{ formatDuration(duration(run)) }}</span>
+                <CountsBar :class="['max-md:(row-start-3 col-start-2 col-span-3)']" :counts="run.counts" />
+                <span :class="['text-right tabular-nums font-semibold max-md:(row-start-1 col-start-3)']">{{ formatScore(run.exactAverage) }}</span>
+                <!-- IdMenu renders no element of its own; the wrapper carries the grid placement. -->
+                <span :class="['flex max-md:(row-start-1 col-start-4)']"><IdMenu :id="run.runKey" kind="run" /></span>
               </div>
             </li>
           </ol>
