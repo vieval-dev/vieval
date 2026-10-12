@@ -7,10 +7,10 @@ import { useQuery } from '@pinia/colada'
 import { computed, shallowRef } from 'vue'
 
 import BarChart from '../components/BarChart.vue'
-import CountsBar from '../components/CountsBar.vue'
 import ExperimentName from '../components/ExperimentName.vue'
 import IdLabel from '../components/IdLabel.vue'
 import PageHeader from '../components/PageHeader.vue'
+import ScoreCard from '../components/ScoreCard.vue'
 import StateBadge from '../components/StateBadge.vue'
 import StateView from '../components/StateView.vue'
 
@@ -175,21 +175,20 @@ const position = computed(() => ({ experiment: query.value.experiment, project: 
       >{{ item.id.split('/').at(-1) }} · {{ item.count }} rows</a>
     </div>
     <section :class="['grid gap-3 mb-4']" :style="{ gridTemplateColumns: `repeat(auto-fill, minmax(min(240px, 100%), 1fr))` }">
-      <div v-for="column in result?.columns" :key="column.id" :class="['card p-3 flex flex-col gap-1.5']">
-        <div :class="['text-xs font-medium min-w-0']">
-          <IdLabel :id="column.label" :label="columnLabel(column)" />
-        </div>
+      <ScoreCard
+        v-for="column in result?.columns"
+        :key="column.id"
+        :href="column.runs.at(-1) && view !== 'matrix' ? href({ name: 'run', runKey: column.runs.at(-1)!.runKey }) : undefined"
+        :score="column.runs.at(-1)?.exactAverage"
+        :state="column.runs.at(-1)?.state"
+        :counts="column.runs.at(-1)?.counts"
+        :title="columnLabel(column)"
+      >
         <template v-for="run in column.runs.slice(-1)" :key="run.runKey">
-          <IdLabel v-if="view !== 'matrix'" :id="run.runKey" :label="runLabel(run)" :href="href({ name: 'run', runKey: run.runKey })" :class="['text-xs']" />
-          <div :class="['flex items-center gap-2 text-sm']">
-            <StateBadge :state="run.state" /> exact <b class="tabular-nums">{{ formatScore(run.exactAverage) }}</b>
-          </div>
-          <CountsBar :counts="run.counts" labels="below" />
+          <span v-if="view !== 'matrix'" :title="run.runKey">{{ runLabel(run) }}</span>
         </template>
-        <div v-if="column.runs.length > 1" class="text-xs muted">
-          newest of {{ column.runs.length }} runs
-        </div>
-      </div>
+        <span v-if="column.runs.length > 1">newest of {{ column.runs.length }} runs</span>
+      </ScoreCard>
     </section>
 
     <section :class="['card mb-4']">

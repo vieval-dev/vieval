@@ -66,7 +66,7 @@ every number on screen comes from a run's events, report files, or evidence dire
 
 | Screen | Address (`#/…`) | What it shows |
 |---|---|---|
-| Projects (home) | `#/` or `#/?workspace=` | One card per project: experiments and runs, the newest run's state, time and cases, the best exact score, the matrix axes. With one workspace its projects are shown directly (the workspace stays in the breadcrumb). |
+| Projects (home) | `#/` or `#/?workspace=` | One card per project: the best exact score, the newest run's state, experiments and runs, the matrix axes, and the case bar; while the newest run is running, when it is expected to end, how long ago it started, and a thin progress bar. With one workspace its projects are shown directly (the workspace stays in the breadcrumb). |
 | Project | `#/?workspace=&project=&tab=` | **Experiments**: one row per experiment with its readable name, newest run (state, time), score trend, cases, exact score, attempts. **Matrix**: per eval entry, rows along the run axis with the most values (for example `model`), columns for the other axes (for example `repeat`); each cell is the newest run of that combination with its score, cases, and trend, linking to the task. |
 | Experiment | `#/?workspace=&project=&experiment=&tab=` | **Attempts**: one row per attempt, newest first (time, run state and short hash, duration, cases, exact score; extra runs of an attempt as sub-rows), checkboxes to compare chosen runs. **Matrix** of the experiment's runs. `&attempt=` highlights one attempt. |
 | Run | `#/runs/<runKey>` | Progress bar and progress chart (solid: completed cases over time; dashed: projection at the current ETA to the estimated total, fainter when it is a lower bound; "now" marker; recent rate in cases/h), cases done / estimated, running cases, tasks done, elapsed time, ETA and expected finish, current position (running cases with round, retry, elapsed). Tabs: **Execution** (virtualized live tree `project → task → round → case → try`, state filters, search, *Current* jumps to the first running case), **Scores & metrics** (scores, matrix rows table and chart, scores per round, numeric metrics as line charts, other metrics collapsed to one line each, expandable to every value per case), **Console logs** (all `console.*` lines of the run, linked to their case), **OpenTelemetry** (trace waterfall, log records, gauges, raw `otlp/*.json`). |
@@ -85,9 +85,14 @@ On screens narrower than 768 px (phones), the sidebar becomes a drawer behind th
 breadcrumb is one line that scrolls sideways, and list rows stack their columns (for example the run, duration, and
 cases of an attempt below its time). A run page shows progress, ETA, and expected finish right under the progress bar.
 While a view loads, a skeleton in its shape stands in for it; responses are cached (Pinia Colada), so a view opened
-again shows at once and refreshes in place. To follow a run from a phone, bind the viewer to an
-address the phone can reach, for example a Tailscale address or `--host 0.0.0.0` on a trusted network (binding all
-interfaces turns off the `Host` check).
+again shows at once and refreshes in place.
+
+Cards (project, matrix cell, compared column) share one layout: the exact score top left, the state top right, the
+name below the score, the expected finish of a running run, and the case bar at the bottom. The case bar is the one
+indicator of case outcomes everywhere; cards show its counts above the bar on hover, rows and headers in a tooltip.
+
+To follow a run from a phone, bind the viewer to an address the phone can reach, for example a Tailscale address or
+`--host 0.0.0.0` on a trusted network (binding all interfaces turns off the `Host` check).
 
 **Live updates.** A run in state `running` or `stale` opens the SSE stream after the snapshot's `seq`. `progress`
 events update progress, ETA, and the current position at once; other events trigger a snapshot refetch at most every

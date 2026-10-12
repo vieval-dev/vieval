@@ -1,5 +1,3 @@
-import { formatTime } from './format'
-
 /**
  * Readable names of report levels. Report ids are path segments made for machines
  * (`matrix-run-model-gpt-5.5-repeat-1`, `attempt-2026-10-12T07-11-52-616Z`, `run-1791789112616-e67c9b33`); the UI
@@ -113,17 +111,19 @@ export function formatAxisValues(values: readonly string[]): string {
 
 /**
  * Formats an expected finish: the time of day while it is less than a day away, the date and time otherwise, so a
- * finish weeks ahead never reads as "later today".
+ * finish weeks ahead never reads as "later today". Minutes at most: seconds of an estimate are false precision.
  *
  * Before:
  * - "2026-10-12T13:00:00Z" (3 h from now), "2026-11-25T03:45:00Z" (44 days from now)
  *
  * After:
- * - "13:00:00", "Nov 25, 03:45"
+ * - "13:00", "Nov 25, 03:45"
  */
 export function formatFinish(iso: string, now = Date.now()): string {
   const finish = new Date(iso)
-  return finish.getTime() - now < 86_400_000 ? formatTime(iso) : formatShortDateTime(finish)
+  return finish.getTime() - now < 86_400_000
+    ? finish.toLocaleTimeString('en-US', { hour: '2-digit', hour12: false, minute: '2-digit' })
+    : formatShortDateTime(finish)
 }
 
 /** `Oct 12, 07:11` in the viewer's (English) UI language and the browser's time zone. */

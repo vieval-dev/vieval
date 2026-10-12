@@ -89,7 +89,11 @@ const position = computed(() => ({
         <div :class="['min-w-64 max-md:(min-w-0 w-full)']">
           <div class="text-xs muted">
             Cases ({{ task.caseTotal ?? '?' }} expected)
-          </div><CountsBar :counts="task.caseCounts" labels="below" />
+          </div>
+          <!-- On the values' line (counts in the tooltip); gray is the expected cases that did not start yet. -->
+          <div :class="['flex items-center h-6']">
+            <CountsBar :class="['w-full']" :counts="{ ...task.caseCounts, total: task.caseTotal ?? task.caseCounts.total }" />
+          </div>
         </div>
         <div>
           <div class="text-xs muted">

@@ -108,7 +108,7 @@ function choose(id: unknown): void {
                     <span v-if="option.detail" class="truncate">{{ option.detail }}</span>
                     <TimeAgo v-if="option.time" :time="option.time" relative-only :class="['ml-auto shrink-0']" />
                   </span>
-                  <CountsBar v-if="option.counts" :counts="option.counts" :show-text="false" />
+                  <CountsBar v-if="option.counts" :counts="option.counts" labels="none" />
                 </ComboboxItem>
               </ComboboxViewport>
             </ComboboxContent>

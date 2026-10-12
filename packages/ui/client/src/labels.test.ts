@@ -115,6 +115,6 @@ describe('attempt and run labels', () => {
     const now = Date.parse('2026-10-12T10:00:00Z')
 
     expect(formatFinish('2026-11-25T03:45:00Z', now)).toMatch(/^Nov 2[45], \d{2}:\d{2}$/)
-    expect(formatFinish('2026-10-12T13:00:00Z', now)).toMatch(/^\d{2}:\d{2}:\d{2}$/)
+    expect(formatFinish('2026-10-12T13:00:00Z', now)).toMatch(/^\d{2}:\d{2}$/)
   })
 })

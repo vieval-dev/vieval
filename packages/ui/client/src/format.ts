@@ -24,6 +24,19 @@ export function formatBytes(bytes: number): string {
 const compactCount = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1, notation: 'compact' })
 
 /**
+ * Formats a count with its noun in the right number, for short summaries.
+ *
+ * Before:
+ * - (1, 'run'), (12, 'run'), (3, 'experiment')
+ *
+ * After:
+ * - "1 run", "12 runs", "3 experiments"
+ */
+export function countOf(count: number, noun: string): string {
+  return `${formatCount(count)} ${noun}${count === 1 ? '' : 's'}`
+}
+
+/**
  * Formats a case count so it stays short next to a bar: exact below 10 000, compact from there.
  *
  * Before:

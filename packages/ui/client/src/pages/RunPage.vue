@@ -105,13 +105,13 @@ const caseHref = (line: LogLine) => href({ caseId: line.caseId!, name: 'case', r
       <RunDetails :run-id="props.route.runKey" :report-path="props.run?.reportPath" :report-root="props.run?.reportRoot" />
     </template>
     <template #actions>
-      <!-- The run's score at a glance, like a matrix cell: exact score and case counts (hover for each count). -->
-      <span v-if="score" :class="['flex flex-col gap-1 w-40 mr-2', 'max-md:(w-full mr-0)']" data-testid="run-score">
+      <!-- The run's score at a glance, on the title's line: exact score and the case bar (counts in its tooltip). -->
+      <span v-if="score" :class="['flex items-center gap-3 mr-1', 'max-md:(w-full mr-0)']" data-testid="run-score">
         <span :class="['flex items-baseline gap-1.5']">
-          <span :class="['text-2xl font-semibold tabular-nums leading-none']">{{ formatScore(score.exact) }}</span>
+          <span :class="['text-xl font-semibold tabular-nums leading-none']">{{ formatScore(score.exact) }}</span>
           <span :class="['text-xs muted']">exact</span>
         </span>
-        <CountsBar :counts="score.counts" labels="hover" />
+        <CountsBar :class="['w-32 max-md:flex-1']" :counts="score.counts" />
       </span>
       <a v-if="position.workspace && position.project && position.experiment" :class="['btn']" :href="href({ name: 'compare', query: { experiment: position.experiment, project: position.project, view: 'attempts', workspace: position.workspace } })">
         <span class="i-mingcute-git-compare-line" aria-hidden="true" />Compare attempts
