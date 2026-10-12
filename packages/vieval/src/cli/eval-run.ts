@@ -69,7 +69,7 @@ const evalRunHelpText = `
     --report-out Report output root directory (default: .vieval/reports next to the config file)
     --no-report  Do not write reports or case artifacts
     --json       Print machine-readable JSON output
-    --with-viewer        Serve the web viewer (package @vieval/viewer) for this run; keeps serving after
+    --with-viewer        Serve the web viewer (package @vieval/ui) for this run; keeps serving after
                          the run ends until Ctrl+C
     --viewer-port <port> Viewer port (default: ${DEFAULT_VIEWER_PORT})
     --viewer-host <host> Viewer host (default: ${DEFAULT_VIEWER_HOST})

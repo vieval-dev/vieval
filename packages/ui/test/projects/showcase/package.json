@@ -1,5 +1,5 @@
 {
-  "name": "@vieval/viewer-showcase-fixture",
+  "name": "@vieval/ui-showcase-fixture",
   "type": "module",
   "private": true,
   "description": "Real vieval eval project whose reports exercise every feature of the web viewer.",

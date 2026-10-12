@@ -263,9 +263,9 @@ importers:
       '@unocss/reset':
         specifier: 'catalog:'
         version: 66.7.4
-      '@vieval/viewer':
+      '@vieval/ui':
         specifier: workspace:*
-        version: link:packages/viewer
+        version: link:packages/ui
       '@vitest/coverage-v8':
         specifier: catalog:vitest
         version: 4.1.11(@vitest/browser@4.1.11)(vitest@4.1.11)
@@ -473,7 +473,7 @@ importers:
         specifier: 'catalog:'
         version: 6.0.3
 
-  packages/viewer:
+  packages/ui:
     dependencies:
       '@moeru/std':
         specifier: 'catalog:'
@@ -561,7 +561,7 @@ importers:
         specifier: 'catalog:'
         version: 2.9.1
 
-  packages/viewer/test/projects/showcase:
+  packages/ui/test/projects/showcase:
     devDependencies:
       vieval:
         specifier: workspace:^

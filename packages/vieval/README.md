@@ -380,7 +380,7 @@ Concurrency flags are available on `vieval run`:
 
 ### Web viewer
 
-`vieval run --with-viewer` serves the web viewer for the run. The viewer is the optional package `@vieval/viewer`; install it next to your config (`pnpm add -D @vieval/viewer`).
+`vieval run --with-viewer` serves the web viewer for the run. The viewer is the optional package `@vieval/ui`; install it next to your config (`pnpm add -D @vieval/ui`).
 
 - `--viewer-port <port>`: port to listen on (default `51204`, the same as `vitest --ui`).
 - `--viewer-host <host>`: interface to listen on (default `127.0.0.1`).
@@ -392,7 +392,7 @@ Without `--with-viewer`, vieval does not load any viewer code, and the run outpu
 
 With `--no-report`, case artifacts are in a temporary directory that is removed when the run ends, so the viewer cannot show them after the run.
 
-`vieval viewer [reportRoot...]` serves the same viewer for report directories, without running evals (like `vitest --ui` for results). The default report root is `.vieval/reports` in the current directory, or next to `--config`. A run that another process is still writing (only `events.jsonl` exists) is tailed and updated live. Options: `--port` (default `51204`), `--host` (default `127.0.0.1`), `--open`, `--evidence-root <dir>` (repeatable: extra directories that `*.evidence` metric paths may point into), `--stale-after <min>` (default `60`). See `packages/viewer/README.md` and `packages/viewer/API.md`.
+`vieval viewer [reportRoot...]` serves the same viewer for report directories, without running evals (like `vitest --ui` for results). The default report root is `.vieval/reports` in the current directory, or next to `--config`. A run that another process is still writing (only `events.jsonl` exists) is tailed and updated live. Options: `--port` (default `51204`), `--host` (default `127.0.0.1`), `--open`, `--evidence-root <dir>` (repeatable: extra directories that `*.evidence` metric paths may point into), `--stale-after <min>` (default `60`). See `packages/ui/README.md` and `packages/ui/API.md`.
 
 ### Attach a host to a run (`onRunReady`)
 

@@ -34,7 +34,7 @@
     "@types/node": "catalog:",
     "@unocss/eslint-plugin": "catalog:",
     "@unocss/reset": "catalog:",
-    "@vieval/viewer": "workspace:*",
+    "@vieval/ui": "workspace:*",
     "@vitest/coverage-v8": "catalog:vitest",
     "bumpp": "catalog:",
     "eslint": "catalog:",

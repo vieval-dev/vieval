@@ -1,4 +1,4 @@
-# @vieval/viewer
+# @vieval/ui
 
 Web viewer for [vieval](../vieval) runs: an H3 (v2) app served with srvx, and a Vue 3 + Vite + UnoCSS web UI that
 the same server hosts at `/`. It shows runs while they execute and after they finished, from three sources:
@@ -12,8 +12,10 @@ The API contract is in [API.md](./API.md) and `src/shared/contract.ts`.
 ## Install
 
 ```sh
-pnpm add -D @vieval/viewer
+pnpm add -D @vieval/ui
 ```
+
+Up to 0.2.0 this package was published as `@vieval/viewer`. Replace that dependency with `@vieval/ui` when you upgrade.
 
 `vieval` loads this package only when you ask for the viewer. Runs without `--with-viewer` do not import it.
 
@@ -47,7 +49,7 @@ vieval viewer reports-a reports-b --evidence-root /data/episodes --stale-after 3
 ## Programmatic use
 
 ```ts
-import { startViewer } from '@vieval/viewer'
+import { startViewer } from '@vieval/ui'
 
 const viewer = await startViewer({ host: '127.0.0.1', mode: 'static', open: false, port: 0, reportRoots: ['.vieval/reports'] })
 console.info(viewer.url)
@@ -149,7 +151,7 @@ See [API.md § Security](./API.md#security) for the status codes.
 
 | Symptom | Cause and fix |
 |---|---|
-| `/` says "The web UI is not bundled in this build." | `dist/client/` is missing. Run `pnpm -F @vieval/viewer build`. |
+| `/` says "The web UI is not bundled in this build." | `dist/client/` is missing. Run `pnpm -F @vieval/ui build`. |
 | `EADDRINUSE` on start | Port `51204` is in use (often a second viewer). Use `--port 0` or another port. |
 | `403` `Host "…" is not allowed` | You opened the viewer through a hostname other than the bound host. Use `127.0.0.1`, or bind that host with `--host`. |
 | A run shows `stale` | No end event and no event for `--stale-after` minutes. The writer was killed, or it is waiting longer than that. Raise `--stale-after` for slow evals. |
@@ -181,10 +183,10 @@ See [API.md § Security](./API.md#security) for the status codes.
 ## Develop
 
 ```sh
-pnpm -F @vieval/viewer build        # tsdown (server) + vite build (web UI into dist/client/)
-pnpm -F @vieval/viewer typecheck    # tsc (server) + vue-tsc (web UI)
-pnpm -F @vieval/viewer test:run     # server tests (Node) + component tests (Vitest browser mode, Chromium)
-pnpm -F @vieval/viewer dev:client   # Vite dev server for the UI; proxies /api to VIEVAL_VIEWER_API (default http://127.0.0.1:51204)
+pnpm -F @vieval/ui build        # tsdown (server) + vite build (web UI into dist/client/)
+pnpm -F @vieval/ui typecheck    # tsc (server) + vue-tsc (web UI)
+pnpm -F @vieval/ui test:run     # server tests (Node) + component tests (Vitest browser mode, Chromium)
+pnpm -F @vieval/ui dev:client   # Vite dev server for the UI; proxies /api to VIEVAL_VIEWER_API (default http://127.0.0.1:51204)
 ```
 
 Component tests need the Playwright Chromium (`pnpm exec playwright install chromium` once).

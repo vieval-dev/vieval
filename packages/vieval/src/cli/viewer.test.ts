@@ -108,10 +108,10 @@ describe('vieval viewer', () => {
     const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
     await runViewerCli([], {
       importViewer: async () => {
-        throw new Error('--with-viewer requires the "@vieval/viewer" package.')
+        throw new Error('--with-viewer requires the "@vieval/ui" package.')
       },
     })
     expect(process.exitCode).toBe(1)
-    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('@vieval/viewer'))
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('@vieval/ui'))
   })
 })
