@@ -3,7 +3,8 @@ import type { RunSnapshot } from '../../../src/shared/contract'
 import type { BarDatum } from './BarChart.vue'
 import type { LinePoint } from './LineChart.vue'
 
-import { computed, reactive } from 'vue'
+import { useQuery } from '@pinia/colada'
+import { computed, reactive, watch } from 'vue'
 
 import BarChart from './BarChart.vue'
 import CountsBar from './CountsBar.vue'
@@ -11,7 +12,6 @@ import LineChart from './LineChart.vue'
 import StateView from './StateView.vue'
 
 import { api } from '../api'
-import { useResource } from '../composables/useResource'
 import { formatScore, previewValue } from '../format'
 import { levelIcons } from '../hierarchy'
 import { href } from '../router'
@@ -28,8 +28,13 @@ const props = defineProps<{
 const runKey = computed(() => props.snapshot.runKey)
 
 // Refetch whenever the run advanced (throttled seq), so live runs keep their charts current.
-const scores = useResource(() => [runKey.value, props.refreshKey] as const, ([key]) => api.scores(key), { keepData: true })
-const metrics = useResource(() => [runKey.value, props.refreshKey] as const, ([key]) => api.metrics(key), { keepData: true })
+const scores = useQuery({ key: () => ['runs', runKey.value, 'scores'], query: () => api.scores(runKey.value) })
+const metrics = useQuery({ key: () => ['runs', runKey.value, 'metrics'], query: () => api.metrics(runKey.value) })
+// The run advanced: re-read the same entries, so the charts keep showing the previous data meanwhile.
+watch(() => props.refreshKey, () => {
+  void scores.refetch()
+  void metrics.refetch()
+})
 
 const matrixKeys = computed(() => [...new Set(props.snapshot.tasks.flatMap(task => Object.keys({ ...task.matrix?.run, ...task.matrix?.eval })))])
 const byTask = computed<BarDatum[]>(() => (scores.data.value?.byTask ?? []).map(task => ({ href: href({ name: 'task', runKey: runKey.value, taskId: task.taskId }), label: task.displayName, values: [task.exact, task.judge] })))
@@ -56,7 +61,7 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
 
 <template>
   <div :class="['flex flex-col gap-4']">
-    <StateView :error="scores.error.value" :loading="scores.loading.value" skeleton="panel" @retry="scores.reload">
+    <StateView :error="scores.error.value" :loading="scores.isPending.value" skeleton="panel" @retry="scores.refetch()">
       <section :class="['card']">
         <h2 class="card-title">
           <span class="i-mingcute-target-line" aria-hidden="true" />Scores
@@ -149,7 +154,7 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
       </section>
     </StateView>
 
-    <StateView :error="metrics.error.value" :loading="metrics.loading.value" :empty="metrics.data.value?.numeric.length === 0 && metrics.data.value?.nonNumeric.length === 0" empty-text="No metrics recorded" empty-hint="Cases record metrics with context.recordMetric(name, value)." skeleton="panel" @retry="metrics.reload">
+    <StateView :error="metrics.error.value" :loading="metrics.isPending.value" :empty="metrics.data.value?.numeric.length === 0 && metrics.data.value?.nonNumeric.length === 0" empty-text="No metrics recorded" empty-hint="Cases record metrics with context.recordMetric(name, value)." skeleton="panel" @retry="metrics.refetch()">
       <section v-if="numeric.length > 0" :class="['card']" data-testid="metric-charts">
         <h2 class="card-title">
           <span class="i-mingcute-chart-line-line" aria-hidden="true" />Numeric metrics <span class="text-xs muted font-normal">in recording order</span>

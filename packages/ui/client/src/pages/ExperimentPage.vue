@@ -88,7 +88,7 @@ watch([() => props.attempt, () => attempts.value.length], async ([attempt]) => {
 </script>
 
 <template>
-  <PageHeader :id="props.experiment" :loading="catalog.resource.loading.value" level="experiment" :position="{ attempt: props.attempt, experiment: props.experiment, project: props.project, workspace: props.workspace }" :title="title">
+  <PageHeader :id="props.experiment" :loading="catalog.query.isPending.value" level="experiment" :position="{ attempt: props.attempt, experiment: props.experiment, project: props.project, workspace: props.workspace }" :title="title">
     <template #title>
       <ExperimentName :experiment-id="props.experiment" :matrix="matrix" />
     </template>
@@ -101,7 +101,7 @@ watch([() => props.attempt, () => attempts.value.length], async ([attempt]) => {
     </template>
   </PageHeader>
 
-  <StateView :error="catalog.resource.error.value" :loading="catalog.resource.loading.value" :empty="runs.length === 0" empty-text="No runs in this experiment" empty-hint="Runs appear here once `vieval run` writes a report below the viewer's report roots." skeleton="rows" @retry="catalog.resource.reload">
+  <StateView :error="catalog.query.error.value" :loading="catalog.query.isPending.value" :empty="runs.length === 0" empty-text="No runs in this experiment" empty-hint="Runs appear here once `vieval run` writes a report below the viewer's report roots." skeleton="rows" @retry="catalog.query.refetch()">
     <ViewTabs v-model="tab" :items="tabs" label="Experiment views" :href="value => href(tabRoute(value))">
       <template v-if="tab === 'attempts'">
         <div :class="['flex items-center flex-wrap gap-2 mb-2 text-xs muted']">

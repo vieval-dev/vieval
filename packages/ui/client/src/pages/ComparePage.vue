@@ -3,6 +3,7 @@ import type { ComparisonResponse, RunSnapshot } from '../../../src/shared/contra
 import type { BarDatum } from '../components/BarChart.vue'
 import type { Route } from '../router'
 
+import { useQuery } from '@pinia/colada'
 import { computed, shallowRef } from 'vue'
 
 import BarChart from '../components/BarChart.vue'
@@ -15,7 +16,6 @@ import StateView from '../components/StateView.vue'
 
 import { api } from '../api'
 import { useCatalog } from '../composables/useCatalog'
-import { useResource } from '../composables/useResource'
 import { formatScore } from '../format'
 import { levelIcons } from '../hierarchy'
 import { attemptLabel, experimentLabel, runLabel } from '../labels'
@@ -46,10 +46,10 @@ function columnLabel(column: ComparisonResponse['columns'][number]): string {
   return `${experiment} · ${attemptLabel(run.attemptId)}`
 }
 
-const tree = useResource(() => view.value, value => value == null ? api.tree() : Promise.resolve(undefined))
-const runs = useResource(() => view.value, value => value == null ? api.runs() : Promise.resolve(undefined))
+// The list of comparisons (no `view`) needs the hierarchy; the runs come from the shared catalog.
+const tree = useQuery({ enabled: () => view.value == null, key: ['tree'], query: () => api.tree() })
 /** Runs with more than one task: their matrix rows can be compared. */
-const matrixRuns = computed(() => (runs.data.value ?? []).filter(run => run.counts.total > 0).slice(0, 50))
+const matrixRuns = computed(() => catalog.runs.value.filter(run => run.counts.total > 0).slice(0, 50))
 
 /**
  * Matrix rows of one eval entry of a run as a {@link ComparisonResponse}: one column per task (matrix row such as
@@ -79,7 +79,12 @@ function compareMatrixRows(snapshot: RunSnapshot, entryId: string | undefined): 
   return { columns, rows: list, summary: { changed: list.filter(row => row.changed).length, rows: list.length }, view: 'runs' }
 }
 
-const matrixSnapshot = useResource(() => (view.value === 'matrix' ? query.value.run : undefined), runKey => (runKey == null ? Promise.resolve(undefined) : api.snapshot(runKey)))
+// Same entry as the run page's snapshot (`useRunLive`): a run opened there compares at once.
+const matrixSnapshot = useQuery({
+  enabled: () => view.value === 'matrix' && query.value.run != null,
+  key: () => ['runs', query.value.run ?? '', 'snapshot'],
+  query: () => api.snapshot(query.value.run!),
+})
 /** Eval entries of the run with their task and case counts; the entry with the most matrix rows (then cases) is the default. */
 const entries = computed(() => {
   const counts = new Map<string, { cases: number, count: number }>()
@@ -92,18 +97,19 @@ const entries = computed(() => {
 })
 const entry = computed(() => query.value.entry ?? entries.value.toSorted((a, b) => b.count - a.count || b.cases - a.cases)[0]?.id)
 
-const comparison = useResource(() => ({ ...query.value }), async (value) => {
-  if (value.view == null || value.view === 'matrix')
-    return undefined
-  return api.compare(value.view as 'attempts' | 'experiments' | 'runs', value)
+const comparison = useQuery({
+  enabled: () => view.value != null && view.value !== 'matrix',
+  // Only the set parameters: a query key holds JSON values, and an unset one must not change the key.
+  key: () => ['compare', Object.fromEntries(Object.entries(query.value).filter(([, value]) => value != null)) as Record<string, string>],
+  query: () => api.compare(view.value as 'attempts' | 'experiments' | 'runs', query.value),
 })
 const result = computed(() => (view.value === 'matrix'
   ? (matrixSnapshot.data.value == null ? undefined : compareMatrixRows(matrixSnapshot.data.value, entry.value))
   : comparison.data.value))
 const resultError = computed(() => (view.value === 'matrix' ? matrixSnapshot.error.value : comparison.error.value))
-const resultLoading = computed(() => (view.value === 'matrix' ? matrixSnapshot.loading.value : comparison.loading.value))
+const resultLoading = computed(() => (view.value === 'matrix' ? matrixSnapshot.isPending.value : comparison.isPending.value))
 function reloadResult(): void {
-  void (view.value === 'matrix' ? matrixSnapshot.reload() : comparison.reload())
+  void (view.value === 'matrix' ? matrixSnapshot.refetch() : comparison.refetch())
 }
 
 const onlyChanged = shallowRef(false)
@@ -124,7 +130,7 @@ const position = computed(() => ({ experiment: query.value.experiment, project: 
   <PageHeader level="comparison" :position="position" :title="title" :subtitle="view == null ? 'Pick what to compare' : `${result?.columns.length ?? 0} columns · ${result?.summary.rows ?? 0} cases · ${result?.summary.changed ?? 0} differ`" />
 
   <template v-if="view == null">
-    <StateView :error="tree.error.value ?? runs.error.value" :loading="tree.loading.value" :empty="tree.data.value?.workspaces.length === 0" empty-text="No runs to compare" skeleton="rows" @retry="tree.reload">
+    <StateView :error="tree.error.value ?? catalog.query.error.value" :loading="tree.isPending.value" :empty="tree.data.value?.workspaces.length === 0" empty-text="No runs to compare" skeleton="rows" @retry="tree.refetch()">
       <section v-for="workspace in tree.data.value?.workspaces" :key="workspace.id" :class="['card mb-4']">
         <h2 class="card-title">
           <span :class="levelIcons.workspace" aria-hidden="true" />{{ workspace.id }}

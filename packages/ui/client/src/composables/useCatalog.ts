@@ -1,20 +1,21 @@
+import type { UseQueryReturn } from '@pinia/colada'
+
 import type { CaseCounts, RunListItem } from '../../../src/shared/contract'
 import type { MatrixAxes } from '../labels'
-import type { Resource } from './useResource'
 
+import { defineQuery, useQuery } from '@pinia/colada'
 import { useDocumentVisibility, useIntervalFn } from '@vueuse/core'
-import { computed, effectScope, watch } from 'vue'
+import { computed, watch } from 'vue'
 
 import { api } from '../api'
 import { mergeMatrices } from '../labels'
-import { runStatesChanged } from '../runInfo'
-import { useResource } from './useResource'
 
 /** Every run below the viewer's report roots, with the hierarchy and labels derived from it. */
 export interface Catalog {
   /** Matrix axes of all runs of an experiment (or a project when `experiment` is omitted). */
   matrixOf: (scope: Scope) => MatrixAxes
-  resource: Resource<RunListItem[]>
+  /** The `GET /api/runs` query (key {@link RUNS_KEY}); views pass its state to `StateView`. */
+  query: UseQueryReturn<RunListItem[]>
   /** Runs, newest first. */
   runs: Readonly<{ value: RunListItem[] }>
   /** Runs inside a scope, newest first. */
@@ -61,7 +62,11 @@ export interface WorkspaceEntry {
 /** Interval of the refresh that makes new runs appear without reloading the page. */
 const REFRESH_MS = 10_000
 
-let shared: Catalog | undefined
+/**
+ * Query key of the run list. Invalidate it (exactly: per-run keys start with the same segment) to re-read the
+ * hierarchy at once, for example when a run shown on screen ended.
+ */
+export const RUNS_KEY = ['runs'] as const
 
 /**
  * Adds case counts of several runs.
@@ -90,29 +95,23 @@ export function sumCounts(runs: readonly RunListItem[]): CaseCounts {
  * - a view needs the hierarchy, labels, or runs of a scope (sidebar, home, project and experiment pages, breadcrumbs)
  *
  * Returns:
- * - one catalog for the whole app: the first call starts the request and the refresh, later calls reuse them
+ * - one catalog for the whole app (a Pinia Colada `defineQuery`): the first call starts the request and the refresh,
+ *   later calls reuse them
  */
-export function useCatalog(): Catalog {
-  // A detached scope: the catalog outlives the component that happened to ask first.
-  shared ??= effectScope(true).run(createCatalog)!
-  return shared
-}
-
-function createCatalog(): Catalog {
-  const resource = useResource(() => 0, () => api.runs(), { keepData: true })
-  const polling = useIntervalFn(() => void resource.reload(), REFRESH_MS)
+export const useCatalog = defineQuery((): Catalog => {
+  const query = useQuery({ key: RUNS_KEY, query: () => api.runs() })
+  const polling = useIntervalFn(() => void query.refetch(), REFRESH_MS)
   // A hidden tab does not poll; it re-reads the runs once it is shown again.
   watch(useDocumentVisibility(), (visibility) => {
     if (visibility === 'hidden') {
       polling.pause()
       return
     }
-    void resource.reload()
+    void query.refetch()
     polling.resume()
   })
-  watch(runStatesChanged, () => void resource.reload())
 
-  const runs = computed(() => (resource.data.value ?? []).toSorted((a, b) => (b.startedAt ?? '').localeCompare(a.startedAt ?? '')))
+  const runs = computed(() => (query.data.value ?? []).toSorted((a, b) => (b.startedAt ?? '').localeCompare(a.startedAt ?? '')))
 
   const workspaces = computed<WorkspaceEntry[]>(() => {
     const byWorkspace = new Map<string, Map<string, Map<string, RunListItem[]>>>()
@@ -155,9 +154,9 @@ function createCatalog(): Catalog {
 
   return {
     matrixOf: scope => mergeMatrices(runsIn(scope).map(run => run.matrix)),
-    resource,
+    query,
     runs,
     runsIn,
     workspaces,
   }
-}
+})

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { RunListItem } from '../../src/shared/contract'
 
-import { computedAsync, useDark, useToggle } from '@vueuse/core'
+import { useQuery } from '@pinia/colada'
+import { useDark, useToggle } from '@vueuse/core'
 import { DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle, TooltipProvider } from 'reka-ui'
 import { computed, shallowRef, useTemplateRef, watch } from 'vue'
 
@@ -17,18 +18,21 @@ import ProjectPage from './pages/ProjectPage.vue'
 import RunPage from './pages/RunPage.vue'
 import TaskPage from './pages/TaskPage.vue'
 
+import { api } from './api'
 import { currentRoute, href } from './router'
-import { runInfo } from './runInfo'
 
 const route = currentRoute
 const routeRunKey = computed(() => ('runKey' in route.value ? route.value.runKey : undefined))
-// `computedAsync` drops the response of a run key that is no longer current. While the next response loads it
-// keeps the previous run, so only a run that matches the route is passed on (never another run's report paths).
-const loadedRun = computedAsync<RunListItem | undefined>(async () => {
-  const runKey = routeRunKey.value
-  return runKey == null ? undefined : await runInfo(runKey).catch(() => undefined)
-}, undefined)
-const activeRun = computed(() => (loadedRun.value?.runKey === routeRunKey.value ? loadedRun.value : undefined))
+// Report identity of the run of the route (workspace, project segment, experiment, attempt). It never changes, so one
+// request per run is enough for breadcrumbs and the sidebar.
+const runInfo = useQuery({
+  enabled: () => routeRunKey.value != null,
+  key: () => ['runs', routeRunKey.value ?? ''],
+  query: () => api.run(routeRunKey.value!),
+  staleTime: Number.POSITIVE_INFINITY,
+})
+// Only a run that matches the route is passed on (never another run's report paths while the next one loads).
+const activeRun = computed<RunListItem | undefined>(() => (runInfo.data.value?.runKey === routeRunKey.value ? runInfo.data.value : undefined))
 const sidebarRun = computed(() => activeRun.value && {
   attempt: activeRun.value.attemptId,
   experiment: activeRun.value.experimentId,

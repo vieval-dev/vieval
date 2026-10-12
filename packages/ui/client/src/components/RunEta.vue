@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { useQuery } from '@pinia/colada'
+import { computed, watch } from 'vue'
 
 import { api } from '../api'
-import { useResource } from '../composables/useResource'
 import { formatDuration } from '../format'
 import { formatFinish } from '../labels'
 
@@ -18,7 +18,8 @@ const props = defineProps<{
   seq: number
 }>()
 
-const progress = useResource(() => [props.runKey, props.seq] as const, ([runKey]) => api.progress(runKey), { keepData: true })
+const progress = useQuery({ key: () => ['runs', props.runKey, 'progress'], query: () => api.progress(props.runKey) })
+watch(() => props.seq, () => void progress.refetch())
 const view = computed(() => {
   const value = progress.data.value?.progress
   if (value == null)

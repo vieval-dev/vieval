@@ -4,6 +4,7 @@ import type { CaseRef } from '../api'
 import type { Frame } from './ImageSequence.vue'
 import type { ViewTab } from './ViewTabs.vue'
 
+import { useQuery } from '@pinia/colada'
 import { computed, shallowRef, watch } from 'vue'
 
 import ArtifactViewer from './ArtifactViewer.vue'
@@ -15,7 +16,6 @@ import StateView from './StateView.vue'
 import ViewTabs from './ViewTabs.vue'
 
 import { api, jsonlPage, readText } from '../api'
-import { useResource } from '../composables/useResource'
 import { formatBytes, formatDateTime, formatScore, formatTime, previewValue } from '../format'
 
 /**
@@ -36,8 +36,17 @@ type Tab = 'files' | 'logs' | 'records' | 'screenshots' | 'steps'
 const tab = shallowRef<Tab>('steps')
 watch(isOsworld, value => (tab.value = value ? 'steps' : 'files'), { immediate: true })
 
-const tree = useResource(() => (usable.value ? linkId.value : undefined), id => (id == null ? Promise.resolve(undefined) : api.evidenceTree(props.runKey, id)))
-const timeline = useResource(() => (usable.value && isOsworld.value ? linkId.value : undefined), id => (id == null ? Promise.resolve(undefined) : api.evidenceTimeline(props.runKey, id)))
+// Unreadable evidence shows a notice instead of these views, so nothing is requested for it.
+const tree = useQuery({
+  enabled: () => usable.value,
+  key: () => ['runs', props.runKey, 'evidence', linkId.value ?? '', 'tree'],
+  query: () => api.evidenceTree(props.runKey, linkId.value!),
+})
+const timeline = useQuery({
+  enabled: () => usable.value && isOsworld.value,
+  key: () => ['runs', props.runKey, 'evidence', linkId.value ?? '', 'timeline'],
+  query: () => api.evidenceTimeline(props.runKey, linkId.value!),
+})
 const frames = computed<Frame[]>(() => (timeline.data.value?.frames ?? []).map(frame => ({
   caption: `${frame.purpose ?? ''} · AUV run ${frame.runId}`,
   label: frame.path,
@@ -48,11 +57,13 @@ const frameIndex = shallowRef(0)
 
 /** One agent step of OSWorld's `result.json` (`agent.steps[]`); `arguments` and `output` are JSON strings. */
 interface AgentStep { arguments?: string, output?: string, runId?: string, tool?: string }
-const resultJson = useResource(() => (usable.value && isOsworld.value ? linkId.value : undefined), async (id) => {
-  if (id == null)
-    return undefined
-  const { text } = await readText({ linkId: id, path: 'result.json', runKey: props.runKey }, 8 * 1024 * 1024)
-  return JSON.parse(text) as Record<string, unknown> & { agent?: { steps?: AgentStep[] } }
+const resultJson = useQuery({
+  enabled: () => usable.value && isOsworld.value,
+  key: () => ['runs', props.runKey, 'evidence', linkId.value ?? '', 'result.json'],
+  query: async () => {
+    const { text } = await readText({ linkId: linkId.value, path: 'result.json', runKey: props.runKey }, 8 * 1024 * 1024)
+    return JSON.parse(text) as Record<string, unknown> & { agent?: { steps?: AgentStep[] } }
+  },
 })
 function parseJson(text: string | undefined): Record<string, unknown> | undefined {
   try {
@@ -94,7 +105,10 @@ const loadRecords = computed(() => {
 })
 
 const logLimit = 200
-const logs = useResource(() => [props.runKey, props.caseRef.taskId, props.caseRef.caseId] as const, ([runKey, taskId, caseId]) => api.externalLogs(runKey, { caseId, taskId }, 0, logLimit))
+const logs = useQuery({
+  key: () => ['runs', props.runKey, 'case', props.caseRef.taskId, props.caseRef.caseId, 'external-logs'],
+  query: () => api.externalLogs(props.runKey, props.caseRef, 0, logLimit),
+})
 const extraLogs = shallowRef<NonNullable<typeof logs.data.value>['lines']>([])
 async function moreLogs(): Promise<void> {
   const page = await api.externalLogs(props.runKey, props.caseRef, logLimit + extraLogs.value.length, logLimit)
@@ -143,7 +157,7 @@ function showFrame(index: number): void {
       </dl>
       <ViewTabs v-model="tab" :items="tabs" label="Evidence views" in-card>
         <div class="p-3">
-          <StateView v-if="tab === 'steps'" :error="resultJson.error.value" :loading="resultJson.loading.value" :empty="steps.length === 0" empty-text="result.json has no agent steps" skeleton="lines" :skeleton-count="8" @retry="resultJson.reload">
+          <StateView v-if="tab === 'steps'" :error="resultJson.error.value" :loading="resultJson.isPending.value" :empty="steps.length === 0" empty-text="result.json has no agent steps" skeleton="lines" :skeleton-count="8" @retry="resultJson.refetch()">
             <div :class="['overflow-auto max-h-[65vh]']">
               <table :class="['w-full']" data-testid="osworld-steps">
                 <thead :class="['sticky top-0 bg-white dark:bg-neutral-900 max-md:hidden']">
@@ -201,7 +215,7 @@ function showFrame(index: number): void {
             </div>
           </StateView>
 
-          <StateView v-else-if="tab === 'screenshots'" :error="timeline.error.value" :loading="timeline.loading.value" :empty="frames.length === 0" empty-text="No screenshots in auv-runs" skeleton="media" @retry="timeline.reload">
+          <StateView v-else-if="tab === 'screenshots'" :error="timeline.error.value" :loading="timeline.isPending.value" :empty="frames.length === 0" empty-text="No screenshots in auv-runs" skeleton="media" @retry="timeline.refetch()">
             <ImageSequence :frames="frames" :initial="frameIndex" />
           </StateView>
 
@@ -211,7 +225,7 @@ function showFrame(index: number): void {
             </StateView>
           </template>
 
-          <StateView v-else-if="tab === 'files'" :error="tree.error.value" :loading="tree.loading.value" :empty="files.length === 0" empty-text="The evidence directory is empty" skeleton="lines" @retry="tree.reload">
+          <StateView v-else-if="tab === 'files'" :error="tree.error.value" :loading="tree.isPending.value" :empty="files.length === 0" empty-text="The evidence directory is empty" skeleton="lines" @retry="tree.refetch()">
             <!-- Narrow screens stack the file list (shorter) above the preview. -->
             <div :class="['grid gap-3 grid-cols-1 md:grid-cols-[minmax(220px,300px)_minmax(0,1fr)]']">
               <div :class="['flex flex-col gap-1 min-w-0']">
@@ -238,7 +252,7 @@ function showFrame(index: number): void {
             </div>
           </StateView>
 
-          <StateView v-else :error="logs.error.value" :loading="logs.loading.value" skeleton="lines" :empty="logs.data.value?.total === 0" empty-text="No correlated log lines" :empty-hint="`Searched ${logs.data.value?.files.length ?? 0} log files for keys ${logs.data.value?.correlation.keys.join(', ')}`" @retry="logs.reload">
+          <StateView v-else :error="logs.error.value" :loading="logs.isPending.value" skeleton="lines" :empty="logs.data.value?.total === 0" empty-text="No correlated log lines" :empty-hint="`Searched ${logs.data.value?.files.length ?? 0} log files for keys ${logs.data.value?.correlation.keys.join(', ')}`" @retry="logs.refetch()">
             <div class="text-xs muted mb-2" data-testid="external-logs-correlation">
               {{ logs.data.value?.total }} lines matched in {{ logs.data.value?.files.filter(file => file.matched > 0).map(file => file.path.split('/').at(-1)).join(', ') }} · pods {{ logs.data.value?.correlation.podNames.join(', ') || '—' }} · window {{ formatTime(logs.data.value?.correlation.window.from) }}–{{ formatTime(logs.data.value?.correlation.window.to) }}
             </div>
