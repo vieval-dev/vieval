@@ -1,0 +1,40 @@
+{
+  "api": "responses",
+  "auvRuntimeSha256": "bc7da5392e85f35d102297cc11f076e239dd60a8ff530fcccb16fdfc3a7cb12b",
+  "domain": "chrome",
+  "model": "gpt-5.5",
+  "podName": "osworld-06fe7178-624029",
+  "repeat": 1,
+  "startedAt": "2026-10-11T19:14:06.064Z",
+  "taskId": "06fe7178-4491-4589-810f-2e2bc9502122",
+  "agent": {
+    "runIds": [
+      "ef8e83be-bb57-3c0c-d366-3c2add975efe"
+    ],
+    "steps": [
+      {
+        "arguments": "{\"command_id\":\"display.capture\"}",
+        "output": "{\"artifacts\":[{\"attributes\":{},\"byte_length\":668794,\"content_type\":\"image/webp\",\"file_extension\":\"webp\",\"purpose\":\"auv.driver.display_capture\",\"sha256\":\"19d7d47287c29f0889ee593c799402c6eeb3c5cf60fa2f6c029a0a0a5caa85c7\",\"uri\":\"auv://runs/8ce2b33d-31cd-47b3-a869-b9cb4eab1d5d/artifacts/01a12c64-1658-70c6-a4c8-3ee541e31b05\"}],\"result\":{\"capture\":{\"backend\":\"xcap.x11\",\"bounds\":{\"origin\":{\"x\":0,\"y\":0},\"size\":{\"height\":1080,\"width\":1920}},\"fallback_reason\":null,\"pixel_dimensions\":{\"height\":1080,\"width\":1920},\"scale_factor\":1},\"display\":{\"coordinate_space\":\"screen\",\"frame\":{\"origin\":{\"x\":0,\"y\":0},\"size\":{\"height\":1080,\"width\":1920}},\"id\":\"63\",\"is_builtin\":null,\"is_primary\":true,\"name\":\"Virtual-1\",\"scale_factor\":1}},\"run_id\":\"8ce2b33d-31cd-47b3-a869-b9cb4eab1d5d\",\"status\":\"completed\"}",
+        "runId": "8ce2b33d-31cd-47b3-a869-b9cb4eab1d5d",
+        "tool": "invoke"
+      },
+      {
+        "arguments": "{\"command_id\":\"input.pressKeys\",\"inputs\":{\"keys\":\"CTRL+SHIFT+T\"}}",
+        "output": "{\"command_id\":\"input.pressKeys\",\"failure\":\"expected value at line 1 column 1\",\"failure_details\":{\"code\":\"invalid_input\",\"message\":\"expected value at line 1 column 1\"},\"run_id\":\"7f8742c0-19c1-cae3-32ea-db1c53169b71\",\"status\":\"failed\"}",
+        "runId": "7f8742c0-19c1-cae3-32ea-db1c53169b71",
+        "tool": "invoke"
+      },
+      {
+        "arguments": "{\"command_id\":\"input.keys\",\"inputs\":{\"keys\":\"<Ctrl><Shift>t\"}}",
+        "output": "{\"command_id\":\"input.keys\",\"failure\":\"expected value at line 1 column 1\",\"failure_details\":{\"code\":\"invalid_input\",\"message\":\"expected value at line 1 column 1\"},\"run_id\":\"2decd904-75d7-ea71-11e7-e199b601a5d3\",\"status\":\"failed\"}",
+        "runId": "2decd904-75d7-ea71-11e7-e199b601a5d3",
+        "tool": "invoke"
+      }
+    ],
+    "lastAction": "DONE"
+  },
+  "auvLinuxSha256": "07d549bbb44e45df1cfd53060b0de060357fd24d59e174b341ab24a2ceb27c86",
+  "score": 0,
+  "status": "evaluated",
+  "finishedAt": "2026-10-11T19:16:29.912Z"
+}

@@ -1,0 +1,11 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "jsx": "preserve",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["vite/client", "@vitest/browser-playwright"],
+    "strict": true
+  },
+  "include": ["./**/*.ts", "./**/*.vue"]
+}

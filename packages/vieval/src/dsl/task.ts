@@ -1,5 +1,6 @@
 import type { TaskConcurrencyConfig, TaskExecutionPolicy, TaskRunContext, TaskRunOutput } from '../config'
 import type { RunScoreKind } from '../core/runner'
+import type { SchedulerQueue } from '../core/scheduler/queue'
 import type { TelemetryAttributeValue } from '../core/telemetry'
 import type { RunEventDefinition, RunEventEmitter } from '../events'
 import type { RecordArtifactOptions } from './case-artifacts'
@@ -179,6 +180,14 @@ export interface DescribeTaskOptions extends TaskExecutionPolicy {
   description?: string
 }
 
+/**
+ * Auto attempt fields stamped on case events while a task runs auto attempts.
+ */
+interface CaseAutoAttempt {
+  attemptIndex: number
+  autoAttempt: number
+}
+
 interface CaseExecutionOutcome {
   errorMessage?: string
   output?: unknown
@@ -321,8 +330,10 @@ function emitCaseOutcome(
   outcome: CaseExecutionOutcome,
   index: number,
   totalCases: number,
+  autoAttempt: CaseAutoAttempt | undefined,
 ): void {
   emitSafely(context.events?.scope({ caseId: createCaseId(index, taskCase.name) }), caseEnded, {
+    ...autoAttempt,
     ...(outcome.errorMessage == null ? {} : { errorMessage: outcome.errorMessage }),
     index,
     ...(outcome.output === undefined ? {} : { output: outcome.output }),
@@ -356,6 +367,7 @@ async function executeRegisteredCase(
   index: number,
   totalCases: number,
   taskExecutionPolicy: TaskExecutionPolicy | undefined,
+  autoAttempt: CaseAutoAttempt | undefined,
 ): Promise<CaseExecutionOutcome | undefined> {
   const resolvedPolicy = resolveCaseExecutionPolicy(taskCase, taskExecutionPolicy)
   let lastOutcome: CaseExecutionOutcome | undefined
@@ -376,6 +388,7 @@ async function executeRegisteredCase(
     }
 
     emitSafely(context.events?.scope({ caseId: createCaseId(index, taskCase.name) }), caseStarted, {
+      ...autoAttempt,
       ...(resolvedPolicy.autoRetry > 0
         ? {
             autoRetry: resolvedPolicy.autoRetry,
@@ -387,7 +400,7 @@ async function executeRegisteredCase(
       name: taskCase.name,
       total: totalCases,
     })
-    lastOutcome = await runCaseOnce(context, taskCase, index, resolvedPolicy.timeout)
+    lastOutcome = await runCaseOnce(context, taskCase, index, resolvedPolicy.timeout, autoAttempt)
     if (lastOutcome.state === 'passed') {
       return lastOutcome
     }
@@ -468,6 +481,7 @@ async function runCaseOnce(
   taskCase: RegisteredCase<unknown>,
   index: number,
   timeout: number | undefined,
+  autoAttempt: CaseAutoAttempt | undefined,
 ): Promise<CaseExecutionOutcome> {
   const customScoresByKind = new Map<RunScoreKind, number>()
   const abortController = new AbortController()
@@ -495,6 +509,7 @@ async function runCaseOnce(
 
   try {
     return await telemetry.withSpan('vieval.case', {
+      ...(autoAttempt == null ? {} : { 'vieval.case.attempt_index': autoAttempt.attemptIndex }),
       'vieval.case.id': caseId,
       'vieval.case.name': taskCase.name,
       'vieval.task.id': context.task.id,
@@ -691,30 +706,38 @@ export function describeTask(
         const caseQueues = new Map<object, ReturnType<typeof createSchedulerQueue>>()
         const hasAutoAttempt = registeredCases.some(taskCase => resolveCaseExecutionPolicy(taskCase, taskExecutionPolicy).autoAttempt > 0)
         const runtimeTaskConcurrency = context.task.entry.task?.concurrency ?? options.concurrency
+        const attemptConcurrency = resolveAttemptConcurrency(runtimeTaskConcurrency, context.runtimeConcurrency)
+        // Runs one case of one attempt under its case queue, then under the attempt-wide cap.
+        const scheduleCase = <T>(
+          taskCase: RegisteredCase<unknown>,
+          attemptQueue: SchedulerQueue | undefined,
+          execute: () => Promise<T>,
+        ): Promise<T> => {
+          const executeInAttempt = attemptQueue == null ? execute : async () => await attemptQueue.run(execute)
+          const concurrency = resolveCaseConcurrency(taskCase, runtimeTaskConcurrency, context.runtimeConcurrency)
+          if (concurrency == null) {
+            return executeInAttempt()
+          }
+
+          const queueKey = resolveCaseQueueKey(taskCase, defaultCaseQueueKey)
+          const queue = caseQueues.get(queueKey) ?? createSchedulerQueue(concurrency)
+          caseQueues.set(queueKey, queue)
+          return queue.run(executeInAttempt)
+        }
 
         if (!hasAutoAttempt) {
+          const attemptQueue = attemptConcurrency == null ? undefined : createSchedulerQueue(attemptConcurrency)
           await Promise.all(
             registeredCases.map(async (taskCase, index) => {
-              const executeCase = async () => {
-                const outcome = await executeRegisteredCase(context, taskCase, index, totalCases, taskExecutionPolicy)
+              await scheduleCase(taskCase, attemptQueue, async () => {
+                const outcome = await executeRegisteredCase(context, taskCase, index, totalCases, taskExecutionPolicy, undefined)
                 // Not started because the run was interrupted.
                 if (outcome == null) {
                   return
                 }
-                emitCaseOutcome(context, taskCase, outcome, index, totalCases)
+                emitCaseOutcome(context, taskCase, outcome, index, totalCases, undefined)
                 collectCaseOutcomeScores(outcome, scoreBucketsByKind)
-              }
-
-              const concurrency = resolveCaseConcurrency(taskCase, runtimeTaskConcurrency, context.runtimeConcurrency)
-              if (concurrency == null) {
-                await executeCase()
-                return
-              }
-
-              const queueKey = resolveCaseQueueKey(taskCase, defaultCaseQueueKey)
-              const queue = caseQueues.get(queueKey) ?? createSchedulerQueue(concurrency)
-              caseQueues.set(queueKey, queue)
-              await queue.run(executeCase)
+              })
             }),
           )
         }
@@ -722,19 +745,18 @@ export function describeTask(
           let attemptIndex = 0
 
           for (;;) {
+            // Each attempt gets its own cap, matching the scheduler's per-attempt `attempt` scope.
+            const attemptQueue = attemptConcurrency == null ? undefined : createSchedulerQueue(attemptConcurrency)
+            const autoAttemptOf = (taskCase: RegisteredCase<unknown>): CaseAutoAttempt => ({
+              attemptIndex,
+              autoAttempt: resolveCaseExecutionPolicy(taskCase, taskExecutionPolicy).autoAttempt,
+            })
             const attemptOutcomes = await Promise.all(
-              registeredCases.map(async (taskCase, index) => {
-                const executeCase = async () => await executeRegisteredCase(context, taskCase, index, totalCases, taskExecutionPolicy)
-                const concurrency = resolveCaseConcurrency(taskCase, runtimeTaskConcurrency, context.runtimeConcurrency)
-                if (concurrency == null) {
-                  return await executeCase()
-                }
-
-                const queueKey = resolveCaseQueueKey(taskCase, defaultCaseQueueKey)
-                const queue = caseQueues.get(queueKey) ?? createSchedulerQueue(concurrency)
-                caseQueues.set(queueKey, queue)
-                return await queue.run(executeCase)
-              }),
+              registeredCases.map(async (taskCase, index) => await scheduleCase(
+                taskCase,
+                attemptQueue,
+                async () => await executeRegisteredCase(context, taskCase, index, totalCases, taskExecutionPolicy, autoAttemptOf(taskCase)),
+              )),
             )
 
             attemptOutcomes.forEach((outcome, index) => {
@@ -743,7 +765,7 @@ export function describeTask(
                 return
               }
 
-              emitCaseOutcome(context, taskCase, outcome, index, totalCases)
+              emitCaseOutcome(context, taskCase, outcome, index, totalCases, autoAttemptOf(taskCase))
               collectCaseOutcomeScores(outcome, scoreBucketsByKind)
             })
 
@@ -798,6 +820,35 @@ function getActiveCases(): RegisteredCase<unknown>[] {
   }
 
   return active
+}
+
+/**
+ * Resolves the cap on cases running at once within one task attempt, across every case queue of the task.
+ *
+ * Before:
+ * - CLI `--attempt-concurrency 2`, task `{ attempt: 4 }`
+ * - no CLI override, task `{ attempt: 3 }`
+ * - no override anywhere
+ *
+ * After:
+ * - `2`
+ * - `3`
+ * - `undefined` (uncapped)
+ */
+function resolveAttemptConcurrency(
+  taskConcurrency: TaskConcurrencyConfig | undefined,
+  runtimeConcurrency: TaskConcurrencyConfig | undefined,
+): number | undefined {
+  const concurrency = runtimeConcurrency?.attempt ?? taskConcurrency?.attempt
+  if (concurrency == null) {
+    return undefined
+  }
+
+  if (!Number.isFinite(concurrency) || !Number.isInteger(concurrency) || concurrency <= 0) {
+    throw new Error(`Invalid task attempt concurrency: ${String(concurrency)}`)
+  }
+
+  return concurrency
 }
 
 /**

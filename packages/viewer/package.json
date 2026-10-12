@@ -1,0 +1,84 @@
+{
+  "name": "@vieval/viewer",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Web viewer server and API for vieval runs: live event bus, live tail of events.jsonl, and finished reports.",
+  "author": {
+    "name": "Vieval Team",
+    "email": "vieval@moeru.ai",
+    "url": "https://github.com/vieval-dev"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vieval-dev/vieval.git",
+    "directory": "packages/viewer"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./contract": {
+      "types": "./dist/shared/contract.d.mts",
+      "default": "./dist/shared/contract.mjs"
+    },
+    "./reduce": {
+      "types": "./dist/shared/reduce.d.mts",
+      "default": "./dist/shared/reduce.mjs"
+    }
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "API.md",
+    "README.md",
+    "dist",
+    "package.json"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsdown && vite build",
+    "dev:client": "vite",
+    "typecheck": "tsc -p tsconfig.json --noEmit && vue-tsc -p client/tsconfig.json --noEmit",
+    "test": "vitest",
+    "test:run": "vitest run"
+  },
+  "peerDependencies": {
+    "vieval": "workspace:^"
+  },
+  "dependencies": {
+    "@moeru/std": "catalog:",
+    "@napi-rs/image": "catalog:",
+    "es-toolkit": "catalog:",
+    "h3": "catalog:",
+    "srvx": "catalog:",
+    "thumbhash": "catalog:",
+    "tinyglobby": "catalog:",
+    "valibot": "catalog:"
+  },
+  "devDependencies": {
+    "@fontsource-variable/noto-sans": "catalog:",
+    "@fontsource-variable/noto-sans-sc": "catalog:",
+    "@fontsource-variable/quicksand": "catalog:",
+    "@fontsource/maple-mono": "catalog:",
+    "@iconify-json/mingcute": "catalog:",
+    "@proj-airi/unocss-preset-chromatic": "catalog:",
+    "@tanstack/vue-virtual": "catalog:",
+    "@unlazy/vue": "catalog:",
+    "@vitejs/plugin-vue": "catalog:",
+    "@vitest/browser-playwright": "catalog:vitest",
+    "@vueuse/core": "catalog:",
+    "anser": "catalog:",
+    "playwright": "catalog:",
+    "reka-ui": "catalog:",
+    "smol-toml": "catalog:",
+    "vieval": "workspace:^",
+    "vitest-browser-vue": "catalog:",
+    "vue": "catalog:",
+    "vue-tsc": "catalog:",
+    "yaml": "catalog:"
+  }
+}

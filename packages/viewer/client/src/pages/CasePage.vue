@@ -1,0 +1,184 @@
+<script setup lang="ts">
+import type { RunListItem } from '../../../src/shared/contract'
+import type { ViewTab } from '../components/ViewTabs.vue'
+import type { Route } from '../router'
+
+import { computed, toRef } from 'vue'
+
+import ArtifactsPanel from '../components/ArtifactsPanel.vue'
+import CaseTimeline from '../components/CaseTimeline.vue'
+import EvidencePanel from '../components/EvidencePanel.vue'
+import LogView from '../components/LogView.vue'
+import ObjectTree from '../components/ObjectTree.vue'
+import PageHeader from '../components/PageHeader.vue'
+import StateBadge from '../components/StateBadge.vue'
+import StateView from '../components/StateView.vue'
+import ViewTabs from '../components/ViewTabs.vue'
+
+import { api } from '../api'
+import { useResource } from '../composables/useResource'
+import { useRunLive } from '../composables/useRunLive'
+import { formatDateTime, formatDuration, formatScore, formatTime, previewValue } from '../format'
+import { href, navigate } from '../router'
+
+/**
+ * One case: rounds and retries on a timeline, console output, input and output, metrics, artifacts, external
+ * evidence, and inference events. Refreshes while the run is live.
+ */
+const props = defineProps<{ route: Extract<Route, { name: 'case' }>, run?: RunListItem }>()
+
+const live = useRunLive(toRef(() => props.route.runKey))
+const ref = computed(() => ({ caseId: props.route.caseId, taskId: props.route.taskId }))
+// Re-read the case whenever the run advanced; finished cases do not change, so the cost is one request per refresh.
+const detail = useResource(() => [props.route.runKey, ref.value, live.refreshKey.value] as const, ([runKey, caseRef]) => api.case(runKey, caseRef), { keepData: true })
+const timeline = useResource(() => [props.route.runKey, ref.value, live.refreshKey.value] as const, ([runKey, caseRef]) => api.timeline(runKey, caseRef), { keepData: true })
+
+type Tab = 'artifacts' | 'evidence' | 'inference' | 'logs' | 'overview'
+const tabs = computed<ViewTab<Tab>[]>(() => [
+  { icon: 'i-mingcute-layout-4-line', label: 'Overview', value: 'overview' },
+  { count: detail.data.value?.logLineCount, icon: 'i-mingcute-terminal-box-line', label: 'Console log', value: 'logs' },
+  { count: detail.data.value?.artifacts.length, icon: 'i-mingcute-attachment-line', label: 'Artifacts', value: 'artifacts' },
+  { count: detail.data.value?.evidence.length, icon: 'i-mingcute-file-search-line', label: 'Evidence', value: 'evidence' },
+  { count: detail.data.value?.inference.length, icon: 'i-mingcute-robot-line', label: 'Inference', value: 'inference' },
+])
+const tabRoute = (value: Tab): Route => ({ ...props.route, tab: value === 'overview' ? undefined : value })
+// An unknown `tab` in the address shows the overview.
+const tab = computed<Tab>({
+  get: () => tabs.value.find(item => item.value === props.route.tab)?.value ?? 'overview',
+  set: value => navigate(tabRoute(value)),
+})
+const loadLogs = computed(() => {
+  const runKey = props.route.runKey
+  const caseRef = ref.value
+  return (offset: number, limit: number) => api.logs(runKey, { ...caseRef, limit, offset })
+})
+const position = computed(() => ({
+  attempt: props.run?.attemptId,
+  caseId: props.route.caseId,
+  caseName: detail.data.value?.name,
+  experiment: props.run?.experimentId,
+  project: props.run?.projectSegment,
+  runKey: props.route.runKey,
+  taskId: props.route.taskId,
+  taskName: detail.data.value?.taskDisplayName,
+  workspace: props.run?.workspaceId,
+}))
+const running = computed(() => detail.data.value?.state === 'running')
+</script>
+
+<template>
+  <PageHeader level="case" :position="position" :title="detail.data.value?.name ?? props.route.caseId">
+    <template #subtitle>
+      <template v-if="detail.data.value">
+        case #{{ detail.data.value.index + 1 }} of <a :class="['link']" :href="href({ name: 'task', runKey: props.route.runKey, taskId: props.route.taskId })">{{ detail.data.value.taskDisplayName }}</a>
+        · started {{ formatDateTime(detail.data.value.startedAt) }}
+      </template>
+    </template>
+    <template #actions>
+      <template v-if="detail.data.value">
+        <StateBadge :state="detail.data.value.state" />
+        <span class="badge state-neutral">exact {{ formatScore(detail.data.value.scores.exact) }}</span>
+        <span v-if="detail.data.value.scores.judge != null" class="badge state-neutral">judge {{ formatScore(detail.data.value.scores.judge) }}</span>
+        <span class="badge state-neutral">{{ formatDuration(detail.data.value.durationMs) }}</span>
+        <span v-if="running" class="badge state-running"><span class="vv-pulse i-mingcute-airdrop-line" aria-hidden="true" />live</span>
+      </template>
+    </template>
+  </PageHeader>
+
+  <StateView :error="detail.error.value" :loading="detail.loading.value" loading-text="Reading the case…" @retry="detail.reload">
+    <template v-if="detail.data.value">
+      <ViewTabs v-model="tab" :items="tabs" :href="value => href(tabRoute(value))" label="Case views">
+        <div v-if="tab === 'overview'" :class="['flex flex-col gap-4']">
+          <div v-if="detail.data.value.errorMessage" role="alert" :class="['rounded state-failed px-3 py-2 text-sm whitespace-pre-wrap mono']">
+            {{ detail.data.value.errorMessage }}
+          </div>
+          <section class="card">
+            <h2 class="card-title">
+              <span class="i-mingcute-chart-horizontal-2-line" aria-hidden="true" />Rounds (auto attempts) and retries
+              <span class="text-xs muted font-normal">{{ detail.data.value.rounds.length }} round(s) · {{ detail.data.value.rounds.reduce((sum, round) => sum + round.tries.length, 0) }} tries</span>
+            </h2>
+            <StateView :error="timeline.error.value" :loading="timeline.loading.value" :empty="timeline.data.value?.entries.length === 0" @retry="timeline.reload">
+              <div class="p-3">
+                <CaseTimeline v-if="timeline.data.value" :timeline="timeline.data.value" />
+              </div>
+            </StateView>
+          </section>
+          <div :class="['grid gap-4']" style="grid-template-columns: repeat(auto-fit, minmax(380px, 1fr))">
+            <section class="card">
+              <h2 class="card-title">
+                <span class="i-mingcute-file-import-line" aria-hidden="true" />Input
+              </h2>
+              <div :class="['p-3 overflow-auto max-h-96']">
+                <ObjectTree v-if="detail.data.value.input !== undefined" :value="detail.data.value.input" />
+                <span v-else class="text-sm muted">No input recorded.</span>
+              </div>
+            </section>
+            <section class="card">
+              <h2 class="card-title">
+                <span class="i-mingcute-file-export-line" aria-hidden="true" />Output
+              </h2>
+              <div :class="['p-3 overflow-auto max-h-96']">
+                <ObjectTree v-if="detail.data.value.output !== undefined" :value="detail.data.value.output" />
+                <span v-else class="text-sm muted">No output recorded.</span>
+              </div>
+            </section>
+          </div>
+          <section class="card">
+            <h2 class="card-title">
+              <span class="i-mingcute-dashboard-3-line" aria-hidden="true" />Metrics <span class="text-xs muted font-normal">{{ detail.data.value.metrics.length }}</span>
+            </h2>
+            <StateView :empty="detail.data.value.metrics.length === 0" empty-text="No metrics recorded for this case">
+              <div :class="['overflow-auto max-h-96']">
+                <table class="w-full">
+                  <tbody>
+                    <tr v-for="metric in detail.data.value.metrics" :key="metric.seq" :class="['border-b border-neutral-100/70 dark:border-neutral-900']">
+                      <td :class="['td mono text-xs muted whitespace-nowrap']">
+                        {{ formatTime(metric.time) }}
+                      </td>
+                      <td :class="['td mono text-xs whitespace-nowrap']">
+                        {{ metric.name }}
+                      </td>
+                      <td :class="['td mono text-xs break-all']">
+                        {{ previewValue(metric.value, 200) }}
+                      </td>
+                      <td :class="['td mono muted text-xs']">
+                        round {{ metric.roundIndex ?? 0 }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </StateView>
+          </section>
+        </div>
+
+        <section v-else-if="tab === 'logs'" class="card">
+          <LogView :load="loadLogs" :follow="running" />
+        </section>
+
+        <section v-else-if="tab === 'artifacts'" :class="['card p-3']">
+          <ArtifactsPanel :artifacts="detail.data.value.artifacts" :run-key="props.route.runKey" />
+        </section>
+
+        <template v-else-if="tab === 'evidence'">
+          <StateView :empty="detail.data.value.evidence.length === 0" empty-text="No external evidence" empty-hint="Evals link outside evidence with a metric named *.evidence whose value is an absolute path (OSWorld: osworld.evidence).">
+            <EvidencePanel :links="detail.data.value.evidence" :run-key="props.route.runKey" :case-ref="ref" />
+          </StateView>
+        </template>
+
+        <section v-else-if="tab === 'inference'" class="card">
+          <StateView :empty="detail.data.value.inference.length === 0" empty-text="No inference events" empty-hint="Model calls made through vieval's inference executors appear here.">
+            <div :class="['p-3 flex flex-col gap-2']">
+              <details v-for="item in detail.data.value.inference" :key="item.seq" :class="['rounded border border-neutral-200/50 dark:border-neutral-800/50 p-2']">
+                <summary :class="['text-sm cursor-pointer']">
+                  <span class="text-xs mono">{{ item.event }}</span> <span class="text-xs muted">{{ formatTime(item.time) }} · round {{ item.roundIndex ?? 0 }}</span>
+                </summary>
+                <ObjectTree :value="item.data" />
+              </details>
+            </div>
+          </StateView>
+        </section>
+      </ViewTabs>
+    </template>
+  </StateView>
+</template>

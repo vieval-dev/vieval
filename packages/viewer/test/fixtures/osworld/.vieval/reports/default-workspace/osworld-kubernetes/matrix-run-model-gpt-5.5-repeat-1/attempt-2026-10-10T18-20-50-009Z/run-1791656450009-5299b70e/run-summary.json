@@ -1,0 +1,81 @@
+{
+  "attemptId": "attempt-2026-10-10T18-20-50-009Z",
+  "configFilePath": "/home/user/Git/github.com/moeru-ai/auv-pr-258/evals/osworld/vieval.config.ts",
+  "experimentId": "matrix-run-model-gpt-5.5-repeat-1",
+  "projects": [
+    {
+      "caseFailures": [
+        {
+          "caseId": "2:vs_code%2F982d12a5-beab-424f-8d38-d2a48429e511",
+          "caseName": "vs_code/982d12a5-beab-424f-8d38-d2a48429e511",
+          "errorMessage": "expected +0 to be 1 // Object.is equality",
+          "taskId": "evals%2Fosworld%2Feval%2Fosworld::default::run=model%3Dgpt-5.5%26repeat%3D1::eval=default"
+        }
+      ],
+      "caseSummary": {
+        "failed": 1,
+        "passed": 2,
+        "skipped": 0,
+        "timeout": 0,
+        "total": 3
+      },
+      "discoveredEvalFileCount": 1,
+      "durationMs": 520493,
+      "entryCount": 1,
+      "errorMessage": null,
+      "executed": true,
+      "matrixSummary": {
+        "evalAxes": [],
+        "evalRows": 1,
+        "runAxes": [
+          "model",
+          "repeat"
+        ],
+        "runRows": 1
+      },
+      "name": "osworld-kubernetes",
+      "result": {
+        "inferenceExecutors": [
+          {
+            "exactAverage": 0.6666666666666666,
+            "hybridAverage": 0.6666666666666666,
+            "inferenceExecutorId": "default",
+            "judgeAverage": null,
+            "runCount": 1
+          }
+        ],
+        "overall": {
+          "exactAverage": 0.6666666666666666,
+          "hybridAverage": 0.6666666666666666,
+          "judgeAverage": null,
+          "runCount": 1
+        },
+        "runs": [
+          {
+            "entryId": "evals/osworld/eval/osworld",
+            "exactAverage": 0.6666666666666666,
+            "hybridAverage": 0.6666666666666666,
+            "id": "evals%2Fosworld%2Feval%2Fosworld::default::run=model%3Dgpt-5.5%26repeat%3D1::eval=default",
+            "inferenceExecutorId": "default",
+            "judgeAverage": null,
+            "matrix": {
+              "eval": {},
+              "meta": {
+                "evalRowId": "default",
+                "runRowId": "model=gpt-5.5&repeat=1"
+              },
+              "run": {
+                "model": "gpt-5.5",
+                "repeat": "1"
+              }
+            }
+          }
+        ]
+      },
+      "taskCount": 1
+    }
+  ],
+  "reportDirectory": "__VIEVAL_DIR__/reports/default-workspace/osworld-kubernetes/matrix-run-model-gpt-5.5-repeat-1/attempt-2026-10-10T18-20-50-009Z/run-1791656450009-5299b70e",
+  "runId": "run-1791656450009-5299b70e",
+  "workspaceId": "default-workspace"
+}

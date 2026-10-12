@@ -44,9 +44,13 @@ Vieval 在报告根目录下按工作区、项目、实验、尝试和自动生�
 
 `vieval report index` 默认会创建 `index/runs.jsonl`，也可以通过 `--output` 指定其他位置；`vieval run` 本身不会写入这个索引文件。
 
-使用自动尝试时，应根据问题选择文件：`run-summary.json` 中的任务分数包含所有已完成尝试的结果；`cases.jsonl` 为每个「任务 ID + 用例 ID」组合只保留最终记录；`events.jsonl` 则保留重试和尝试的执行顺序。
+`run-summary.json`、每条事件、每条用例记录，以及 OTLP 文件中资源和 `vieval.run` span 的 `vieval.workspace.id`、`vieval.experiment.id`、`vieval.attempt.id`、`vieval.run.id` 属性，都使用同一组 `workspaceId`、`experimentId`、`attemptId` 和 `runId`，因此可以在所有文件之间追溯同一次运行。
 
-`cases.jsonl` 中的 `retryCount` 根据用例开始事件计算。如果事件没有 `retryIndex`，后续自动尝试产生的重复开始事件也可能让这个数字增加。要准确区分重试和自动尝试，请直接查看 `events.jsonl`。
+使用自动尝试时，应根据问题选择文件：`run-summary.json` 中的任务分数包含所有已完成尝试的结果；`cases.jsonl` 为每个「任务 ID + 用例 ID」组合只保留一条记录，其顶层字段描述最后一次尝试，`attempts` 列出每次尝试的状态、分数、重试次数和耗时；`events.jsonl` 中，启用自动尝试的任务的 `case.started` 和 `case.ended` 带有 `attemptIndex`（第一次尝试为 0）和 `autoAttempt`。
+
+`cases.jsonl` 中的 `retryCount` 只统计最后一次尝试内的重试。对于启用自动尝试的任务，它根据 `attemptIndex` 计算，后续尝试不会被算作重试。在 `attemptIndex` 出现之前写入的报告没有这个字段，其中后续尝试的重复开始事件仍可能让 `retryCount` 增加。
+
+事件行仍为 `schemaVersion: 2`，用例记录仍为 `schemaVersion: 1`：新增可选字段或新事件名不改变版本号，读取方会忽略不认识的字段；重命名、删除字段或改变字段类型时才会增加版本号。
 
 ::: warning 报告文件可能包含敏感信息
 报告可能包含用例输入和输出、错误信息、自定义指标、模型或评测基准标识符，以及其他事件数据。请设置合适的保留期限和访问权限，并删除或脱敏不应离开评测环境的字段。
@@ -84,7 +88,7 @@ vieval report analyze <报告目录>
 
 :::
 
-`analyze` 读取运行摘要和事件。它可以按工作区、项目、实验、尝试、运行、事件、错误文本，以及运行或评测矩阵的选中值筛选，再按工作区和实验汇总结果。`--task-state` 和 `--case-state` 目前接受 `passed`、`failed` 或 `skipped`；`--case-state` 暂不接受 `timeout`。`--format table|json|jsonl|csv` 用于选择标准输出格式。
+`analyze` 读取运行摘要和事件。它可以按工作区、项目、实验、尝试、运行、事件、错误文本，以及运行或评测矩阵的选中值筛选，再按工作区和实验汇总结果。`--task-state` 和 `--case-state` 目前接受 `passed`、`failed` 或 `skipped`；`--case-state` 暂不接受 `timeout`。`--attempt-index <n>` 只保留至少有一个用例运行过第 `n` 次自动尝试的运行。JSON、JSONL 和 CSV 输出中的每个运行行和实验分组都包含 `autoAttemptedCases`（运行过多次尝试的用例数；后续尝试会重新运行任务的全部用例）和 `maxAttemptIndex`（没有自动尝试时为 `null`）。`--format table|json|jsonl|csv` 用于选择标准输出格式。
 
 ## 比较两组已有报告
 

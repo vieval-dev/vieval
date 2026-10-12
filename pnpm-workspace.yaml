@@ -21,22 +21,34 @@ overrides:
 catalog:
   '@antfu/eslint-config': ^9.1.0
   '@arethetypeswrong/core': ^0.18.4
+  '@fontsource-variable/noto-sans': ^5.3.0
+  '@fontsource-variable/noto-sans-sc': ^5.3.1
+  '@fontsource-variable/quicksand': ^5.3.0
+  '@fontsource/maple-mono': ^5.3.0
   '@henrygd/queue': ^1.2.0
+  '@iconify-json/mingcute': ^1.2.8
   '@moeru/eslint-config': 0.1.0-beta.15
   '@moeru/eventa': ^1.0.2
   '@moeru/std': 0.1.0-beta.17
+  '@napi-rs/image': ^1.15.0
   '@opentelemetry/api': ^1.9.1
   '@pnpm/find-workspace-dir': ^1000.1.5
+  '@proj-airi/unocss-preset-chromatic': ^1.1.5
   '@shikijs/transformers': 3.23.0
+  '@tanstack/vue-virtual': ^3.13.41
   '@types/node': ^26.1.0
+  '@unlazy/vue': ^2.0.1
   '@unocss/eslint-plugin': ^66.7.4
   '@unocss/reset': ^66.7.4
-  '@vitest/runner': ^4.1.9
+  '@vitejs/plugin-vue': ^6.0.10
+  '@vitest/runner': ^4.1.11
   '@voidzero-dev/vitepress-theme': ^4.8.4
   '@vue/tsconfig': ^0.9.1
+  '@vueuse/core': ^15.0.0
   '@xsai-ext/providers': 0.5.0-beta.6
   '@xsai/generate-text': 0.5.0-beta.6
   '@xsai/providers': ^0.1.0-beta.5
+  anser: ^2.3.5
   bumpp: ^11.1.0
   c12: ^4.0.0-beta.5
   date-fns: ^4.4.0
@@ -44,14 +56,20 @@ catalog:
   eslint: ^10.6.0
   eslint-plugin-oxlint: ^1.72.0
   fast-string-width: ^3.0.2
+  h3: ^2.0.2
   meow: ^14.1.0
   nano-staged: ^1.0.2
   oxc-minify: ^0.138.0
   oxlint: ^1.72.0
+  playwright: ^1.64.0
   publint: ^0.3.21
+  reka-ui: ^2.11.0
   rollup: ^4.62.2
   simple-git-hooks: ^2.13.1
+  smol-toml: ^1.9.1
+  srvx: ^1.0.5
   taze: ^19.14.1
+  thumbhash: ^0.1.1
   tinyexec: ^1.2.4
   tinyglobby: ^0.2.17
   tinyrainbow: ^3.1.0
@@ -66,13 +84,17 @@ catalog:
   vite: ^8.1.3
   vite-plugin-inspect: ^11.4.1
   vitepress: 2.0.0-alpha.16
+  vitest-browser-vue: ^3.1.0
   vue: ^3.5.39
+  vue-tsc: ^3.3.13
   xsai: ^0.5.0-beta.6
+  yaml: ^2.9.1
 catalogs:
   vitest:
-    '@vitest/coverage-v8': ^4.1.9
-    '@vitest/expect': ^4.1.9
-    vitest: ^4.1.9
+    '@vitest/browser-playwright': ^4.1.11
+    '@vitest/coverage-v8': ^4.1.11
+    '@vitest/expect': ^4.1.11
+    vitest: ^4.1.11
 ignoredBuiltDependencies:
   - simple-git-hooks # [workaround] postinstall script bundled in simple-git-hooks fails to execute with `enableGlobalVirtualStore: true`. Using local postinstall script to run `npx simple-git-hooks` instead.
 onlyBuiltDependencies:

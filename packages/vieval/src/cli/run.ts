@@ -8,6 +8,7 @@ import type { InterruptSignal } from './interrupt'
 import type { ReportEventLog } from './report-log'
 import type { CliReporter, SummaryReporter, SummaryReporterCaseStartPayload, SummaryReporterTaskQueuedPayload } from './reporters'
 import type { WindowRendererTimer } from './reporters/renderers/windowed-renderer'
+import type { RunReadyContext, RunReadyDisposer, RunReadyHook } from './viewer-host'
 
 import process from 'node:process'
 
@@ -124,6 +125,13 @@ export interface RunVievalCliOptions extends LoadVievalCliConfigOptions {
    * Experiment id attached to report artifacts.
    */
   experiment?: string
+  /**
+   * Attaches an external host (for example the web viewer) to the run's event bus.
+   *
+   * Called once, after the terminal reporter subscribed and before `run.started`, so the host sees every
+   * event from `seq` 1. Not called when the run fails before it starts (for example on a config error).
+   */
+  onRunReady?: RunReadyHook
   /**
    * Restrict run to project names.
    *
@@ -449,16 +457,20 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
   let temporaryArtifactsRoot: string | undefined
   let stopListeningForInterrupt: (() => void) | undefined
   let interruptSignal: InterruptSignal | undefined
+  let disposeRunReadyHook: RunReadyDisposer | undefined
   try {
     const selectedProjects = filterProjectsByName(loadedConfig.projects, options.project ?? [])
     const preparedProjects = await Promise.all(selectedProjects.map(async project => prepareProject(project)))
     const identity = createRunIdentity(options, preparedProjects)
     const bus = createRunEventBus(identity)
     // The report directory is fixed before execution so events and artifacts reach disk while the run is in progress.
-    const reportDirectory = options.report === false
+    const reportRoot = options.report === false
+      ? undefined
+      : resolve(options.reportOut ?? join(loadedConfig.configFilePath == null ? (options.cwd ?? process.cwd()) : dirname(loadedConfig.configFilePath), '.vieval', 'reports'))
+    const reportDirectory = reportRoot == null
       ? undefined
       : resolveRunReportDirectory(
-          options.reportOut ?? join(loadedConfig.configFilePath == null ? (options.cwd ?? process.cwd()) : dirname(loadedConfig.configFilePath), '.vieval', 'reports'),
+          reportRoot,
           identity,
           selectedProjects.map(project => project.name),
         )
@@ -481,6 +493,17 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
     reporter = runReporter
     subscribeRunReporter(bus, runReporter)
     const reporterCounters = subscribeTaskCounters(bus)
+    if (options.onRunReady != null) {
+      disposeRunReadyHook = await callRunReadyHook(options.onRunReady, {
+        artifactsRoot,
+        bus,
+        configFilePath: loadedConfig.configFilePath,
+        identity,
+        projectNames: selectedProjects.map(project => project.name),
+        reportDirectory: reportDirectory ?? null,
+        reportRoot: reportRoot ?? null,
+      })
+    }
     // First interrupt: stop starting work and abort running cases, so their cleanup runs before the run ends.
     // Second interrupt: give up waiting.
     const interruption = new AbortController()
@@ -631,6 +654,14 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
         runEndError ??= error
       }
     }
+    if (disposeRunReadyHook != null) {
+      try {
+        await disposeRunReadyHook()
+      }
+      catch (error) {
+        process.stderr.write(`[vieval] onRunReady cleanup failed: ${errorMessageFrom(error) ?? 'unknown error'}\n`)
+      }
+    }
     if (temporaryArtifactsRoot != null) {
       await rm(temporaryArtifactsRoot, { force: true, recursive: true })
     }
@@ -685,6 +716,19 @@ function applyRunEnvironment(env: NodeJS.ProcessEnv): () => void {
       }
       delete process.env[key]
     }
+  }
+}
+
+/**
+ * Calls the `onRunReady` hook; a failing host is reported and never fails the run.
+ */
+async function callRunReadyHook(hook: RunReadyHook, context: RunReadyContext): Promise<RunReadyDisposer | undefined> {
+  try {
+    return await hook(context) ?? undefined
+  }
+  catch (error) {
+    process.stderr.write(`[vieval] onRunReady hook failed: ${errorMessageFrom(error) ?? 'unknown error'}\n`)
+    return undefined
   }
 }
 

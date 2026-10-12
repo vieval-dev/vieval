@@ -34,15 +34,19 @@ Vieval places each run under the report root by workspace, project, experiment, 
 | --- | --- |
 | `run-summary.json` | The CLI run output, including identities, project status, case summaries and failures, matrix summaries, and aggregated run scores. |
 | `events.jsonl` | Ordered run, task, case, score, metric, and custom event envelopes captured during execution. |
-| `cases.jsonl` | One normalized final record per observed task/case, with identities, state, timing, a derived retry count, scores, metrics, and optional input/output. |
+| `cases.jsonl` | One normalized final record per observed task/case, with identities, state, timing, a derived retry count, scores, metrics, optional input/output, and, for tasks with automatic attempts, `attemptIndex`, `autoAttempt`, and every attempt in `attempts`. |
 | `metrics-summary.json` | Overall score counts, sums, and averages derived from normalized case records. |
-| `otlp/traces.json`, `otlp/logs.json`, `otlp/metrics.json` | Local OTLP-shaped projections derived from the case records. |
+| `otlp/traces.json`, `otlp/logs.json`, `otlp/metrics.json` | Local OTLP-shaped projections derived from the case records. Each resource and the `vieval.run` span carry `vieval.workspace.id`, `vieval.experiment.id`, `vieval.attempt.id`, and `vieval.run.id`. |
 
 `vieval report index` creates another artifact, `index/runs.jsonl` by default. It is not written by `vieval run`.
 
-Automatic attempts require one reading caveat. `run-summary.json` contains the task score aggregated from all completed attempt evidence, while `cases.jsonl` keeps a final projection for each task/case. Use `events.jsonl` when retry or attempt sequence matters.
+The same `workspaceId`, `experimentId`, `attemptId`, and `runId` appear in `run-summary.json`, every event, every case record, and the OTLP attributes above, so one run can be traced across all files.
 
-The `retryCount` field is derived from lifecycle starts. When events do not provide a `retryIndex`, repeated starts from additional attempts may increase it too; use `events.jsonl` to distinguish retries from attempts precisely.
+Automatic attempts require one reading caveat. `run-summary.json` contains the task score aggregated from all completed attempt evidence, while `cases.jsonl` keeps a final projection for each task/case: its top-level fields describe the last attempt, and `attempts` lists the state, scores, retries, and timing of each attempt. In `events.jsonl`, `case.started` and `case.ended` of a task with automatic attempts carry `attemptIndex` (0 for the first attempt) and `autoAttempt`.
+
+The `retryCount` field counts retries within the final attempt. For tasks with automatic attempts it uses `attemptIndex`, so additional attempts are not counted as retries. Reports written before `attemptIndex` existed have no such field; for them, repeated starts from additional attempts may still increase `retryCount`.
+
+Event lines keep `schemaVersion: 2` and case records keep `schemaVersion: 1`: new optional fields and new event names do not change the version, and readers ignore fields they do not know. A renamed, removed, or retyped field would increment the version.
 
 ::: warning Treat report artifacts as potentially sensitive
 Artifacts may contain case inputs and outputs, error messages, custom metrics, model or benchmark identifiers, and other event payloads. Store them under an appropriate retention policy, restrict access, and remove or redact fields that should not leave the evaluation environment.
@@ -68,7 +72,7 @@ vieval report cases <report-directory>
 vieval report analyze <report-directory>
 ```
 
-`analyze` reads run summaries and events, filters runs, and rolls them up by workspace and experiment. Its filters include workspace, project, experiment, attempt, run, event or error text, and run/eval matrix selectors. `--task-state` and `--case-state` currently accept `passed`, `failed`, or `skipped`; `timeout` is not currently accepted by `--case-state`. `--format table|json|jsonl|csv` controls stdout.
+`analyze` reads run summaries and events, filters runs, and rolls them up by workspace and experiment. Its filters include workspace, project, experiment, attempt, run, event or error text, and run/eval matrix selectors. `--task-state` and `--case-state` currently accept `passed`, `failed`, or `skipped`; `timeout` is not currently accepted by `--case-state`. `--attempt-index <n>` keeps runs where at least one case ran automatic attempt `n`. Each run row and experiment group in JSON, JSONL, and CSV output includes `autoAttemptedCases` (cases that ran in more than one attempt; an additional attempt reruns every case of the task) and `maxAttemptIndex` (`null` without automatic attempts). `--format table|json|jsonl|csv` controls stdout.
 
 ## Compare two existing report sets
 

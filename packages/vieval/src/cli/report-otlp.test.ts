@@ -13,6 +13,7 @@ describe('local OTLP projection', () => {
    */
   it('projects case records into trace, log, and metric containers', () => {
     const projection = buildLocalOtlpProjection({
+      identity: { attemptId: 'a', experimentId: 'e', runId: 'run-1', workspaceId: 'w' },
       records: [
         {
           attemptId: 'a',
@@ -44,7 +45,6 @@ describe('local OTLP projection', () => {
           workspaceId: 'w',
         },
       ],
-      runId: 'run-1',
     })
 
     const spans = projection.traces.resourceSpans[0]?.scopeSpans[0]?.spans
@@ -52,6 +52,16 @@ describe('local OTLP projection', () => {
     const metrics = projection.metrics.resourceMetrics[0]?.scopeMetrics[0]?.metrics
 
     expect(spans?.[0]?.name).toBe('vieval.run')
+    const identityAttributes = [
+      { key: 'vieval.attempt.id', value: { stringValue: 'a' } },
+      { key: 'vieval.experiment.id', value: { stringValue: 'e' } },
+      { key: 'vieval.run.id', value: { stringValue: 'run-1' } },
+      { key: 'vieval.workspace.id', value: { stringValue: 'w' } },
+    ]
+    expect(spans?.[0]?.attributes).toEqual(identityAttributes)
+    expect(projection.traces.resourceSpans[0]?.resource.attributes).toEqual(identityAttributes)
+    expect(projection.logs.resourceLogs[0]?.resource.attributes).toEqual(identityAttributes)
+    expect(projection.metrics.resourceMetrics[0]?.resource.attributes).toEqual(identityAttributes)
     expect(spans?.map(span => span.name)).toEqual([
       'vieval.run',
       'vieval.project',
@@ -115,10 +125,50 @@ describe('local OTLP projection', () => {
 
   /**
    * @example
+   * it('tags case spans with the auto attempt of the final outcome') keeps auto attempts traceable in OTLP files.
+   */
+  it('tags case spans with the auto attempt of the final outcome', () => {
+    const projection = buildLocalOtlpProjection({
+      identity: { attemptId: 'a', experimentId: 'e', runId: 'run-1', workspaceId: 'w' },
+      records: [
+        {
+          attemptId: 'a',
+          attemptIndex: 1,
+          autoAttempt: 1,
+          caseId: 'case-1',
+          caseName: 'Case 1',
+          durationMs: 1,
+          endedAt: '2026-05-08T00:00:00.000Z',
+          experimentId: 'e',
+          metrics: {},
+          projectName: 'p',
+          retryCount: 0,
+          runId: 'run-1',
+          schemaVersion: 1,
+          scores: { exact: 1 },
+          startedAt: '2026-05-08T00:00:00.000Z',
+          state: 'passed',
+          taskId: 'task-1',
+          workspaceId: 'w',
+        },
+      ],
+    })
+
+    const caseSpan = projection.traces.resourceSpans[0]?.scopeSpans[0]?.spans.find(span => span.name === 'vieval.case')
+
+    expect(caseSpan?.attributes).toContainEqual({
+      key: 'vieval.case.attempt_index',
+      value: { doubleValue: 1 },
+    })
+  })
+
+  /**
+   * @example
    * it('preserves fractional ISO timestamp precision') checks sub-millisecond traces remain inspectable.
    */
   it('preserves fractional ISO timestamp precision', () => {
     const projection = buildLocalOtlpProjection({
+      identity: { attemptId: 'a', experimentId: 'e', runId: 'run-1', workspaceId: 'w' },
       records: [
         {
           attemptId: 'a',
@@ -139,7 +189,6 @@ describe('local OTLP projection', () => {
           workspaceId: 'w',
         },
       ],
-      runId: 'run-1',
     })
 
     const caseSpan = projection.traces.resourceSpans[0]?.scopeSpans[0]?.spans.find(span => span.name === 'vieval.case')
@@ -154,6 +203,7 @@ describe('local OTLP projection', () => {
    */
   it('stringifies non-finite numeric attributes', () => {
     const projection = buildLocalOtlpProjection({
+      identity: { attemptId: 'a', experimentId: 'e', runId: 'run-1', workspaceId: 'w' },
       records: [
         {
           attemptId: 'a',
@@ -178,7 +228,6 @@ describe('local OTLP projection', () => {
           workspaceId: 'w',
         },
       ],
-      runId: 'run-1',
     })
 
     const attributes = projection.traces.resourceSpans[0]?.scopeSpans[0]?.spans.find(span => span.name === 'vieval.case')?.attributes

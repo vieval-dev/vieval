@@ -352,7 +352,10 @@ export type TaskCaseState = 'failed' | 'passed' | 'timeout'
  */
 export interface TaskConcurrencyConfig {
   /**
-   * Attempt-level concurrency cap for this task.
+   * Cap on cases running at once within one task attempt, across every case group of the task.
+   *
+   * Applies on top of the case caps. Auto attempts of a task run one after another, and each attempt gets
+   * its own cap. Overridden by `--attempt-concurrency`.
    */
   attempt?: number
   /**

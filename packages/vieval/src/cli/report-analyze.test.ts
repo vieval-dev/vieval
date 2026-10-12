@@ -85,6 +85,14 @@ describe('parseReportAnalyzeCliArguments', () => {
     })
   })
 
+  it('parses the auto attempt index filter', () => {
+    expect(parseReportAnalyzeCliArguments(['analyze', '.vieval/reports', '--attempt-index', '1']).attemptIndex).toBe(1)
+    expect(parseReportAnalyzeCliArguments(['analyze', '.vieval/reports', '--attempt-index', '0']).attemptIndex).toBe(0)
+    expect(() => parseReportAnalyzeCliArguments(['analyze', '.vieval/reports', '--attempt-index', '-1'])).toThrow(
+      'Unsupported attempt index filter "-1". Expected a non-negative integer.',
+    )
+  })
+
   it('throws when task/case state filters are unsupported', () => {
     expect(() => parseReportAnalyzeCliArguments(['analyze', '.vieval/reports', '--task-state', 'unknown'])).toThrow(
       'Unsupported state filter "unknown". Expected "passed", "failed", or "skipped".',
@@ -106,10 +114,12 @@ describe('buildExperimentSummaries', () => {
     const summaries = buildExperimentSummaries([
       {
         attemptId: 'attempt-a',
+        autoAttemptedCases: 0,
         eventsCount: 10,
         executedProjects: 1,
         experimentId: 'exp-1',
         failedProjects: 0,
+        maxAttemptIndex: null,
         projectNames: ['project-a'],
         reportDirectory: '/tmp/reports/1',
         runId: 'run-1',
@@ -119,10 +129,12 @@ describe('buildExperimentSummaries', () => {
       },
       {
         attemptId: 'attempt-a',
+        autoAttemptedCases: 2,
         eventsCount: 12,
         executedProjects: 1,
         experimentId: 'exp-1',
         failedProjects: 1,
+        maxAttemptIndex: 2,
         projectNames: ['project-a'],
         reportDirectory: '/tmp/reports/2',
         runId: 'run-2',
@@ -132,10 +144,12 @@ describe('buildExperimentSummaries', () => {
       },
       {
         attemptId: 'attempt-b',
+        autoAttemptedCases: 1,
         eventsCount: 9,
         executedProjects: 1,
         experimentId: 'exp-1',
         failedProjects: 0,
+        maxAttemptIndex: 1,
         projectNames: ['project-a'],
         reportDirectory: '/tmp/reports/3',
         runId: 'run-3',
@@ -174,8 +188,10 @@ describe('buildExperimentSummaries', () => {
             totalTasks: 3,
           },
         ],
+        autoAttemptedCases: 3,
         experimentId: 'exp-1',
         failedProjects: 1,
+        maxAttemptIndex: 2,
         runCount: 3,
         successRate: 0.666667,
         totalEvents: 31,

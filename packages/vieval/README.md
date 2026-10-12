@@ -332,6 +332,8 @@ export default defineConfig({
 
 ```bash
 vieval run [--config <path>] [--project <name>] [--json] [--report-out <path> | --no-report]
+vieval run --with-viewer [--viewer-port <port>] [--viewer-host <host>] [--viewer-open]
+vieval viewer [reportRoot...] [--port <port>] [--host <host>] [--open] [--evidence-root <dir>] [--stale-after <min>]
 vieval compare [--config <path>] [--comparison <id>] [--output <path>] [--format table|json]
 vieval report analyze <report-directory>
 vieval report index <report-directory> [--output <path>] [--format table|json|jsonl]
@@ -343,6 +345,8 @@ vieval report compare <left-report-directory> <right-report-directory> [--case-k
 
 - `events.jsonl` is appended while the run is in progress, so a crashed run keeps the events already flushed to disk. Each line has a `seq` that orders it within the run.
 - `run-summary.json`, `cases.jsonl`, `metrics-summary.json`, and `otlp/*.json` are derived from `events.jsonl` when the run ends.
+- The same `workspaceId`, `experimentId`, `attemptId`, and `runId` identify the run in every file: the top-level fields of `run-summary.json`, every event envelope, every `cases.jsonl` record, and the `vieval.workspace.id` / `vieval.experiment.id` / `vieval.attempt.id` / `vieval.run.id` attributes of the OTLP resources and the `vieval.run` span.
+- For a task with auto attempts, a `cases.jsonl` record describes the last attempt and adds `attemptIndex`, `autoAttempt`, and `attempts` (state, scores, retries, and timing of each attempt). `retryCount` counts only the retries within the last attempt. `CaseRecord.schemaVersion` stays `1`, because the new fields are optional.
 - `artifacts/<task>/<case>/` holds case files (see [Case ids and artifacts](#case-ids-and-artifacts)).
 
 Interrupting a run (Ctrl+C, `SIGTERM`, or closing the terminal):
@@ -371,8 +375,46 @@ Concurrency flags are available on `vieval run`:
 - `--workspace-concurrency`
 - `--project-concurrency`
 - `--task-concurrency`
-- `--attempt-concurrency`
+- `--attempt-concurrency`: the most cases of one task that run at the same time within one attempt, across all case groups of the task. It overrides `concurrency.attempt` of the task, project, or config. Auto attempts of a task run one after another, and each attempt gets its own cap.
 - `--case-concurrency`
+
+### Web viewer
+
+`vieval run --with-viewer` serves the web viewer for the run. The viewer is the optional package `@vieval/viewer`; install it next to your config (`pnpm add -D @vieval/viewer`).
+
+- `--viewer-port <port>`: port to listen on (default `51204`, the same as `vitest --ui`).
+- `--viewer-host <host>`: interface to listen on (default `127.0.0.1`).
+- `--viewer-open`: open the viewer in a browser.
+
+vieval loads the package with a dynamic `import()` only when `--with-viewer` is set. If the package is missing, the command fails before the run starts, with exit code 1. The viewer starts when the run is ready and prints `Viewer: <url>` on stderr. After the run, the viewer keeps serving until Ctrl+C. The process then exits with the exit code of the run.
+
+Without `--with-viewer`, vieval does not load any viewer code, and the run output does not change.
+
+With `--no-report`, case artifacts are in a temporary directory that is removed when the run ends, so the viewer cannot show them after the run.
+
+`vieval viewer [reportRoot...]` serves the same viewer for report directories, without running evals (like `vitest --ui` for results). The default report root is `.vieval/reports` in the current directory, or next to `--config`. A run that another process is still writing (only `events.jsonl` exists) is tailed and updated live. Options: `--port` (default `51204`), `--host` (default `127.0.0.1`), `--open`, `--evidence-root <dir>` (repeatable: extra directories that `*.evidence` metric paths may point into), `--stale-after <min>` (default `60`). See `packages/viewer/README.md` and `packages/viewer/API.md`.
+
+### Attach a host to a run (`onRunReady`)
+
+Other hosts (the viewer, a dashboard, a custom CLI) attach to a run with the `onRunReady` option of `runVievalCli` from `vieval/cli`:
+
+```ts
+import { runVievalCli } from 'vieval/cli'
+
+await runVievalCli({
+  configFilePath: './vieval.config.ts',
+  onRunReady({ bus, identity, reportDirectory }) {
+    // identity: { workspaceId, experimentId, attemptId, runId }
+    const unsubscribe = bus.onAny(envelope => console.error(envelope.seq, envelope.event))
+    return () => unsubscribe() // called after the run settled and its reports are written
+  },
+})
+```
+
+- vieval calls the hook once, after the terminal reporter subscribed and before `run.started`. The host therefore receives every event from `seq` 1, the same events that go to `events.jsonl`.
+- The context also has `artifactsRoot`, `configFilePath`, `projectNames`, `reportDirectory`, and `reportRoot` (the last two are `null` with `--no-report`).
+- If the hook or its cleanup throws, vieval writes the error to stderr. The run continues, and its result does not change.
+- `vieval/cli` also exports the viewer contract types (`ViewerModule`, `ViewerHost`, `StartViewerOptions`) for packages that implement a viewer.
 
 ## Public Entrypoints
 
@@ -472,6 +514,8 @@ Every activity of a run is one typed event on an in-process bus (`@moeru/eventa`
 
 - Event names are `<entity>.<past-tense verb>`: `run.started`, `project.started`, `task.queued`, `task.started`, `case.started`, `case.output`, `metric.recorded`, `score.recorded`, `case.ended`, `task.ended`, `project.ended`, `run.ended`, plus `inference.*` and `tool-call.*` from `vieval/plugins/chat-models`.
 - Definitions, payload types, and Valibot schemas are exported from `vieval/events`. Every line of `events.jsonl` is an envelope with `schemaVersion: 2`, a per-run `seq`, run identity, and `projectId` / `taskId` / `caseId` when they apply.
+- When a task runs auto attempts (a case has `autoAttempt > 0`), `case.started` and `case.ended` of every case of the task have `attemptIndex` (0 for the first attempt) and `autoAttempt` (the attempts that the case allows). Events of other tasks do not have these fields. `retryIndex` stays the retry within one attempt.
+- Schema version policy: a new optional payload field or a new event name does not change `schemaVersion`. Readers of version 2 ignore unknown payload fields and skip unknown events, so they can read newer logs. A renamed, removed, or retyped field increments the version. `attemptIndex` and `autoAttempt` are optional fields of version 2.
 - Task and case code receives `context.events`, scoped to its task and case. Emits never reject and never affect scoring.
 - A custom project `executor` forwards `context.events` into `task.entry.task.run(...)`, so case progress and output reach the terminal and the report.
 - Plugins define their own events with `defineEventa` from `vieval/events`:

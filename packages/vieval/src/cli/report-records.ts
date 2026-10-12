@@ -12,6 +12,28 @@ export interface BuildCaseRecordsArgs {
   projectName: string
 }
 
+/**
+ * Outcome of one auto attempt of a case, kept in {@link CaseRecord.attempts}.
+ */
+export interface CaseAttemptRecord {
+  /** Zero-based auto attempt of the task. */
+  attemptIndex: number
+  /** Non-negative duration of this attempt in milliseconds, from its first start to its end. */
+  durationMs: number
+  /** Timestamp of the attempt's `case.ended`. */
+  endedAt: string
+  /** Error message of a failed or timed-out attempt. */
+  errorMessage?: string
+  /** Retries within this attempt. */
+  retryCount: number
+  /** Score values of this attempt keyed by score kind. */
+  scores: Record<string, number>
+  /** Timestamp of the attempt's first `case.started`. */
+  startedAt: string
+  /** Terminal state of this attempt. */
+  state: CaseRecordState
+}
+
 /** Scalar and array metric values persisted in case records. */
 export type CaseMetricValue = boolean | null | number | readonly unknown[] | string
 
@@ -25,13 +47,27 @@ export type CaseMetricValue = boolean | null | number | readonly unknown[] | str
  * Expects:
  * - one record represents one final case outcome for one task in one run
  * - `metrics` stores JSON-safe scalar or array values emitted by task code
+ * - for tasks with auto attempts, the top-level fields describe the last attempt and `attempts` lists all of them
  *
  * Returns:
- * - a stable schema-versioned case projection for local report artifacts
+ * - a stable schema-versioned case projection for local report artifacts; optional fields are added
+ *   without bumping `schemaVersion`
  */
 export interface CaseRecord {
-  /** Attempt identity attached to the run. */
+  /** Attempt identity attached to the run (the `--attempt` label, not an auto attempt). */
   attemptId: string
+  /**
+   * Zero-based auto attempt of the final outcome. Present only when the task ran auto attempts.
+   */
+  attemptIndex?: number
+  /**
+   * Outcome of every auto attempt in order. Present only when the task ran auto attempts.
+   */
+  attempts?: CaseAttemptRecord[]
+  /**
+   * Additional full task attempts the case allows. Present only when the task ran auto attempts.
+   */
+  autoAttempt?: number
   /** Stable case id within the task. */
   caseId: string
   /** Human-readable case name. */
@@ -50,7 +86,7 @@ export interface CaseRecord {
   output?: unknown
   /** Project name for the task/case when known. */
   projectName: string
-  /** Number of retries represented in the final case outcome. */
+  /** Number of retries (`autoRetry`) within the final case outcome; auto attempts are not counted. */
   retryCount: number
   /** Run identity attached to the run. */
   runId: string
@@ -94,6 +130,10 @@ export interface ScoreSummaryBucket {
 
 interface CaseDraft {
   attemptId: string
+  attemptIndex?: number
+  attempts?: CaseAttemptRecord[]
+  attemptStartedAt?: string
+  autoAttempt?: number
   caseId: string
   caseName: string
   endedAt?: string
@@ -250,6 +290,21 @@ function applyCaseEnd(draft: CaseDraft, event: RunEventEnvelope, data: CaseEnded
   draft.output = data.output ?? draft.output
   draft.state = data.state
   draft.scores.exact ??= draft.state === 'passed' ? 1 : 0
+
+  if (data.attemptIndex != null) {
+    const startedAt = draft.attemptStartedAt ?? event.time
+    draft.attempts ??= []
+    draft.attempts.push({
+      attemptIndex: data.attemptIndex,
+      durationMs: calculateDurationMs(startedAt, event.time),
+      endedAt: event.time,
+      ...(data.errorMessage == null ? {} : { errorMessage: data.errorMessage }),
+      retryCount: draft.retryCount,
+      scores: { ...draft.scores },
+      startedAt,
+      state: data.state,
+    })
+  }
 }
 
 function applyCaseStart(draft: CaseDraft, event: RunEventEnvelope, data: CaseStartedData): void {
@@ -262,7 +317,21 @@ function applyCaseStart(draft: CaseDraft, event: RunEventEnvelope, data: CaseSta
   draft.scores = {}
   draft.state = undefined
   draft.input = data.input
-  draft.retryCount = Math.max(draft.retryCount, data.retryIndex ?? draft.startCount - 1)
+
+  if (data.attemptIndex == null) {
+    // Without auto attempts, every start after the first is a retry.
+    draft.retryCount = Math.max(draft.retryCount, data.retryIndex ?? draft.startCount - 1)
+    return
+  }
+
+  // A new auto attempt re-runs the case from scratch, so its retries are counted on their own.
+  if (draft.attemptIndex !== data.attemptIndex) {
+    draft.attemptIndex = data.attemptIndex
+    draft.attemptStartedAt = event.time
+    draft.retryCount = 0
+  }
+  draft.autoAttempt = data.autoAttempt
+  draft.retryCount = Math.max(draft.retryCount, data.retryIndex ?? 0)
 }
 
 /**
@@ -382,6 +451,9 @@ function toCaseRecord(draft: CaseDraft): CaseRecord {
 
   return {
     attemptId: draft.attemptId,
+    ...(draft.attemptIndex == null ? {} : { attemptIndex: draft.attemptIndex }),
+    ...(draft.attempts == null ? {} : { attempts: draft.attempts }),
+    ...(draft.autoAttempt == null ? {} : { autoAttempt: draft.autoAttempt }),
     caseId: draft.caseId,
     caseName: draft.caseName,
     durationMs: calculateDurationMs(startedAt, endedAt),
