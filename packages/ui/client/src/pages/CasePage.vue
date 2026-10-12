@@ -18,6 +18,7 @@ import ViewTabs from '../components/ViewTabs.vue'
 
 import { api } from '../api'
 import { useRunLive } from '../composables/useRunLive'
+import { useStatusFavicon } from '../composables/useStatusFavicon'
 import { formatDateTime, formatDuration, formatScore, formatTime, previewValue } from '../format'
 import { href, navigate } from '../router'
 import { runSwitcherOptions } from '../switcher'
@@ -74,6 +75,8 @@ const position = computed(() => ({
   taskName: detail.data.value?.taskDisplayName,
   workspace: props.run?.workspaceId,
 }))
+// The tab follows the case itself: its own outcome is what the page is about.
+useStatusFavicon(() => detail.data.value?.state)
 const running = computed(() => detail.data.value?.state === 'running')
 </script>
 
