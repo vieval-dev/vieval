@@ -150,11 +150,12 @@ function scoreDelta(cell: MatrixCell): number | undefined {
                       <span :class="[scoreDelta(cell)! > 0 ? 'i-mingcute-arrow-up-line' : 'i-mingcute-arrow-down-line']" aria-hidden="true" />{{ Math.abs(scoreDelta(cell)!).toFixed(1) }}
                     </span>
                   </span>
-                  <Sparkline :class="['ml-auto']" :values="cell.history.map(point => point.exact)" :label="`exact score of ${cell.history.length} runs`" :width="56" />
+                  <!-- The state of the newest run is the first thing to check, so it takes the corner. -->
+                  <StateBadge :class="['ml-auto']" :state="cell.latest.state" />
                 </span>
                 <span :class="['flex items-center gap-1.5 mt-1.5 text-xs muted min-w-0']">
-                  <StateBadge :state="cell.latest.state" icon-only />
                   <span :class="['truncate']">{{ attemptLabel(cell.latest.attemptId) }} · {{ cell.history.length }} run(s)</span>
+                  <Sparkline :class="['ml-auto']" :values="cell.history.map(point => point.exact)" :label="`exact score of ${cell.history.length} runs`" :width="48" :height="16" />
                 </span>
                 <CountsBar :class="['mt-2']" :counts="cell.latest.counts" labels="hover" />
               </a>

@@ -4,7 +4,7 @@ import type { BarDatum } from '../components/BarChart.vue'
 import type { Route } from '../router'
 
 import { useVirtualizer } from '@tanstack/vue-virtual'
-import { useMediaQuery } from '@vueuse/core'
+import { useIntervalFn, useMediaQuery, useTimestamp } from '@vueuse/core'
 import { computed, shallowRef, toRef, useTemplateRef, watch } from 'vue'
 
 import BarChart from '../components/BarChart.vue'
@@ -19,6 +19,7 @@ import { useRunLive } from '../composables/useRunLive'
 import { formatDuration, formatScore, formatTime } from '../format'
 import { levelIcons } from '../hierarchy'
 import { href } from '../router'
+import { runSwitcherOptions } from '../switcher'
 
 /**
  * One task (a matrix row of an eval entry): matrix values, scores per auto-attempt round, and all its cases.
@@ -33,10 +34,13 @@ const roundChart = computed<BarDatum[]>(() => rounds.value.map(round => ({ label
 
 const filter = shallowRef('')
 const cases = computed(() => (task.value?.cases ?? []).filter(node => node.name.toLowerCase().includes(filter.value.toLowerCase())))
+// Once per second: running cases show how long they have run, in whole seconds.
+const now = useTimestamp({ scheduler: callback => useIntervalFn(callback, 1000) })
+
 /** Narrow screens put the score and duration of a case under its name (fixed row heights, see `ExecutionTree`). */
 const wide = useMediaQuery('(min-width: 768px)')
 const scroller = useTemplateRef<HTMLElement>('scroller')
-const virtualizer = useVirtualizer(computed(() => ({ count: cases.value.length, estimateSize: () => (wide.value ? 32 : 48), getScrollElement: () => scroller.value ?? null, overscan: 10 })))
+const virtualizer = useVirtualizer(computed(() => ({ count: cases.value.length, estimateSize: () => (wide.value ? 32 : 54), getScrollElement: () => scroller.value ?? null, overscan: 10 })))
 // NOTICE: TanStack Virtual keeps cached sizes when only `estimateSize` changes; `measure()` drops them.
 // Removal condition: none while the row height depends on the screen width.
 watch(wide, () => virtualizer.value.measure())
@@ -53,7 +57,7 @@ const position = computed(() => ({
 </script>
 
 <template>
-  <PageHeader :loading="!live.snapshot.value && !live.error.value" level="task" :position="position" :title="task?.displayName ?? props.route.taskId" :subtitle="task?.entryId" />
+  <PageHeader :loading="!live.snapshot.value && !live.error.value" :siblings="runSwitcherOptions(live.snapshot.value, 'task')" level="task" :position="position" :title="task?.displayName ?? props.route.taskId" :subtitle="task?.entryId" />
   <StateView :error="live.error.value" :loading="!live.snapshot.value" :empty="live.snapshot.value != null && task == null" empty-text="This run has no such task (yet)" skeleton="task" @retry="live.reload">
     <template v-if="task">
       <section :class="['card p-3 mb-4 flex flex-wrap gap-x-8 gap-y-2 text-sm', 'max-md:(gap-x-6 gap-y-3)']">
@@ -80,7 +84,7 @@ const position = computed(() => ({
         <div :class="['min-w-64 max-md:(min-w-0 w-full)']">
           <div class="text-xs muted">
             Cases ({{ task.caseTotal ?? '?' }} expected)
-          </div><CountsBar :counts="task.caseCounts" />
+          </div><CountsBar :counts="task.caseCounts" labels="below" />
         </div>
         <div>
           <div class="text-xs muted">
@@ -128,15 +132,18 @@ const position = computed(() => ({
               <a
                 v-for="item in virtualizer.getVirtualItems()" :key="cases[item.index]!.key"
                 :href="href({ caseId: cases[item.index]!.caseId, name: 'case', runKey: props.route.runKey, taskId: props.route.taskId })"
-                :class="['absolute left-0 right-0 flex items-center gap-x-2 px-3 text-sm border-b border-neutral-100/70 dark:border-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800/50', 'max-md:(flex-wrap content-center gap-y-0.5 pl-1.5)', cases[item.index]!.state === 'running' && 'bg-blue-50 dark:bg-blue-950/40']"
+                :class="['absolute left-0 right-0 flex items-center gap-x-2 px-3 text-sm border-b border-neutral-100/70 dark:border-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800/50', 'max-md:(grid grid-cols-[auto_auto_minmax(0,1fr)] content-center gap-y-1)', cases[item.index]!.state === 'running' && 'bg-blue-50 dark:bg-blue-950/40']"
                 :style="{ height: `${item.size}px`, transform: `translateY(${item.start}px)` }"
               >
-                <span :class="['text-xs muted mono text-right w-10 max-md:w-8 shrink-0']">{{ cases[item.index]!.index + 1 }}</span>
+                <span :class="['text-xs muted mono text-right w-10 shrink-0', 'max-md:(w-auto min-w-5)']">{{ cases[item.index]!.index + 1 }}</span>
                 <StateBadge :state="cases[item.index]!.state" icon-only />
-                <span :class="['text-xs link mono truncate max-md:(flex-1 min-w-0)']">{{ cases[item.index]!.name }}</span>
-                <span v-if="cases[item.index]!.rounds.length > 1" class="badge state-neutral">{{ cases[item.index]!.rounds.length }} rounds</span>
-                <span v-if="(cases[item.index]!.rounds.at(-1)?.tries.length ?? 1) > 1" class="badge state-interrupted">{{ cases[item.index]!.rounds.at(-1)!.tries.length - 1 }} {{ cases[item.index]!.rounds.at(-1)!.tries.length === 2 ? 'retry' : 'retries' }}</span>
-                <span :class="['text-xs muted mono ml-auto whitespace-nowrap', 'max-md:(basis-full ml-0 pl-[4.25rem] text-[11px])']">exact {{ formatScore(cases[item.index]!.scores.exact) }} · {{ formatDuration(cases[item.index]!.durationMs) }}</span>
+                <span :class="['flex items-center gap-2 min-w-0']">
+                  <span :class="['text-xs max-md:text-[13px] link mono truncate']">{{ cases[item.index]!.name }}</span>
+                  <span v-if="cases[item.index]!.rounds.length > 1" class="badge state-neutral">{{ cases[item.index]!.rounds.length }} rounds</span>
+                  <span v-if="(cases[item.index]!.rounds.at(-1)?.tries.length ?? 1) > 1" class="badge state-interrupted">{{ cases[item.index]!.rounds.at(-1)!.tries.length - 1 }} {{ cases[item.index]!.rounds.at(-1)!.tries.length === 2 ? 'retry' : 'retries' }}</span>
+                </span>
+                <!-- Phones: under the name (third grid column), aligned with it. -->
+                <span :class="['text-xs muted mono ml-auto whitespace-nowrap', 'max-md:(col-start-3 ml-0)']"><template v-if="cases[item.index]!.state === 'running'"><span class="text-blue-700 dark:text-blue-300">running {{ formatDuration(Math.max(0, now - Date.parse(cases[item.index]!.rounds.at(-1)?.startedAt ?? cases[item.index]!.startedAt))) }}</span></template><template v-else>exact {{ formatScore(cases[item.index]!.scores.exact) }} · {{ formatDuration(cases[item.index]!.durationMs) }}</template></span>
               </a>
             </div>
           </div>

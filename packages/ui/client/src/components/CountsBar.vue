@@ -11,13 +11,15 @@ import { formatCount } from '../format'
  * `labels`:
  * - `inline` (lists and tables): the counts follow the bar as text; from 10 000 on in compact notation (`1M`, the
  *   exact number is the tooltip), and the text wraps below the bar when both do not fit side by side.
+ * - `below` (cards and summaries): the bar spans the full width and the counts sit under it, so the bar keeps its
+ *   length on narrow screens.
  * - `hover` (cards): no text; hovering or focusing the bar thickens it and shows each segment's count right above
  *   that segment, so a card stays a big number and a bar.
  */
 const props = withDefaults(defineProps<{
   counts: CaseCounts
   /** @default 'inline' */
-  labels?: 'hover' | 'inline'
+  labels?: 'below' | 'hover' | 'inline'
   /** Inline labels only. @default true */
   showText?: boolean
 }>(), { labels: 'inline', showText: true })
@@ -58,13 +60,13 @@ const summary = computed(() => parts.value.map(part => `${part.value} ${part.lab
       <div v-for="part in parts" :key="part.label" :class="[part.class, 'h-full rounded-full min-w-1.5']" :style="{ width: part.width }" />
     </div>
   </div>
-  <div v-else :class="['flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0']">
-    <div :class="['flex h-1.5 grow basis-24 min-w-24 gap-[2px] overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800']" role="img" :aria-label="summary" data-testid="counts-bar">
+  <div v-else :class="['min-w-0', props.labels === 'below' ? 'flex flex-col gap-1.5' : 'flex flex-wrap items-center gap-x-2 gap-y-1']">
+    <div :class="['flex h-1.5 gap-[2px] overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800', props.labels === 'below' ? 'w-full' : 'grow basis-24 min-w-24']" role="img" :aria-label="summary" data-testid="counts-bar">
       <div v-for="part in parts" :key="part.label" :class="[part.class, 'h-full rounded-full min-w-1.5']" :style="{ width: part.width }" :title="`${part.value} ${part.label}`" />
     </div>
     <span
       v-if="props.showText"
-      :class="['inline-flex items-center gap-1 shrink-0', 'mono text-xs muted whitespace-nowrap']"
+      :class="['inline-flex items-center gap-1 shrink-0', 'mono text-xs muted whitespace-nowrap', props.labels === 'below' && 'self-start']"
       :title="`${props.counts.passed} passed · ${failed} failed${props.counts.running ? ` · ${props.counts.running} running` : ''} · ${props.counts.total} total`"
       data-testid="counts-text"
     >

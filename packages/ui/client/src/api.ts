@@ -13,6 +13,7 @@ import type {
   OtelLogsResponse,
   OtelMetricsResponse,
   OtelTracesResponse,
+  ProgressResponse,
   RunListItem,
   RunSnapshot,
   ScoresResponse,
@@ -88,6 +89,8 @@ export const api = {
   otelMetrics: (runKey: string) => get<OtelMetricsResponse>(runPath(runKey, '/otel/metrics')),
   otelRaw: (runKey: string, signal: 'logs' | 'metrics' | 'traces') => get<unknown>(runPath(runKey, `/otel/raw/${signal}`)),
   otelTraces: (runKey: string) => get<OtelTracesResponse>(runPath(runKey, '/otel/traces')),
+  /** Progress and ETA of a run (`GET /api/runs/:runKey/progress`), the numbers of the run page's progress panel. */
+  progress: (runKey: string) => get<ProgressResponse>(runPath(runKey, '/progress')),
   run: (runKey: string) => get<RunListItem>(runPath(runKey)),
   runs: () => get<RunListItem[]>('runs'),
   scores: (runKey: string) => get<ScoresResponse>(runPath(runKey, '/scores')),

@@ -178,7 +178,7 @@ const position = computed(() => ({ experiment: query.value.experiment, project: 
           <div :class="['flex items-center gap-2 text-sm']">
             <StateBadge :state="run.state" /> exact <b class="tabular-nums">{{ formatScore(run.exactAverage) }}</b>
           </div>
-          <CountsBar :counts="run.counts" />
+          <CountsBar :counts="run.counts" labels="below" />
         </template>
         <div v-if="column.runs.length > 1" class="text-xs muted">
           newest of {{ column.runs.length }} runs
