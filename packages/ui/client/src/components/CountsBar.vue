@@ -10,10 +10,10 @@ import { formatCount } from '../format'
  * The one indicator of case outcomes in the viewer: a thin stacked bar of passed / failed / running / other cases.
  *
  * The bar never carries text next to it; the numbers are one hover away, depending on where it sits:
- * - `hover` (cards, summaries): hovering or focusing the bar thickens it and shows each segment's count right above
- *   that segment; the label row is reserved above the bar, so the card does not move.
- * - `tooltip` (list rows, tree rows, table cells, page headers): the counts open in a tooltip, so the bar fits a
- *   single line of any height.
+ * - `hover` (cards): hovering or focusing the bar thickens it and shows each segment's count right above that
+ *   segment, floating over what is above (no row is reserved, so cards keep their bars close together).
+ * - `tooltip` (list rows, tree rows, table cells, summaries, page headers): the counts open in a tooltip, so the bar
+ *   fits a single line of any height and lines up with the values around it.
  * - `none` (inside an option that is itself interactive, such as a switcher item): the bar alone, with the counts as
  *   its accessible name; the option around it says the rest.
  *
@@ -37,28 +37,28 @@ const parts = computed(() => {
     { class: 'bg-green-600 dark:bg-green-500', label: 'passed', text: 'text-green-700 dark:text-green-400', value: passed },
     { class: 'bg-red-600 dark:bg-red-500', label: 'failed', text: 'text-red-700 dark:text-red-400', value: failed + timeout },
     { class: 'bg-blue-500 vv-pulse', label: 'running', text: 'text-blue-700 dark:text-blue-400', value: running },
-    { class: 'bg-neutral-400 dark:bg-neutral-600', label: 'other', text: 'muted', value: other },
+    { class: 'bg-neutral-400 dark:bg-neutral-600', label: 'not run', text: 'muted', value: other },
   ].filter(part => part.value > 0).map(part => ({ ...part, width: `${(part.value / sum) * 100}%` }))
 })
 const summary = computed(() => [...parts.value.map(part => `${part.value} ${part.label}`), `${props.counts.total} total`].join(', '))
 </script>
 
 <template>
-  <!-- Hover labels: a label row with the same segment widths sits above the bar; the bar clips its own segments for
-       the round ends, so the labels cannot live inside them. -->
+  <!-- Hover labels: a label row with the same segment widths floats above the bar; the bar clips its own segments for
+       the round ends, so the labels cannot live inside them. Each label has its own backdrop, so it stays readable over
+       whatever it covers. -->
   <div
     v-if="props.labels === 'hover'"
     v-bind="$attrs"
-    :class="['group relative pt-5 outline-none']"
+    :class="['group relative py-1 -my-1 outline-none']"
     tabindex="0"
     role="img"
     :aria-label="summary"
-    :title="summary"
     data-testid="counts-bar-hover"
   >
-    <div :class="['absolute inset-x-0 top-0 flex gap-[2px]', 'opacity-0 translate-y-1 transition-all duration-200', 'group-hover:(opacity-100 translate-y-0) group-focus-visible:(opacity-100 translate-y-0)']" aria-hidden="true">
-      <span v-for="part in parts" :key="part.label" :class="['min-w-1.5 text-center text-xs font-semibold tabular-nums whitespace-nowrap', part.text]" :style="{ width: part.width }" data-testid="counts-segment-label">
-        {{ formatCount(part.value) }}
+    <div :class="['absolute inset-x-0 bottom-full z-1 flex gap-[2px] pointer-events-none', 'opacity-0 translate-y-1 transition-all duration-200', 'group-hover:(opacity-100 translate-y-0) group-focus-visible:(opacity-100 translate-y-0)']" aria-hidden="true">
+      <span v-for="part in parts" :key="part.label" :class="['flex justify-center min-w-1.5']" :style="{ width: part.width }">
+        <span :class="['rounded px-1 text-xs font-semibold tabular-nums whitespace-nowrap bg-neutral-100 dark:bg-neutral-800', part.text]" data-testid="counts-segment-label">{{ formatCount(part.value) }}</span>
       </span>
     </div>
     <div :class="['flex h-1.5 gap-[2px] overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800', 'transition-[height] duration-200 group-hover:h-2.5 group-focus-visible:h-2.5']" data-testid="counts-bar">

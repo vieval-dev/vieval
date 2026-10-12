@@ -9,6 +9,7 @@ import StateView from '../components/StateView.vue'
 import TimeAgo from '../components/TimeAgo.vue'
 
 import { useCatalog } from '../composables/useCatalog'
+import { countOf } from '../format'
 import { levelIcons } from '../hierarchy'
 import { formatAxisValues, mergeMatrices } from '../labels'
 import { href } from '../router'
@@ -56,7 +57,7 @@ const sections = computed(() => workspaces.value.map(workspace => ({ id: workspa
           :key="project.id"
           :href="href({ name: 'scope', project: project.id, workspace: section.id })"
           :score="project.best"
-          score-label="best exact"
+          :score-label="`best exact score of ${countOf(project.runs.length, 'run')}`"
           :state="project.latest.state"
           :counts="project.latest.counts"
           :run="project.latest"
@@ -68,14 +69,17 @@ const sections = computed(() => workspaces.value.map(workspace => ({ id: workspa
               <span :class="['truncate']">{{ project.id }}</span>
             </span>
           </template>
+          <!-- A running run says when it started in its progress line; a finished one says it here. -->
           <span>
-            {{ project.experiments.length }} experiment(s) · {{ project.runs.length }} run(s) · newest <TimeAgo :time="project.latest.startedAt" />
+            {{ countOf(project.experiments.length, 'experiment') }} · {{ countOf(project.runs.length, 'run') }}<template v-if="project.latest.state !== 'running'">
+              · last run <TimeAgo :time="project.latest.startedAt" relative-only />
+            </template>
           </span>
-          <span v-if="project.axes.length > 0" :class="['flex flex-wrap gap-1']">
+          <template v-if="project.axes.length > 0" #footer>
             <span v-for="axis in project.axes" :key="axis.axis" :class="['badge state-neutral font-normal']">
               <span class="muted">{{ axis.axis }}</span>{{ axis.values }}
             </span>
-          </span>
+          </template>
         </ScoreCard>
       </div>
     </section>

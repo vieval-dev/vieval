@@ -53,16 +53,15 @@ const startedAgo = computed(() => (props.startedAt == null ? undefined : formatD
 <template>
   <div :class="['flex flex-col gap-1.5 min-w-0']" data-testid="run-eta">
     <template v-if="view">
-      <span :class="['flex items-baseline flex-wrap gap-x-1.5 text-xs muted']">
-        <template v-if="view.finish">
-          Expected to end {{ view.lowerBound ? 'no earlier than' : 'at' }} <b :class="['font-semibold tabular-nums text-neutral-800 dark:text-neutral-200']">{{ view.finish }}</b>
-        </template>
-        <template v-else>
-          No estimate yet
-        </template>
-        <template v-if="startedAgo">
-          · started {{ startedAgo }} ago
-        </template>
+      <!-- Two facts, no separator: on a narrow card the second wraps below the first instead of starting with a dot. -->
+      <span :class="['flex items-baseline justify-between flex-wrap gap-x-3 text-xs muted']">
+        <span :class="['whitespace-nowrap']">
+          <template v-if="view.finish">
+            Ends {{ view.lowerBound ? 'after' : 'at' }} <b :class="['font-semibold tabular-nums text-neutral-800 dark:text-neutral-200']">{{ view.finish }}</b>
+          </template>
+          <template v-else>No estimate yet</template>
+        </span>
+        <span v-if="startedAgo" :class="['whitespace-nowrap']">started {{ startedAgo }} ago</span>
       </span>
       <TooltipRoot :delay-duration="150">
         <TooltipTrigger as-child>

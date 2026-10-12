@@ -10,7 +10,7 @@ import StateView from './StateView.vue'
 
 import { api } from '../api'
 import { useCatalog } from '../composables/useCatalog'
-import { shortTaskId } from '../format'
+import { countOf, shortTaskId } from '../format'
 import { attemptLabel } from '../labels'
 import { href } from '../router'
 
@@ -164,7 +164,7 @@ function scoreDelta(cell: MatrixCell): number | undefined {
                   </span>
                 </template>
                 <span :class="['flex items-center gap-1.5 min-w-0']" :title="`${attemptLabel(cell.latest.attemptId)} · ${cell.latest.runKey}`">
-                  <span :class="['truncate']">{{ attemptLabel(cell.latest.attemptId) }} · {{ cell.history.length }} run(s)</span>
+                  <span :class="['truncate']">{{ attemptLabel(cell.latest.attemptId) }} · {{ countOf(cell.history.length, 'run') }}</span>
                   <Sparkline :class="['ml-auto']" :values="cell.history.map(point => point.exact)" :label="`exact score of ${cell.history.length} runs`" :width="48" :height="16" />
                 </span>
               </ScoreCard>
