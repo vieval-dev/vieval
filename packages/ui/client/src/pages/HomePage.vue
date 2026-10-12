@@ -38,7 +38,7 @@ const sections = computed(() => workspaces.value.map(workspace => ({ id: workspa
 </script>
 
 <template>
-  <PageHeader :id="props.workspace" :level="props.workspace ? 'workspace' : 'home'" :position="{ workspace: props.workspace }" :title="props.workspace ?? 'Projects'">
+  <PageHeader :id="props.workspace" :loading="catalog.resource.loading.value" :level="props.workspace ? 'workspace' : 'home'" :position="{ workspace: props.workspace }" :title="props.workspace ?? 'Projects'">
     <template #subtitle>
       {{ projectCount }} project(s) · {{ runCount }} run(s)<template v-if="!props.workspace && workspaces.length === 1">
         · workspace {{ workspaces[0]!.id }}
@@ -46,13 +46,13 @@ const sections = computed(() => workspaces.value.map(workspace => ({ id: workspa
     </template>
   </PageHeader>
 
-  <StateView :error="catalog.resource.error.value" :loading="catalog.resource.loading.value" :empty="projectCount === 0" empty-text="No runs found" empty-hint="Runs appear here once `vieval run` writes a report below the viewer's report roots." @retry="catalog.resource.reload">
+  <StateView :error="catalog.resource.error.value" :loading="catalog.resource.loading.value" :empty="projectCount === 0" empty-text="No runs found" empty-hint="Runs appear here once `vieval run` writes a report below the viewer's report roots." skeleton="cards" @retry="catalog.resource.reload">
     <section v-for="section in sections" :key="section.id" :class="['mb-6']">
       <h2 v-if="workspaces.length > 1" :class="['flex items-center gap-2 mb-2 text-sm font-semibold']">
         <span :class="[levelIcons.workspace, 'muted']" aria-hidden="true" />
         <a :href="href({ name: 'scope', workspace: section.id })" :class="['link']">{{ section.id }}</a>
       </h2>
-      <div :class="['grid gap-3']" style="grid-template-columns: repeat(auto-fill, minmax(320px, 1fr))">
+      <div :class="['grid gap-3']" style="grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr))">
         <a
           v-for="project in section.projects"
           :key="project.id"

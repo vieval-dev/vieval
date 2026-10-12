@@ -66,7 +66,7 @@ function rowClass(active: boolean) {
 
 <template>
   <nav aria-label="Projects and runs" :class="['flex flex-col gap-4 text-sm']">
-    <StateView :error="catalog.resource.error.value" :loading="catalog.resource.loading.value" :empty="workspaces.length === 0" empty-text="No runs found" @retry="catalog.resource.reload">
+    <StateView :error="catalog.resource.error.value" :loading="catalog.resource.loading.value" :empty="workspaces.length === 0" empty-text="No runs found" skeleton="nav" @retry="catalog.resource.reload">
       <section>
         <h2 :class="['px-1.5 mb-1 text-xs font-medium muted']">
           Projects

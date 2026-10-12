@@ -106,7 +106,7 @@ function scoreDelta(cell: MatrixCell): number | undefined {
 </script>
 
 <template>
-  <StateView :error="matrix.error.value" :loading="matrix.loading.value" :empty="grids.length === 0" empty-text="No matrix rows" empty-hint="Runs without tasks have nothing to show here." @retry="matrix.reload">
+  <StateView :error="matrix.error.value" :loading="matrix.loading.value" :empty="grids.length === 0" empty-text="No matrix rows" empty-hint="Runs without tasks have nothing to show here." skeleton="matrix" @retry="matrix.reload">
     <p :class="['text-xs muted mb-3']">
       Newest run of every combination across {{ matrix.data.value?.runCount }} run(s); the line shows the exact score of each run before it.
     </p>
@@ -134,7 +134,7 @@ function scoreDelta(cell: MatrixCell): number | undefined {
               <a
                 v-if="cell"
                 :href="href({ name: 'task', runKey: cell.latest.runKey, taskId: cell.latest.taskId })"
-                :class="['flex flex-col w-56 rounded-xl p-3.5 transition-colors', 'bg-neutral-500/5 hover:bg-primary-500/8']"
+                :class="['flex flex-col w-44 md:w-56 rounded-xl p-3 md:p-3.5 transition-colors', 'bg-neutral-500/5 hover:bg-primary-500/8']"
                 :title="`${attemptLabel(cell.latest.attemptId)} · ${cell.latest.runKey}`"
                 data-testid="matrix-cell"
               >
@@ -158,7 +158,7 @@ function scoreDelta(cell: MatrixCell): number | undefined {
                 </span>
                 <CountsBar :class="['mt-2']" :counts="cell.latest.counts" labels="hover" />
               </a>
-              <span v-else :class="['flex items-center justify-center w-56 h-24 rounded-xl text-xs muted border border-dashed border-neutral-300/60 dark:border-neutral-700/40']">not run</span>
+              <span v-else :class="['flex items-center justify-center w-44 md:w-56 h-24 rounded-xl text-xs muted border border-dashed border-neutral-300/60 dark:border-neutral-700/40']">not run</span>
             </td>
           </tr>
         </tbody>

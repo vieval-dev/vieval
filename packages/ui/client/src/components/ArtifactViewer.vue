@@ -122,7 +122,7 @@ const loadJsonl = computed(() => {
       <iframe :src="src" sandbox="" referrerpolicy="no-referrer" :title="props.name" :class="['w-full h-[60vh] rounded border border-neutral-200/50 dark:border-neutral-800/50 bg-white']" data-testid="html-sandbox" />
     </template>
 
-    <StateView v-else :error="preview.error.value" :loading="preview.loading.value" @retry="preview.reload">
+    <StateView v-else :error="preview.error.value" :loading="preview.loading.value" skeleton="media" @retry="preview.reload">
       <template v-if="props.previewKind === 'binary'">
         <div :class="['rounded border border-dashed border-neutral-300/60 dark:border-neutral-700/40 p-4 flex flex-col items-center gap-2 text-center']" data-testid="binary-notice">
           <span class="i-mingcute-file-forbid-line text-3xl muted" aria-hidden="true" />

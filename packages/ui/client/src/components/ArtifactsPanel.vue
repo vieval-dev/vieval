@@ -42,8 +42,9 @@ const current = computed(() => props.artifacts.find(artifact => artifact.path ==
 
 <template>
   <StateView :empty="props.artifacts.length === 0" empty-text="No artifacts" empty-hint="Cases record files with context.recordArtifact(name, { body | path, contentType })." data-testid="artifacts-panel">
-    <div :class="['grid gap-3']" style="grid-template-columns: minmax(220px, 280px) minmax(0, 1fr)">
-      <ul :class="['flex flex-col gap-0.5 text-sm max-h-[70vh] overflow-auto']" aria-label="Artifacts">
+    <!-- Narrow screens stack the artifact list (shorter) above the preview. -->
+    <div :class="['grid gap-3 grid-cols-1 md:grid-cols-[minmax(220px,280px)_minmax(0,1fr)]']">
+      <ul :class="['flex flex-col gap-0.5 text-sm max-h-[70vh] max-md:max-h-48 overflow-auto']" aria-label="Artifacts">
         <li v-if="images.length > 1">
           <button type="button" :class="['flex items-center gap-1.5 w-full rounded px-2 py-1 text-left', selected === 'sequence' ? 'selected' : 'hover:bg-neutral-100 dark:hover:bg-neutral-800']" @click="selected = 'sequence'">
             <span class="i-mingcute-photo-album-line shrink-0" aria-hidden="true" /><span class="truncate">Image sequence</span><span class="text-xs muted ml-auto">{{ images.length }} frames</span>

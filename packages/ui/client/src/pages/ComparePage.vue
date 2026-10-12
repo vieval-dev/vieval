@@ -124,20 +124,20 @@ const position = computed(() => ({ experiment: query.value.experiment, project: 
   <PageHeader level="comparison" :position="position" :title="title" :subtitle="view == null ? 'Pick what to compare' : `${result?.columns.length ?? 0} columns · ${result?.summary.rows ?? 0} cases · ${result?.summary.changed ?? 0} differ`" />
 
   <template v-if="view == null">
-    <StateView :error="tree.error.value ?? runs.error.value" :loading="tree.loading.value" :empty="tree.data.value?.workspaces.length === 0" empty-text="No runs to compare" @retry="tree.reload">
+    <StateView :error="tree.error.value ?? runs.error.value" :loading="tree.loading.value" :empty="tree.data.value?.workspaces.length === 0" empty-text="No runs to compare" skeleton="rows" @retry="tree.reload">
       <section v-for="workspace in tree.data.value?.workspaces" :key="workspace.id" :class="['card mb-4']">
         <h2 class="card-title">
           <span :class="levelIcons.workspace" aria-hidden="true" />{{ workspace.id }}
         </h2>
         <div v-for="project in workspace.projects" :key="project.id" :class="['px-3 py-2 border-b last:border-b-0 border-neutral-100/70 dark:border-neutral-900']">
-          <div :class="['flex items-center gap-2 mb-1']">
+          <div :class="['flex items-center flex-wrap gap-2 mb-1']">
             <span :class="[levelIcons.project, 'muted']" aria-hidden="true" /><span class="font-medium">{{ project.id }}</span>
             <a :class="['btn text-xs ml-auto']" :href="href({ name: 'compare', query: { project: project.id, view: 'experiments', workspace: workspace.id } })">
               <span :class="levelIcons.experiment" aria-hidden="true" />Compare {{ project.experiments.length }} experiments
             </a>
           </div>
-          <ul :class="['pl-6 text-sm']">
-            <li v-for="experiment in project.experiments" :key="experiment.id" :class="['flex items-center gap-2 py-0.5']">
+          <ul :class="['pl-6 max-md:pl-2 text-sm']">
+            <li v-for="experiment in project.experiments" :key="experiment.id" :class="['flex items-center flex-wrap gap-x-2 py-0.5 max-md:py-1']">
               <ExperimentName :experiment-id="experiment.id" :matrix="catalog.matrixOf({ experiment: experiment.id, project: project.id, workspace: workspace.id })" />
               <a :class="['link text-xs ml-auto whitespace-nowrap']" :href="href({ name: 'compare', query: { experiment: experiment.id, project: project.id, view: 'attempts', workspace: workspace.id } })">compare {{ experiment.attempts.length }} attempts<span class="i-mingcute-arrow-right-line ml-0.5 align-[-0.15em]" aria-hidden="true" /></a>
             </li>
@@ -159,7 +159,7 @@ const position = computed(() => ({ experiment: query.value.experiment, project: 
     </StateView>
   </template>
 
-  <StateView v-else :error="resultError" :loading="resultLoading" :empty="result?.columns.length === 0" empty-text="Nothing to compare" empty-hint="This level has no runs with cases yet." @retry="reloadResult">
+  <StateView v-else :error="resultError" :loading="resultLoading" :empty="result?.columns.length === 0" empty-text="Nothing to compare" empty-hint="This level has no runs with cases yet." skeleton="panel" @retry="reloadResult">
     <div v-if="view === 'matrix'" :class="['flex items-center gap-2 mb-3 text-sm flex-wrap']">
       <span class="muted">Eval entry</span>
       <a
@@ -168,7 +168,7 @@ const position = computed(() => ({ experiment: query.value.experiment, project: 
         :class="['btn text-xs py-0.5', item.id === entry && 'btn-active']"
       >{{ item.id.split('/').at(-1) }} · {{ item.count }} rows</a>
     </div>
-    <section :class="['grid gap-3 mb-4']" :style="{ gridTemplateColumns: `repeat(auto-fill, minmax(240px, 1fr))` }">
+    <section :class="['grid gap-3 mb-4']" :style="{ gridTemplateColumns: `repeat(auto-fill, minmax(min(240px, 100%), 1fr))` }">
       <div v-for="column in result?.columns" :key="column.id" :class="['card p-3 flex flex-col gap-1.5']">
         <div :class="['text-xs font-medium min-w-0']">
           <IdLabel :id="column.label" :label="columnLabel(column)" />
@@ -196,10 +196,10 @@ const position = computed(() => ({ experiment: query.value.experiment, project: 
     </section>
 
     <section :class="['card']">
-      <h2 class="card-title">
+      <h2 :class="['card-title flex-wrap']">
         <span class="i-mingcute-table-line" aria-hidden="true" />Cases
         <label :class="['ml-auto flex items-center gap-1 text-xs font-normal']"><input v-model="onlyChanged" type="checkbox"> only differing</label>
-        <input v-model="search" type="search" placeholder="Filter cases…" :class="['rounded border border-neutral-300/60 dark:border-neutral-700/40 bg-transparent px-2 py-0.5 text-xs font-normal w-48']">
+        <input v-model="search" type="search" placeholder="Filter cases…" :class="['rounded border border-neutral-300/60 dark:border-neutral-700/40 bg-transparent px-2 py-0.5 text-xs font-normal w-48', 'max-md:(w-full py-1)']">
       </h2>
       <StateView :empty="rows.length === 0" empty-text="No case matches the filter">
         <div :class="['overflow-auto max-h-[70vh]']">
@@ -216,7 +216,7 @@ const position = computed(() => ({ experiment: query.value.experiment, project: 
             </thead>
             <tbody>
               <tr v-for="row in rows" :key="row.caseName" :class="['border-b border-neutral-100/70 dark:border-neutral-900', row.changed && 'bg-amber-50/60 dark:bg-amber-950/30']">
-                <td :class="['td mono text-xs break-all']">
+                <td :class="['td mono text-xs break-all max-md:min-w-40']">
                   <span v-if="row.changed" class="i-mingcute-git-compare-line text-amber-600 mr-1" title="Differs between columns" />{{ row.caseName }}
                 </td>
                 <td v-for="column in result?.columns" :key="column.id" class="td">

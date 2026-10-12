@@ -82,16 +82,16 @@ const gaugeCharts = computed(() => (gauges.data.value?.metrics ?? []).map(metric
   <section :class="['card']" data-testid="otel-panel">
     <ViewTabs v-model="tab" :items="tabItems" label="OpenTelemetry views" in-card>
       <template #extra>
-        <span :class="['ml-auto muted text-xs px-2 whitespace-nowrap']" title="See the viewer README, section Limits">Rebuilt from run events · no OTLP receiver, user spans, or cross-process traces</span>
+        <span :class="['ml-auto muted text-xs px-2 whitespace-nowrap max-md:hidden']" title="See the viewer README, section Limits">Rebuilt from run events · no OTLP receiver, user spans, or cross-process traces</span>
       </template>
 
-      <StateView v-if="tab === 'traces'" :error="traces.error.value" :loading="traces.loading.value" :empty="waterfall.list.length === 0" empty-text="No spans yet" @retry="traces.reload">
+      <StateView v-if="tab === 'traces'" :error="traces.error.value" :loading="traces.loading.value" :empty="waterfall.list.length === 0" empty-text="No spans yet" skeleton="lines" @retry="traces.reload">
         <div :class="['px-3 py-1.5 text-xs muted']">
           trace <span class="font-medium">{{ traces.data.value?.traceId }}</span> · {{ waterfall.list.length }} spans · {{ formatDuration(waterfall.end - waterfall.start) }}
         </div>
         <div :class="['overflow-auto max-h-[60vh]']">
           <div v-for="row in waterfall.list" :key="row.span.spanId" :class="['flex items-center text-xs h-6 border-b border-neutral-100/70 dark:border-neutral-900']">
-            <div :class="['w-96 shrink-0 flex items-center gap-1 truncate pr-2']" :style="{ paddingLeft: `${8 + row.depth * 14}px` }" :title="JSON.stringify(row.span.attributes, null, 2)">
+            <div :class="['w-40 md:w-96 shrink-0 flex items-center gap-1 truncate pr-2']" :style="{ paddingLeft: `${8 + row.depth * 14}px` }" :title="JSON.stringify(row.span.attributes, null, 2)">
               <StateBadge :state="row.span.status === 'unset' ? 'running' : row.span.status" icon-only />
               <span class="muted">{{ row.span.kind }}</span>
               <span class="text-xs mono truncate">{{ spanLabel(row.span) }}</span>
@@ -103,7 +103,7 @@ const gaugeCharts = computed(() => (gauges.data.value?.metrics ?? []).map(metric
         </div>
       </StateView>
 
-      <StateView v-else-if="tab === 'logs'" :error="logs.error.value" :loading="logs.loading.value" :empty="logs.data.value?.records.length === 0" empty-text="No log records" @retry="logs.reload">
+      <StateView v-else-if="tab === 'logs'" :error="logs.error.value" :loading="logs.loading.value" :empty="logs.data.value?.records.length === 0" empty-text="No log records" skeleton="lines" @retry="logs.reload">
         <div :class="['overflow-auto max-h-[60vh]']">
           <table :class="['w-full']">
             <tbody>
@@ -126,8 +126,8 @@ const gaugeCharts = computed(() => (gauges.data.value?.metrics ?? []).map(metric
         </div>
       </StateView>
 
-      <StateView v-else-if="tab === 'metrics'" :error="gauges.error.value" :loading="gauges.loading.value" :empty="gaugeCharts.length === 0" empty-text="No gauges" @retry="gauges.reload">
-        <div :class="['grid gap-4 p-3']" style="grid-template-columns: repeat(auto-fill, minmax(340px, 1fr))">
+      <StateView v-else-if="tab === 'metrics'" :error="gauges.error.value" :loading="gauges.loading.value" :empty="gaugeCharts.length === 0" empty-text="No gauges" skeleton="panel" @retry="gauges.reload">
+        <div :class="['grid gap-4 p-3']" style="grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr))">
           <div v-for="chart in gaugeCharts" :key="chart.name">
             <LineChart :name="`${chart.name} (gauge, ${chart.points.length} points)`" :points="chart.points" />
           </div>
@@ -138,7 +138,7 @@ const gaugeCharts = computed(() => (gauges.data.value?.metrics ?? []).map(metric
         <div :class="['px-3 py-2']">
           <SegmentedControl v-model="rawSignal" :items="(['traces', 'logs', 'metrics'] as const).map(signal => ({ label: `otlp/${signal}.json`, value: signal }))" label="OTLP file" />
         </div>
-        <StateView :error="raw.error.value" :loading="raw.loading.value" @retry="raw.reload">
+        <StateView :error="raw.error.value" :loading="raw.loading.value" skeleton="lines" @retry="raw.reload">
           <div :class="['p-3 overflow-auto max-h-[60vh]']">
             <ObjectTree :value="raw.data.value" :expand-depth="3" />
           </div>

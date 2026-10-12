@@ -69,6 +69,8 @@ export default defineConfig({
     'segmented-item': 'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs text-neutral-600 dark:text-neutral-300 transition-colors hover:text-neutral-900 dark:hover:text-neutral-100 focus-visible:(outline-2 outline-offset-1 outline-primary-500) data-[state=on]:(bg-white text-primary-700 shadow-sm font-medium) dark:data-[state=on]:(bg-neutral-700 text-primary-200)',
     // Selected row of a list (sidebar, file lists, JSONL rows).
     'selected': 'bg-primary-500/15 text-primary-900 dark:text-primary-100',
+    // Placeholder block of `LoadingSkeleton.vue`; `.skeleton` in styles.css sweeps a highlight across it.
+    'skeleton': 'rounded-md bg-neutral-500/12 dark:bg-neutral-500/16',
     'state-failed': 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300',
     'state-interrupted': 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300',
     'state-neutral': 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300',
