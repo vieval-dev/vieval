@@ -16,7 +16,7 @@ import { importViewer } from './viewer-host'
 const packageDirectory = fileURLToPath(new URL('../../', import.meta.url))
 const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
 const viewerStubStateKey = '__VIEVAL_VIEWER_STUB_STATE__'
-const MISSING_VIEWER_PACKAGE = '@vieval/viewer-not-installed'
+const MISSING_VIEWER_PACKAGE = '@vieval/ui-not-installed'
 const temporaryDirectories: string[] = []
 
 interface ViewerStubState {
@@ -28,7 +28,7 @@ interface ViewerStubState {
 }
 
 /**
- * Creates a project with one passing and one failing case and, optionally, a stand-in `@vieval/viewer`
+ * Creates a project with one passing and one failing case and, optionally, a stand-in `@vieval/ui`
  * package in its `node_modules` that records what the CLI does with it.
  */
 async function createViewerProject(options: { withViewerPackage: boolean }): Promise<string> {
@@ -55,11 +55,11 @@ describeTask('viewer-task', () => {
 `, 'utf-8')
 
   if (options.withViewerPackage) {
-    const viewerPackageDirectory = join(projectDirectory, 'node_modules', '@vieval', 'viewer')
+    const viewerPackageDirectory = join(projectDirectory, 'node_modules', '@vieval', 'ui')
     await mkdir(viewerPackageDirectory, { recursive: true })
     await writeFile(join(viewerPackageDirectory, 'package.json'), JSON.stringify({
       exports: { '.': { default: './index.mjs' } },
-      name: '@vieval/viewer',
+      name: '@vieval/ui',
       type: 'module',
       version: '0.0.0',
     }), 'utf-8')
@@ -302,7 +302,7 @@ describe('runEvalRunCli --with-viewer', () => {
     await runEvalRunCli(['run', '--config', join(projectDirectory, 'vieval.config.ts'), '--with-viewer'], {
       async importViewer(baseDirectory) {
         runs.push(baseDirectory)
-        // `@vieval/viewer` is a workspace package here, so a missing install is simulated by name.
+        // `@vieval/ui` is a workspace package here, so a missing install is simulated by name.
         return await importViewer(baseDirectory, MISSING_VIEWER_PACKAGE)
       },
     })

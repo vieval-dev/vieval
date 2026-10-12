@@ -4,8 +4,8 @@ export default defineConfig({
   test: {
     projects: [
       'packages/vieval',
-      'packages/viewer/vitest.server.config.ts',
-      'packages/viewer/vitest.client.config.ts',
+      'packages/ui/vitest.server.config.ts',
+      'packages/ui/vitest.client.config.ts',
     ],
   },
 })

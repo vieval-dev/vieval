@@ -70,7 +70,7 @@ function url(path: string, query: Record<string, number | string | undefined> = 
 }
 
 /**
- * Typed client of the `@vieval/viewer` HTTP API (contract in `API.md` and `src/shared/contract.ts`).
+ * Typed client of the `@vieval/ui` HTTP API (contract in `API.md` and `src/shared/contract.ts`).
  */
 export const api = {
   artifacts: (runKey: string, ref: Partial<CaseRef>) => get<ArtifactDescriptor[]>(runPath(runKey, '/artifacts'), ref),

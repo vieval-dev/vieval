@@ -1,4 +1,4 @@
-# `@vieval/viewer` HTTP API (contract version 1)
+# `@vieval/ui` HTTP API (contract version 1)
 
 The machine-readable contract is `src/shared/contract.ts`: one Valibot schema per response, with the TypeScript
 types inferred from it. `src/server/app.test.ts` validates real responses (copied OSWorld reports) against these
@@ -188,7 +188,7 @@ data: {"seq":251,"state":"ended"}                   ← terminal state reached; 
 ```
 
 Client pattern: `GET /snapshot`, then open the stream with `after=snapshot.seq` and apply each `run-event` with the
-same reducer (`@vieval/viewer/reduce`). Finished and legacy runs send their backlog, one `progress`, and `end`.
+same reducer (`@vieval/ui/reduce`). Finished and legacy runs send their backlog, one `progress`, and `end`.
 
 ## Security
 

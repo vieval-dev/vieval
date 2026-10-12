@@ -64,9 +64,9 @@ jobs:
       - name: Install
         run: pnpm install
 
-      # The viewer's component tests run in Vitest browser mode (Playwright Chromium, packages/viewer/vitest.client.config.ts).
+      # The viewer's component tests run in Vitest browser mode (Playwright Chromium, packages/ui/vitest.client.config.ts).
       - name: Install Playwright Chromium
-        run: pnpm -F @vieval/viewer exec playwright install --with-deps chromium
+        run: pnpm -F @vieval/ui exec playwright install --with-deps chromium
 
       - name: Vitest
         run: |

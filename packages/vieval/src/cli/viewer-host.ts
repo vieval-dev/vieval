@@ -9,7 +9,7 @@ import { errorMessageFrom } from '@moeru/std'
 /**
  * Package that implements the web viewer. It is optional: `vieval` never imports it unless asked to.
  */
-export const VIEWER_PACKAGE_NAME = '@vieval/viewer'
+export const VIEWER_PACKAGE_NAME = '@vieval/ui'
 
 /**
  * Default viewer port of `vieval run --with-viewer` and `vieval viewer`, the same as `vitest --ui`.
@@ -132,7 +132,7 @@ export interface ViewerHost {
 }
 
 /**
- * Module shape `@vieval/viewer` must export.
+ * Module shape `@vieval/ui` must export.
  */
 export interface ViewerModule {
   startViewer: (options: StartViewerOptions) => Promise<ViewerHost>

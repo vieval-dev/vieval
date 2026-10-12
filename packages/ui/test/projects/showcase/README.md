@@ -1,6 +1,6 @@
-# `@vieval/viewer-showcase-fixture`
+# `@vieval/ui-showcase-fixture`
 
-A real vieval eval project. Its runs write reports that use every feature of the web viewer (`@vieval/viewer`).
+A real vieval eval project. Its runs write reports that use every feature of the web viewer (`@vieval/ui`).
 Use these reports for screenshots and manual checks, instead of hand-written JSON.
 
 All models use the `mock` inference executor. The run does not use the network.
@@ -46,7 +46,7 @@ Reports go to `.vieval/reports/default-workspace/showcase/<experiment>/<attempt>
 Open the reports in the viewer (from the repository root):
 
 ```shell
-node packages/vieval/dist/bin/vieval.mjs viewer packages/viewer/test/projects/showcase/.vieval/reports --port 51288
+node packages/vieval/dist/bin/vieval.mjs viewer packages/ui/test/projects/showcase/.vieval/reports --port 51288
 ```
 
 To look at a run while it is in progress, run `pnpm exec vieval run --with-viewer` in this directory, or start the viewer

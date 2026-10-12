@@ -32,7 +32,7 @@ const PLACEHOLDER_HTML = `<!doctype html><meta charset="utf-8"><title>vieval vie
 <h1>vieval viewer</h1>
 <p>The API is running. The web UI is not bundled in this build.</p>
 <ul><li><a href="/api/health">/api/health</a></li><li><a href="/api/tree">/api/tree</a></li><li><a href="/api/runs">/api/runs</a></li></ul>
-<p>See <code>packages/viewer/API.md</code> for the contract.</p></body>`
+<p>See <code>packages/ui/API.md</code> for the contract.</p></body>`
 
 export interface CreateViewerAppOptions {
   /**

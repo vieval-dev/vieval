@@ -110,7 +110,7 @@ export function parseViewerCliArguments(argv: readonly string[], cwd = process.c
  *   -> {@link runViewerCli}
  *     -> {@link parseViewerCliArguments}
  *     -> {@link importViewer}
- *       -> `startViewer({ mode: 'static', ... })` of `@vieval/viewer`
+ *       -> `startViewer({ mode: 'static', ... })` of `@vieval/ui`
  *     -> `ViewerHost.waitUntilClosed()`
  */
 export async function runViewerCli(argv: readonly string[], runtime: ViewerCliRuntime = {}): Promise<void> {
