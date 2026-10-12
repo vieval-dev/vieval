@@ -3,7 +3,8 @@ import type { RunListItem } from '../../../src/shared/contract'
 import type { ViewTab } from '../components/ViewTabs.vue'
 import type { Route } from '../router'
 
-import { computed, toRef } from 'vue'
+import { useQuery } from '@pinia/colada'
+import { computed, toRef, watch } from 'vue'
 
 import ArtifactsPanel from '../components/ArtifactsPanel.vue'
 import CaseTimeline from '../components/CaseTimeline.vue'
@@ -16,7 +17,6 @@ import StateView from '../components/StateView.vue'
 import ViewTabs from '../components/ViewTabs.vue'
 
 import { api } from '../api'
-import { useResource } from '../composables/useResource'
 import { useRunLive } from '../composables/useRunLive'
 import { formatDateTime, formatDuration, formatScore, formatTime, previewValue } from '../format'
 import { href, navigate } from '../router'
@@ -30,9 +30,19 @@ const props = defineProps<{ route: Extract<Route, { name: 'case' }>, run?: RunLi
 
 const live = useRunLive(toRef(() => props.route.runKey))
 const ref = computed(() => ({ caseId: props.route.caseId, taskId: props.route.taskId }))
+const detail = useQuery({
+  key: () => ['runs', props.route.runKey, 'case', props.route.taskId, props.route.caseId],
+  query: () => api.case(props.route.runKey, ref.value),
+})
+const timeline = useQuery({
+  key: () => ['runs', props.route.runKey, 'case', props.route.taskId, props.route.caseId, 'timeline'],
+  query: () => api.timeline(props.route.runKey, ref.value),
+})
 // Re-read the case whenever the run advanced; finished cases do not change, so the cost is one request per refresh.
-const detail = useResource(() => [props.route.runKey, ref.value, live.refreshKey.value] as const, ([runKey, caseRef]) => api.case(runKey, caseRef), { keepData: true })
-const timeline = useResource(() => [props.route.runKey, ref.value, live.refreshKey.value] as const, ([runKey, caseRef]) => api.timeline(runKey, caseRef), { keepData: true })
+watch(live.refreshKey, () => {
+  void detail.refetch()
+  void timeline.refetch()
+})
 
 type Tab = 'artifacts' | 'evidence' | 'inference' | 'logs' | 'overview'
 const tabs = computed<ViewTab<Tab>[]>(() => [
@@ -68,7 +78,7 @@ const running = computed(() => detail.data.value?.state === 'running')
 </script>
 
 <template>
-  <PageHeader :loading="detail.loading.value" :siblings="runSwitcherOptions(live.snapshot.value, 'case', props.route.taskId)" level="case" :position="position" :title="detail.data.value?.name ?? props.route.caseId">
+  <PageHeader :loading="detail.isPending.value" :siblings="runSwitcherOptions(live.snapshot.value, 'case', props.route.taskId)" level="case" :position="position" :title="detail.data.value?.name ?? props.route.caseId">
     <template #subtitle>
       <template v-if="detail.data.value">
         case #{{ detail.data.value.index + 1 }} of <a :class="['link']" :href="href({ name: 'task', runKey: props.route.runKey, taskId: props.route.taskId })">{{ detail.data.value.taskDisplayName }}</a>
@@ -86,7 +96,7 @@ const running = computed(() => detail.data.value?.state === 'running')
     </template>
   </PageHeader>
 
-  <StateView :error="detail.error.value" :loading="detail.loading.value" loading-text="Reading the case…" skeleton="case" @retry="detail.reload">
+  <StateView :error="detail.error.value" :loading="detail.isPending.value" loading-text="Reading the case…" skeleton="case" @retry="detail.refetch()">
     <template v-if="detail.data.value">
       <ViewTabs v-model="tab" :items="tabs" :href="value => href(tabRoute(value))" label="Case views">
         <div v-if="tab === 'overview'" :class="['flex flex-col gap-4']">
@@ -98,7 +108,7 @@ const running = computed(() => detail.data.value?.state === 'running')
               <span class="i-mingcute-chart-horizontal-2-line" aria-hidden="true" />Rounds (auto attempts) and retries
               <span class="text-xs muted font-normal">{{ detail.data.value.rounds.length }} round(s) · {{ detail.data.value.rounds.reduce((sum, round) => sum + round.tries.length, 0) }} tries</span>
             </h2>
-            <StateView :error="timeline.error.value" :loading="timeline.loading.value" :empty="timeline.data.value?.entries.length === 0" skeleton="lines" :skeleton-count="2" @retry="timeline.reload">
+            <StateView :error="timeline.error.value" :loading="timeline.isPending.value" :empty="timeline.data.value?.entries.length === 0" skeleton="lines" :skeleton-count="2" @retry="timeline.refetch()">
               <div class="p-3">
                 <CaseTimeline v-if="timeline.data.value" :timeline="timeline.data.value" />
               </div>

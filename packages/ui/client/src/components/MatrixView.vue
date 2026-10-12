@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { MatrixCell, MatrixResponse } from '../../../src/shared/contract'
 
-import { computed } from 'vue'
+import { useQuery } from '@pinia/colada'
+import { computed, watch } from 'vue'
 
 import CountsBar from './CountsBar.vue'
 import Sparkline from './Sparkline.vue'
@@ -9,7 +10,7 @@ import StateBadge from './StateBadge.vue'
 import StateView from './StateView.vue'
 
 import { api } from '../api'
-import { useResource } from '../composables/useResource'
+import { useCatalog } from '../composables/useCatalog'
 import { formatScore, shortTaskId } from '../format'
 import { attemptLabel } from '../labels'
 import { href } from '../router'
@@ -21,7 +22,15 @@ import { href } from '../router'
  */
 const props = defineProps<{ experiment?: string, project: string, workspace: string }>()
 
-const matrix = useResource(() => ({ experiment: props.experiment, project: props.project, workspace: props.workspace }), scope => api.matrix(scope))
+const matrix = useQuery({
+  key: () => ['matrix', { experiment: props.experiment ?? null, project: props.project, workspace: props.workspace }],
+  query: () => api.matrix({ experiment: props.experiment, project: props.project, workspace: props.workspace }),
+})
+
+// The catalog polls every run; when a run of this scope advanced, its cells (scores, counts, state) are re-read.
+const catalog = useCatalog()
+const scopeRuns = computed(() => catalog.runsIn({ experiment: props.experiment, project: props.project, workspace: props.workspace }))
+watch(() => scopeRuns.value.map(run => `${run.runKey}:${run.lastSeq}`).join(','), () => void matrix.refetch())
 
 /** Values of one cell along every axis, `run.` and `eval.` prefixed so equal axis names cannot collide. */
 function coordinates(cell: MatrixCell): Record<string, string> {
@@ -106,7 +115,7 @@ function scoreDelta(cell: MatrixCell): number | undefined {
 </script>
 
 <template>
-  <StateView :error="matrix.error.value" :loading="matrix.loading.value" :empty="grids.length === 0" empty-text="No matrix rows" empty-hint="Runs without tasks have nothing to show here." skeleton="matrix" @retry="matrix.reload">
+  <StateView :error="matrix.error.value" :loading="matrix.isPending.value" :empty="grids.length === 0" empty-text="No matrix rows" empty-hint="Runs without tasks have nothing to show here." skeleton="matrix" @retry="matrix.refetch()">
     <p :class="['text-xs muted mb-3']">
       Newest run of every combination across {{ matrix.data.value?.runCount }} run(s); the line shows the exact score of each run before it.
     </p>

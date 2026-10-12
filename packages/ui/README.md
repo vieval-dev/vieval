@@ -84,7 +84,8 @@ page header (and on attempt rows) copies it. Comparisons open from the *Compare*
 On screens narrower than 768 px (phones), the sidebar becomes a drawer behind the menu button of a top bar, the
 breadcrumb is one line that scrolls sideways, and list rows stack their columns (for example the run, duration, and
 cases of an attempt below its time). A run page shows progress, ETA, and expected finish right under the progress bar.
-While a view loads, a skeleton in its shape stands in for it. To follow a run from a phone, bind the viewer to an
+While a view loads, a skeleton in its shape stands in for it; responses are cached (Pinia Colada), so a view opened
+again shows at once and refreshes in place. To follow a run from a phone, bind the viewer to an
 address the phone can reach, for example a Tailscale address or `--host 0.0.0.0` on a trusted network (binding all
 interfaces turns off the `Host` check).
 

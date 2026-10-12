@@ -62,13 +62,13 @@ const rowGrid = [
 </script>
 
 <template>
-  <PageHeader :id="props.project" :loading="catalog.resource.loading.value" level="project" :position="{ project: props.project, workspace: props.workspace }" :title="props.project">
+  <PageHeader :id="props.project" :loading="catalog.query.isPending.value" level="project" :position="{ project: props.project, workspace: props.workspace }" :title="props.project">
     <template #subtitle>
       {{ project?.experiments.length ?? 0 }} experiment(s) · {{ project?.runs.length ?? 0 }} run(s)
     </template>
   </PageHeader>
 
-  <StateView :error="catalog.resource.error.value" :loading="catalog.resource.loading.value" :empty="project == null" empty-text="No runs in this project" empty-hint="Runs appear here once `vieval run` writes a report below the viewer's report roots." skeleton="rows" @retry="catalog.resource.reload">
+  <StateView :error="catalog.query.error.value" :loading="catalog.query.isPending.value" :empty="project == null" empty-text="No runs in this project" empty-hint="Runs appear here once `vieval run` writes a report below the viewer's report roots." skeleton="rows" @retry="catalog.query.refetch()">
     <ViewTabs v-model="tab" :items="tabs" label="Project views" :href="value => href(tabRoute(value))">
       <section v-if="tab === 'experiments'" :class="['card']">
         <div :class="[...rowGrid, 'max-md:hidden px-3 py-1.5 border-b border-neutral-200/50 dark:border-neutral-800/50', 'text-xs font-medium muted']" aria-hidden="true">

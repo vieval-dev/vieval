@@ -4,6 +4,7 @@ import type { FileLocation } from '../api'
 import type { Segment } from './SegmentedControl.vue'
 
 import { errorMessageFrom } from '@moeru/std'
+import { useQuery } from '@pinia/colada'
 import { parse as parseToml } from 'smol-toml'
 import { computed, shallowRef } from 'vue'
 import { parse as parseYaml } from 'yaml'
@@ -16,7 +17,6 @@ import SegmentedControl from './SegmentedControl.vue'
 import StateView from './StateView.vue'
 
 import { jsonlPage, rawUrl, readText } from '../api'
-import { useResource } from '../composables/useResource'
 import { formatBytes } from '../format'
 
 /**
@@ -54,11 +54,15 @@ interface Preview {
   text?: { text: string, total: number, truncated: boolean }
 }
 
-// `useResource` drops the response of a file that is no longer shown, so switching files quickly never shows the
-// previous file's content.
+// Every file is its own cache entry, so switching files quickly never shows the previous file's content.
 // Keyed by the file's identity, not the `location` object, which a parent may rebuild on every render.
-const preview = useResource(() => [props.location.runKey, props.location.linkId, props.location.path, props.previewKind] as const, async ([, , , kind]): Promise<Preview> => {
-  const location = props.location
+const preview = useQuery({
+  key: () => ['file-preview', props.location.runKey, props.location.linkId ?? null, props.location.path, props.previewKind],
+  query: () => loadPreview(props.location, props.previewKind),
+})
+
+/** Reads what the preview of `kind` shows: parsed structured data, text, or the first bytes as hex. */
+async function loadPreview(location: FileLocation, kind: PreviewKind): Promise<Preview> {
   if (kind !== 'json' && kind !== 'yaml' && kind !== 'toml' && kind !== 'text' && kind !== 'binary')
     return {}
   if (kind === 'binary') {
@@ -80,7 +84,7 @@ const preview = useResource(() => [props.location.runKey, props.location.linkId,
   catch (caught) {
     return { parsed: { error: `Could not parse as ${kind.toUpperCase()}: ${errorMessageFrom(caught) ?? 'unknown error'}` }, text }
   }
-})
+}
 const text = computed(() => preview.data.value?.text)
 const parsed = computed(() => preview.data.value?.parsed)
 const hex = computed(() => preview.data.value?.hex)
@@ -122,7 +126,7 @@ const loadJsonl = computed(() => {
       <iframe :src="src" sandbox="" referrerpolicy="no-referrer" :title="props.name" :class="['w-full h-[60vh] rounded border border-neutral-200/50 dark:border-neutral-800/50 bg-white']" data-testid="html-sandbox" />
     </template>
 
-    <StateView v-else :error="preview.error.value" :loading="preview.loading.value" skeleton="media" @retry="preview.reload">
+    <StateView v-else :error="preview.error.value" :loading="preview.isPending.value" skeleton="media" @retry="preview.refetch()">
       <template v-if="props.previewKind === 'binary'">
         <div :class="['rounded border border-dashed border-neutral-300/60 dark:border-neutral-700/40 p-4 flex flex-col items-center gap-2 text-center']" data-testid="binary-notice">
           <span class="i-mingcute-file-forbid-line text-3xl muted" aria-hidden="true" />

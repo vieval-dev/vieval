@@ -3,6 +3,7 @@ import type { RunListItem } from '../../../src/shared/contract'
 import type { BarDatum } from '../components/BarChart.vue'
 import type { Route } from '../router'
 
+import { useQuery } from '@pinia/colada'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useIntervalFn, useMediaQuery, useTimestamp } from '@vueuse/core'
 import { computed, shallowRef, toRef, useTemplateRef, watch } from 'vue'
@@ -14,7 +15,6 @@ import StateBadge from '../components/StateBadge.vue'
 import StateView from '../components/StateView.vue'
 
 import { api } from '../api'
-import { useResource } from '../composables/useResource'
 import { useRunLive } from '../composables/useRunLive'
 import { formatDuration, formatScore, formatTime } from '../format'
 import { levelIcons } from '../hierarchy'
@@ -28,7 +28,12 @@ const props = defineProps<{ route: Extract<Route, { name: 'task' }>, run?: RunLi
 
 const live = useRunLive(toRef(() => props.route.runKey))
 const task = computed(() => live.snapshot.value?.tasks.find(item => item.id === props.route.taskId))
-const timeline = useResource(() => [props.route.runKey, props.route.taskId, live.refreshKey.value] as const, ([runKey, taskId]) => api.timeline(runKey, { taskId }), { keepData: true })
+const timeline = useQuery({
+  key: () => ['runs', props.route.runKey, 'task', props.route.taskId, 'timeline'],
+  query: () => api.timeline(props.route.runKey, { taskId: props.route.taskId }),
+})
+// The run advanced: re-read the same entry, so the rounds keep showing meanwhile.
+watch(live.refreshKey, () => void timeline.refetch())
 const rounds = computed(() => timeline.data.value?.rounds.find(item => item.taskId === props.route.taskId)?.rounds ?? [])
 const roundChart = computed<BarDatum[]>(() => rounds.value.map(round => ({ label: `round ${round.roundIndex}`, values: [round.passed / Math.max(1, round.passed + round.failed + round.running)] })))
 

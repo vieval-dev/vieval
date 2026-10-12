@@ -3,7 +3,8 @@ import type { OtelSpan, RunSnapshot } from '../../../src/shared/contract'
 import type { LinePoint } from './LineChart.vue'
 import type { ViewTab } from './ViewTabs.vue'
 
-import { computed, shallowRef } from 'vue'
+import { useQuery } from '@pinia/colada'
+import { computed, shallowRef, watch } from 'vue'
 
 import LineChart from './LineChart.vue'
 import ObjectTree from './ObjectTree.vue'
@@ -13,7 +14,6 @@ import StateView from './StateView.vue'
 import ViewTabs from './ViewTabs.vue'
 
 import { api } from '../api'
-import { useResource } from '../composables/useResource'
 import { extent } from '../extent'
 import { formatDuration, formatTime } from '../format'
 
@@ -35,11 +35,17 @@ type Tab = 'logs' | 'metrics' | 'raw' | 'traces'
 const tab = shallowRef<Tab>('traces')
 const tabItems: ViewTab<Tab>[] = [{ label: 'Traces', value: 'traces' }, { label: 'Logs', value: 'logs' }, { label: 'Metrics', value: 'metrics' }, { label: 'Raw otlp/*.json', value: 'raw' }]
 
-const traces = useResource(() => [runKey.value, props.refreshKey] as const, ([key]) => api.otelTraces(key), { keepData: true })
-const logs = useResource(() => [runKey.value, props.refreshKey] as const, ([key]) => api.otelLogs(key), { keepData: true })
-const gauges = useResource(() => [runKey.value, props.refreshKey] as const, ([key]) => api.otelMetrics(key), { keepData: true })
+const traces = useQuery({ key: () => ['runs', runKey.value, 'otel', 'traces'], query: () => api.otelTraces(runKey.value) })
+const logs = useQuery({ key: () => ['runs', runKey.value, 'otel', 'logs'], query: () => api.otelLogs(runKey.value) })
+const gauges = useQuery({ key: () => ['runs', runKey.value, 'otel', 'metrics'], query: () => api.otelMetrics(runKey.value) })
+// The run advanced: re-read the same entries, so the panels keep showing the previous data meanwhile.
+watch(() => props.refreshKey, () => {
+  void traces.refetch()
+  void logs.refetch()
+  void gauges.refetch()
+})
 const rawSignal = shallowRef<'logs' | 'metrics' | 'traces'>('traces')
-const raw = useResource(() => [runKey.value, rawSignal.value] as const, ([key, signal]) => api.otelRaw(key, signal))
+const raw = useQuery({ key: () => ['runs', runKey.value, 'otel', 'raw', rawSignal.value], query: () => api.otelRaw(runKey.value, rawSignal.value) })
 
 /** Spans in tree order with depth, and their position on the run's time axis. */
 const waterfall = computed(() => {
@@ -85,7 +91,7 @@ const gaugeCharts = computed(() => (gauges.data.value?.metrics ?? []).map(metric
         <span :class="['ml-auto muted text-xs px-2 whitespace-nowrap max-md:hidden']" title="See the viewer README, section Limits">Rebuilt from run events · no OTLP receiver, user spans, or cross-process traces</span>
       </template>
 
-      <StateView v-if="tab === 'traces'" :error="traces.error.value" :loading="traces.loading.value" :empty="waterfall.list.length === 0" empty-text="No spans yet" skeleton="lines" @retry="traces.reload">
+      <StateView v-if="tab === 'traces'" :error="traces.error.value" :loading="traces.isPending.value" :empty="waterfall.list.length === 0" empty-text="No spans yet" skeleton="lines" @retry="traces.refetch()">
         <div :class="['px-3 py-1.5 text-xs muted']">
           trace <span class="font-medium">{{ traces.data.value?.traceId }}</span> · {{ waterfall.list.length }} spans · {{ formatDuration(waterfall.end - waterfall.start) }}
         </div>
@@ -103,7 +109,7 @@ const gaugeCharts = computed(() => (gauges.data.value?.metrics ?? []).map(metric
         </div>
       </StateView>
 
-      <StateView v-else-if="tab === 'logs'" :error="logs.error.value" :loading="logs.loading.value" :empty="logs.data.value?.records.length === 0" empty-text="No log records" skeleton="lines" @retry="logs.reload">
+      <StateView v-else-if="tab === 'logs'" :error="logs.error.value" :loading="logs.isPending.value" :empty="logs.data.value?.records.length === 0" empty-text="No log records" skeleton="lines" @retry="logs.refetch()">
         <div :class="['overflow-auto max-h-[60vh]']">
           <table :class="['w-full']">
             <tbody>
@@ -126,7 +132,7 @@ const gaugeCharts = computed(() => (gauges.data.value?.metrics ?? []).map(metric
         </div>
       </StateView>
 
-      <StateView v-else-if="tab === 'metrics'" :error="gauges.error.value" :loading="gauges.loading.value" :empty="gaugeCharts.length === 0" empty-text="No gauges" skeleton="panel" @retry="gauges.reload">
+      <StateView v-else-if="tab === 'metrics'" :error="gauges.error.value" :loading="gauges.isPending.value" :empty="gaugeCharts.length === 0" empty-text="No gauges" skeleton="panel" @retry="gauges.refetch()">
         <div :class="['grid gap-4 p-3']" style="grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr))">
           <div v-for="chart in gaugeCharts" :key="chart.name">
             <LineChart :name="`${chart.name} (gauge, ${chart.points.length} points)`" :points="chart.points" />
@@ -138,7 +144,7 @@ const gaugeCharts = computed(() => (gauges.data.value?.metrics ?? []).map(metric
         <div :class="['px-3 py-2']">
           <SegmentedControl v-model="rawSignal" :items="(['traces', 'logs', 'metrics'] as const).map(signal => ({ label: `otlp/${signal}.json`, value: signal }))" label="OTLP file" />
         </div>
-        <StateView :error="raw.error.value" :loading="raw.loading.value" skeleton="lines" @retry="raw.reload">
+        <StateView :error="raw.error.value" :loading="raw.isPending.value" skeleton="lines" @retry="raw.refetch()">
           <div :class="['p-3 overflow-auto max-h-[60vh]']">
             <ObjectTree :value="raw.data.value" :expand-depth="3" />
           </div>

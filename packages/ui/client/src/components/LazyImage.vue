@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import type { FileLocation } from '../api'
 
+import { useQuery } from '@pinia/colada'
 import { UnLazyImage } from '@unlazy/vue/components'
 import { thumbHashToDataURL } from 'thumbhash'
 import { computed, shallowRef, watch } from 'vue'
 
 import { imagePreview, rawUrl } from '../api'
-import { useResource } from '../composables/useResource'
 
 /**
  * Image of a run artifact or an evidence file that loads with a blurred ThumbHash placeholder.
@@ -32,7 +32,12 @@ const props = defineProps<{
 /** 1 × 1 transparent GIF: the sizer of an image whose preview has no ThumbHash. */
 const TRANSPARENT_PIXEL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
 
-const preview = useResource(() => [props.location.runKey, props.location.linkId, props.location.path] as const, () => imagePreview(props.location), { keepData: true })
+const preview = useQuery({
+  key: () => ['image-preview', props.location.runKey, props.location.linkId ?? null, props.location.path],
+  // The next frame keeps the previous frame's size until its own preview arrived (see above).
+  placeholderData: previous => previous,
+  query: () => imagePreview(props.location),
+})
 const src = computed(() => rawUrl(props.location))
 const loaded = shallowRef(false)
 /** Last image that finished loading; shown under a newer one until that one loaded. */
@@ -83,7 +88,7 @@ const sized = computed(() => size.value != null)
       data-testid="image-previous"
     >
     <UnLazyImage
-      v-if="sized || !preview.loading.value"
+      v-if="sized || !preview.isPending.value"
       :key="src"
       :src="src"
       :alt="props.alt"

@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import type { ApiError } from '../api'
 import type { SkeletonVariant } from './LoadingSkeleton.vue'
 
+import { computed } from 'vue'
+
 import LoadingSkeleton from './LoadingSkeleton.vue'
+
+import { ApiError } from '../api'
 
 /**
  * Shared loading / error / empty frame around a view's content.
@@ -15,7 +18,8 @@ const props = defineProps<{
   empty?: boolean
   emptyHint?: string
   emptyText?: string
-  error?: ApiError
+  /** Error of the request; an {@link ApiError} also names its HTTP status. */
+  error?: Error | null
   loading?: boolean
   /** What is loading, for screen readers (the skeleton itself is hidden from them). */
   loadingText?: string
@@ -30,13 +34,22 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{ retry: [] }>()
+
+const status = computed(() => (props.error instanceof ApiError ? props.error.status : undefined))
+const title = computed(() => {
+  if (status.value === 0)
+    return 'Viewer server unreachable'
+  if (status.value === 404)
+    return 'Not found'
+  return status.value == null ? 'Request failed' : `Request failed (${status.value})`
+})
 </script>
 
 <template>
   <div v-if="props.error" role="alert" data-testid="state-error" :class="['flex flex-col items-center gap-2 py-10 px-4 text-center']">
     <span :class="['i-mingcute-alert-line text-3xl text-red-600 dark:text-red-400']" aria-hidden="true" />
     <div :class="['font-medium']">
-      {{ props.error.status === 0 ? 'Viewer server unreachable' : props.error.status === 404 ? 'Not found' : `Request failed (${props.error.status})` }}
+      {{ title }}
     </div>
     <div :class="['muted text-sm max-w-xl break-words']">
       {{ props.error.message }}
