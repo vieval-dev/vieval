@@ -1,0 +1,3153 @@
+{
+  "resourceSpans": [
+    {
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "vieval"
+          },
+          "spans": [
+            {
+              "attributes": [
+                {
+                  "key": "vieval.run.id",
+                  "value": {
+                    "stringValue": "run-1791746045991-a77ba0a4"
+                  }
+                }
+              ],
+              "name": "vieval.run"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "vieval.project.name",
+                  "value": {
+                    "stringValue": "osworld-kubernetes"
+                  }
+                },
+                {
+                  "key": "vieval.run.id",
+                  "value": {
+                    "stringValue": "run-1791746045991-a77ba0a4"
+                  }
+                }
+              ],
+              "name": "vieval.project"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "vieval.project.name",
+                  "value": {
+                    "stringValue": "osworld-kubernetes"
+                  }
+                },
+                {
+                  "key": "vieval.run.id",
+                  "value": {
+                    "stringValue": "run-1791746045991-a77ba0a4"
+                  }
+                },
+                {
+                  "key": "vieval.task.id",
+                  "value": {
+                    "stringValue": "evals%2Fosworld%2Feval%2Fosworld::default::run=model%3Dgpt-5.5%26repeat%3D1::eval=default"
+                  }
+                }
+              ],
+              "name": "vieval.task"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "auv.linux_binary.sha256",
+                  "value": {
+                    "stringValue": "07d549bbb44e45df1cfd53060b0de060357fd24d59e174b341ab24a2ceb27c86"
+                  }
+                },
+                {
+                  "key": "auv.run.ids",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "8ce2b33d-31cd-47b3-a869-b9cb4eab1d5d"
+                        },
+                        {
+                          "stringValue": "7f8742c0-19c1-cae3-32ea-db1c53169b71"
+                        },
+                        {
+                          "stringValue": "2decd904-75d7-ea71-11e7-e199b601a5d3"
+                        },
+                        {
+                          "stringValue": "a505c326-bc53-cfd6-3ab2-b7b5ff4d8b07"
+                        },
+                        {
+                          "stringValue": "d233deae-0dff-a34e-3e12-c1ef6e845d19"
+                        },
+                        {
+                          "stringValue": "ef8e83be-bb57-3c0c-d366-3c2add975efe"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "osworld.agent.last_action",
+                  "value": {
+                    "stringValue": "DONE"
+                  }
+                },
+                {
+                  "key": "osworld.agent.steps",
+                  "value": {
+                    "doubleValue": 7
+                  }
+                },
+                {
+                  "key": "osworld.domain",
+                  "value": {
+                    "stringValue": "chrome"
+                  }
+                },
+                {
+                  "key": "osworld.evaluator.func",
+                  "value": {
+                    "stringValue": "\"is_expected_tabs\""
+                  }
+                },
+                {
+                  "key": "osworld.evidence",
+                  "value": {
+                    "stringValue": "__VIEVAL_DIR__/episodes/06fe7178-4491-4589-810f-2e2bc9502122/2026-10-11T19-14-06.064Z-gpt-5.5-r1"
+                  }
+                },
+                {
+                  "key": "osworld.model",
+                  "value": {
+                    "stringValue": "gpt-5.5"
+                  }
+                },
+                {
+                  "key": "osworld.model.api",
+                  "value": {
+                    "stringValue": "responses"
+                  }
+                },
+                {
+                  "key": "osworld.pod",
+                  "value": {
+                    "stringValue": "osworld-06fe7178-624029"
+                  }
+                },
+                {
+                  "key": "osworld.repeat",
+                  "value": {
+                    "doubleValue": 1
+                  }
+                },
+                {
+                  "key": "osworld.task.file",
+                  "value": {
+                    "stringValue": "tasks/chrome/06fe7178-4491-4589-810f-2e2bc9502122.json"
+                  }
+                },
+                {
+                  "key": "vieval.case.duration_ms",
+                  "value": {
+                    "doubleValue": 146910
+                  }
+                },
+                {
+                  "key": "vieval.case.id",
+                  "value": {
+                    "stringValue": "1:chrome%2F06fe7178-4491-4589-810f-2e2bc9502122"
+                  }
+                },
+                {
+                  "key": "vieval.case.name",
+                  "value": {
+                    "stringValue": "chrome/06fe7178-4491-4589-810f-2e2bc9502122"
+                  }
+                },
+                {
+                  "key": "vieval.case.retry_count",
+                  "value": {
+                    "doubleValue": 0
+                  }
+                },
+                {
+                  "key": "vieval.case.state",
+                  "value": {
+                    "stringValue": "failed"
+                  }
+                },
+                {
+                  "key": "vieval.project.name",
+                  "value": {
+                    "stringValue": "osworld-kubernetes"
+                  }
+                },
+                {
+                  "key": "vieval.task.id",
+                  "value": {
+                    "stringValue": "evals%2Fosworld%2Feval%2Fosworld::default::run=model%3Dgpt-5.5%26repeat%3D1::eval=default"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1791746192903000000",
+              "name": "vieval.case",
+              "startTimeUnixNano": "1791746045993000000"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "auv.linux_binary.sha256",
+                  "value": {
+                    "stringValue": "07d549bbb44e45df1cfd53060b0de060357fd24d59e174b341ab24a2ceb27c86"
+                  }
+                },
+                {
+                  "key": "auv.run.ids",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "bbbfc80f-5c9d-3466-40dc-6ffc9fe3cec8"
+                        },
+                        {
+                          "stringValue": "5efa0a92-631d-14c7-628e-1412594c3903"
+                        },
+                        {
+                          "stringValue": "8c93afff-a5f8-3db9-62a1-cf6fde76a8fd"
+                        },
+                        {
+                          "stringValue": "8a68cb33-b136-2bb7-5d5e-499da9c3b67c"
+                        },
+                        {
+                          "stringValue": "b08b73a4-0a02-ab69-f999-6f52f47cdfbf"
+                        },
+                        {
+                          "stringValue": "756c05ed-93ae-5669-7529-fa4381d834e0"
+                        },
+                        {
+                          "stringValue": "bdadc082-0d52-98ac-9c4f-f36d90236668"
+                        },
+                        {
+                          "stringValue": "b2dff437-c5c7-b54a-ffc9-702b714879c1"
+                        },
+                        {
+                          "stringValue": "e3f53fad-c387-6078-08a2-76fab5a85c5e"
+                        },
+                        {
+                          "stringValue": "bdd06d97-0078-aecb-67da-a0a52e6cd5aa"
+                        },
+                        {
+                          "stringValue": "5a18dfc5-c050-04c6-2821-06a37db8440e"
+                        },
+                        {
+                          "stringValue": "f6d8b193-3398-cf53-bc7f-6c21e3c3a4a0"
+                        },
+                        {
+                          "stringValue": "d285b518-9ff4-dfd8-a3a7-b356697ffdb0"
+                        },
+                        {
+                          "stringValue": "459b6908-d168-dd98-e2b3-b774d2f28c54"
+                        },
+                        {
+                          "stringValue": "a3aa3e03-6967-4a4f-c63f-aa6f0407cddf"
+                        },
+                        {
+                          "stringValue": "77cea753-b470-c14c-afd4-0fc1ee81ef03"
+                        },
+                        {
+                          "stringValue": "992eafcd-9db8-0da4-c8a6-eabcaed0cf4b"
+                        },
+                        {
+                          "stringValue": "fcc6b07e-1a7e-ccde-4e56-69b55dd81e73"
+                        },
+                        {
+                          "stringValue": "bb542d39-1684-8e06-47b3-bb05e0535e7c"
+                        },
+                        {
+                          "stringValue": "2be8f32c-3a08-31c4-8723-e2b808d3b711"
+                        },
+                        {
+                          "stringValue": "9be7e44e-3013-0e5f-7201-36cb1ebd4a7b"
+                        },
+                        {
+                          "stringValue": "e6b3123e-a0f3-8194-726d-6793a789bcc9"
+                        },
+                        {
+                          "stringValue": "729d19e7-ed40-e269-ef3c-f658827b3e7e"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "osworld.agent.last_action",
+                  "value": {
+                    "stringValue": "DONE"
+                  }
+                },
+                {
+                  "key": "osworld.agent.steps",
+                  "value": {
+                    "doubleValue": 24
+                  }
+                },
+                {
+                  "key": "osworld.domain",
+                  "value": {
+                    "stringValue": "chrome"
+                  }
+                },
+                {
+                  "key": "osworld.evaluator.func",
+                  "value": {
+                    "stringValue": "\"compare_pdfs\""
+                  }
+                },
+                {
+                  "key": "osworld.evidence",
+                  "value": {
+                    "stringValue": "__VIEVAL_DIR__/episodes/e1e75309-3ddb-4d09-92ec-de869c928143/2026-10-11T19-14-06.065Z-gpt-5.5-r1"
+                  }
+                },
+                {
+                  "key": "osworld.model",
+                  "value": {
+                    "stringValue": "gpt-5.5"
+                  }
+                },
+                {
+                  "key": "osworld.model.api",
+                  "value": {
+                    "stringValue": "responses"
+                  }
+                },
+                {
+                  "key": "osworld.pod",
+                  "value": {
+                    "stringValue": "osworld-e1e75309-25dee7"
+                  }
+                },
+                {
+                  "key": "osworld.repeat",
+                  "value": {
+                    "doubleValue": 1
+                  }
+                },
+                {
+                  "key": "osworld.task.file",
+                  "value": {
+                    "stringValue": "tasks/chrome/e1e75309-3ddb-4d09-92ec-de869c928143.json"
+                  }
+                },
+                {
+                  "key": "vieval.case.duration_ms",
+                  "value": {
+                    "doubleValue": 218639
+                  }
+                },
+                {
+                  "key": "vieval.case.id",
+                  "value": {
+                    "stringValue": "2:chrome%2Fe1e75309-3ddb-4d09-92ec-de869c928143"
+                  }
+                },
+                {
+                  "key": "vieval.case.name",
+                  "value": {
+                    "stringValue": "chrome/e1e75309-3ddb-4d09-92ec-de869c928143"
+                  }
+                },
+                {
+                  "key": "vieval.case.retry_count",
+                  "value": {
+                    "doubleValue": 0
+                  }
+                },
+                {
+                  "key": "vieval.case.state",
+                  "value": {
+                    "stringValue": "failed"
+                  }
+                },
+                {
+                  "key": "vieval.project.name",
+                  "value": {
+                    "stringValue": "osworld-kubernetes"
+                  }
+                },
+                {
+                  "key": "vieval.task.id",
+                  "value": {
+                    "stringValue": "evals%2Fosworld%2Feval%2Fosworld::default::run=model%3Dgpt-5.5%26repeat%3D1::eval=default"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1791746264633000000",
+              "name": "vieval.case",
+              "startTimeUnixNano": "1791746045994000000"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "auv.linux_binary.sha256",
+                  "value": {
+                    "stringValue": "07d549bbb44e45df1cfd53060b0de060357fd24d59e174b341ab24a2ceb27c86"
+                  }
+                },
+                {
+                  "key": "auv.run.ids",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "562d89bb-7abb-c9b8-89e9-f5b7f6476fdc"
+                        },
+                        {
+                          "stringValue": "c221b337-3709-b702-0d3c-38916e614403"
+                        },
+                        {
+                          "stringValue": "33f22dc8-6f24-ea56-6b90-3cd8190d52a2"
+                        },
+                        {
+                          "stringValue": "99797196-b5ea-b987-5276-bd0b3a19270c"
+                        },
+                        {
+                          "stringValue": "a0fd65a9-32bd-b0e5-b8a3-a1c5458b387f"
+                        },
+                        {
+                          "stringValue": "ef0fb452-785c-08a1-4667-78129d9c2e02"
+                        },
+                        {
+                          "stringValue": "4dedcdb9-afc6-651e-f42a-06de2caefcd4"
+                        },
+                        {
+                          "stringValue": "34f4119d-4df4-3ca7-cf9d-f253f90c6f61"
+                        },
+                        {
+                          "stringValue": "27704877-1a99-0f93-8810-03d0f5de52f9"
+                        },
+                        {
+                          "stringValue": "d30dc0a6-9abc-02ce-0a47-7396c30f8254"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "osworld.agent.last_action",
+                  "value": {
+                    "stringValue": "DONE"
+                  }
+                },
+                {
+                  "key": "osworld.agent.steps",
+                  "value": {
+                    "doubleValue": 12
+                  }
+                },
+                {
+                  "key": "osworld.domain",
+                  "value": {
+                    "stringValue": "chrome"
+                  }
+                },
+                {
+                  "key": "osworld.evaluator.func",
+                  "value": {
+                    "stringValue": "\"is_shortcut_on_desktop\""
+                  }
+                },
+                {
+                  "key": "osworld.evidence",
+                  "value": {
+                    "stringValue": "__VIEVAL_DIR__/episodes/35253b65-1c19-4304-8aa4-6884b8218fc0/2026-10-11T19-16-32.960Z-gpt-5.5-r1"
+                  }
+                },
+                {
+                  "key": "osworld.model",
+                  "value": {
+                    "stringValue": "gpt-5.5"
+                  }
+                },
+                {
+                  "key": "osworld.model.api",
+                  "value": {
+                    "stringValue": "responses"
+                  }
+                },
+                {
+                  "key": "osworld.pod",
+                  "value": {
+                    "stringValue": "osworld-35253b65-de1eaa"
+                  }
+                },
+                {
+                  "key": "osworld.repeat",
+                  "value": {
+                    "doubleValue": 1
+                  }
+                },
+                {
+                  "key": "osworld.task.file",
+                  "value": {
+                    "stringValue": "tasks/chrome/35253b65-1c19-4304-8aa4-6884b8218fc0.json"
+                  }
+                },
+                {
+                  "key": "vieval.case.duration_ms",
+                  "value": {
+                    "doubleValue": 141074
+                  }
+                },
+                {
+                  "key": "vieval.case.id",
+                  "value": {
+                    "stringValue": "3:chrome%2F35253b65-1c19-4304-8aa4-6884b8218fc0"
+                  }
+                },
+                {
+                  "key": "vieval.case.name",
+                  "value": {
+                    "stringValue": "chrome/35253b65-1c19-4304-8aa4-6884b8218fc0"
+                  }
+                },
+                {
+                  "key": "vieval.case.retry_count",
+                  "value": {
+                    "doubleValue": 0
+                  }
+                },
+                {
+                  "key": "vieval.case.state",
+                  "value": {
+                    "stringValue": "passed"
+                  }
+                },
+                {
+                  "key": "vieval.project.name",
+                  "value": {
+                    "stringValue": "osworld-kubernetes"
+                  }
+                },
+                {
+                  "key": "vieval.task.id",
+                  "value": {
+                    "stringValue": "evals%2Fosworld%2Feval%2Fosworld::default::run=model%3Dgpt-5.5%26repeat%3D1::eval=default"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1791746333977000000",
+              "name": "vieval.case",
+              "startTimeUnixNano": "1791746192903000000"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "auv.linux_binary.sha256",
+                  "value": {
+                    "stringValue": "07d549bbb44e45df1cfd53060b0de060357fd24d59e174b341ab24a2ceb27c86"
+                  }
+                },
+                {
+                  "key": "auv.run.ids",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "63cc9314-526b-5d8c-c56c-6474f90ffcd3"
+                        },
+                        {
+                          "stringValue": "74a785ce-182e-3dbd-63a5-29b61d79955c"
+                        },
+                        {
+                          "stringValue": "a8b589ea-ec19-7b31-f717-5364234055a4"
+                        },
+                        {
+                          "stringValue": "31462f1a-9636-0e8d-e59e-d3cf79817292"
+                        },
+                        {
+                          "stringValue": "383a51e8-1059-33c1-318b-72b76118e6d5"
+                        },
+                        {
+                          "stringValue": "9948558b-5941-2d57-fb21-40850c5f61f3"
+                        },
+                        {
+                          "stringValue": "20f34f68-b134-e47b-5003-c4ece7e66b05"
+                        },
+                        {
+                          "stringValue": "9e6b2088-1b0f-a47b-d18d-4792a1fda16b"
+                        },
+                        {
+                          "stringValue": "e4e6c191-f988-e93e-be4d-4ca0e999849c"
+                        },
+                        {
+                          "stringValue": "434aa8a4-779c-3f27-ac8e-097ce678d176"
+                        },
+                        {
+                          "stringValue": "5390f775-93f1-913d-acf1-6d1b11bf790d"
+                        },
+                        {
+                          "stringValue": "ffcb9b6c-576e-5849-5da1-c2cfc0f609a9"
+                        },
+                        {
+                          "stringValue": "c1688640-a8db-816f-572b-1318e7d3e090"
+                        },
+                        {
+                          "stringValue": "6a272e12-1ca3-125b-1929-71ad6f6b5edc"
+                        },
+                        {
+                          "stringValue": "b6005878-8c1c-c18a-4e40-b22ad1e61345"
+                        },
+                        {
+                          "stringValue": "e4bcdeb3-f807-de9e-a059-03a7021ae82c"
+                        },
+                        {
+                          "stringValue": "7a6e804e-2635-6d32-9bb1-7d9b4caf24f1"
+                        },
+                        {
+                          "stringValue": "391df434-ddc6-6483-8027-7a1b800ad797"
+                        },
+                        {
+                          "stringValue": "73ff6def-2189-95a7-246f-662107a93d50"
+                        },
+                        {
+                          "stringValue": "67e7f2ee-32ae-ba60-eb3a-410f16865231"
+                        },
+                        {
+                          "stringValue": "7f147858-f5e9-9e5c-a165-950fdd0d78e2"
+                        },
+                        {
+                          "stringValue": "f59fa940-6c43-b0c2-d6e7-bd90de15b13e"
+                        },
+                        {
+                          "stringValue": "caf01e5f-724c-43dc-6bbb-e88a07f443f5"
+                        },
+                        {
+                          "stringValue": "bc14f365-cc07-23c7-36ca-8cd78a711384"
+                        },
+                        {
+                          "stringValue": "b4caaa6b-db0e-84a4-b707-50878f393486"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "osworld.agent.last_action",
+                  "value": {
+                    "stringValue": "DONE"
+                  }
+                },
+                {
+                  "key": "osworld.agent.steps",
+                  "value": {
+                    "doubleValue": 26
+                  }
+                },
+                {
+                  "key": "osworld.domain",
+                  "value": {
+                    "stringValue": "chrome"
+                  }
+                },
+                {
+                  "key": "osworld.evaluator.func",
+                  "value": {
+                    "stringValue": "\"is_expected_bookmarks\""
+                  }
+                },
+                {
+                  "key": "osworld.evidence",
+                  "value": {
+                    "stringValue": "__VIEVAL_DIR__/episodes/2ad9387a-65d8-4e33-ad5b-7580065a27ca/2026-10-11T19-17-44.670Z-gpt-5.5-r1"
+                  }
+                },
+                {
+                  "key": "osworld.model",
+                  "value": {
+                    "stringValue": "gpt-5.5"
+                  }
+                },
+                {
+                  "key": "osworld.model.api",
+                  "value": {
+                    "stringValue": "responses"
+                  }
+                },
+                {
+                  "key": "osworld.pod",
+                  "value": {
+                    "stringValue": "osworld-2ad9387a-03611b"
+                  }
+                },
+                {
+                  "key": "osworld.repeat",
+                  "value": {
+                    "doubleValue": 1
+                  }
+                },
+                {
+                  "key": "osworld.task.file",
+                  "value": {
+                    "stringValue": "tasks/chrome/2ad9387a-65d8-4e33-ad5b-7580065a27ca.json"
+                  }
+                },
+                {
+                  "key": "vieval.case.duration_ms",
+                  "value": {
+                    "doubleValue": 208165
+                  }
+                },
+                {
+                  "key": "vieval.case.id",
+                  "value": {
+                    "stringValue": "4:chrome%2F2ad9387a-65d8-4e33-ad5b-7580065a27ca"
+                  }
+                },
+                {
+                  "key": "vieval.case.name",
+                  "value": {
+                    "stringValue": "chrome/2ad9387a-65d8-4e33-ad5b-7580065a27ca"
+                  }
+                },
+                {
+                  "key": "vieval.case.retry_count",
+                  "value": {
+                    "doubleValue": 0
+                  }
+                },
+                {
+                  "key": "vieval.case.state",
+                  "value": {
+                    "stringValue": "passed"
+                  }
+                },
+                {
+                  "key": "vieval.project.name",
+                  "value": {
+                    "stringValue": "osworld-kubernetes"
+                  }
+                },
+                {
+                  "key": "vieval.task.id",
+                  "value": {
+                    "stringValue": "evals%2Fosworld%2Feval%2Fosworld::default::run=model%3Dgpt-5.5%26repeat%3D1::eval=default"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1791746472798000000",
+              "name": "vieval.case",
+              "startTimeUnixNano": "1791746264633000000"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "auv.linux_binary.sha256",
+                  "value": {
+                    "stringValue": "07d549bbb44e45df1cfd53060b0de060357fd24d59e174b341ab24a2ceb27c86"
+                  }
+                },
+                {
+                  "key": "auv.run.ids",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "bff34b9b-f6d2-a64a-c731-95a461421db2"
+                        },
+                        {
+                          "stringValue": "c1d3b012-c69c-0543-b106-02e17fef9c70"
+                        },
+                        {
+                          "stringValue": "fdddaf0d-4383-ae71-55f1-ec9759151168"
+                        },
+                        {
+                          "stringValue": "a48f780c-7411-3bed-2fc6-eddc3665a1e9"
+                        },
+                        {
+                          "stringValue": "3f9ca3ae-73e8-9d6d-cb89-a74f72223eab"
+                        },
+                        {
+                          "stringValue": "3d3883ae-1d66-06a5-2a1a-4f4cdb9a69ea"
+                        },
+                        {
+                          "stringValue": "009a7cfd-40dc-55ce-44e0-9f5210595c80"
+                        },
+                        {
+                          "stringValue": "da930dff-5400-febf-35a8-0236cc13f405"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "osworld.agent.last_action",
+                  "value": {
+                    "stringValue": "DONE"
+                  }
+                },
+                {
+                  "key": "osworld.agent.steps",
+                  "value": {
+                    "doubleValue": 9
+                  }
+                },
+                {
+                  "key": "osworld.domain",
+                  "value": {
+                    "stringValue": "chrome"
+                  }
+                },
+                {
+                  "key": "osworld.evaluator.func",
+                  "value": {
+                    "stringValue": "\"is_expected_bookmarks\""
+                  }
+                },
+                {
+                  "key": "osworld.evidence",
+                  "value": {
+                    "stringValue": "__VIEVAL_DIR__/episodes/7a5a7856-f1b6-42a4-ade9-1ca81ca0f263/2026-10-11T19-18-54.025Z-gpt-5.5-r1"
+                  }
+                },
+                {
+                  "key": "osworld.model",
+                  "value": {
+                    "stringValue": "gpt-5.5"
+                  }
+                },
+                {
+                  "key": "osworld.model.api",
+                  "value": {
+                    "stringValue": "responses"
+                  }
+                },
+                {
+                  "key": "osworld.pod",
+                  "value": {
+                    "stringValue": "osworld-7a5a7856-13547c"
+                  }
+                },
+                {
+                  "key": "osworld.repeat",
+                  "value": {
+                    "doubleValue": 1
+                  }
+                },
+                {
+                  "key": "osworld.task.file",
+                  "value": {
+                    "stringValue": "tasks/chrome/7a5a7856-f1b6-42a4-ade9-1ca81ca0f263.json"
+                  }
+                },
+                {
+                  "key": "vieval.case.duration_ms",
+                  "value": {
+                    "doubleValue": 139064
+                  }
+                },
+                {
+                  "key": "vieval.case.id",
+                  "value": {
+                    "stringValue": "5:chrome%2F7a5a7856-f1b6-42a4-ade9-1ca81ca0f263"
+                  }
+                },
+                {
+                  "key": "vieval.case.name",
+                  "value": {
+                    "stringValue": "chrome/7a5a7856-f1b6-42a4-ade9-1ca81ca0f263"
+                  }
+                },
+                {
+                  "key": "vieval.case.retry_count",
+                  "value": {
+                    "doubleValue": 0
+                  }
+                },
+                {
+                  "key": "vieval.case.state",
+                  "value": {
+                    "stringValue": "passed"
+                  }
+                },
+                {
+                  "key": "vieval.project.name",
+                  "value": {
+                    "stringValue": "osworld-kubernetes"
+                  }
+                },
+                {
+                  "key": "vieval.task.id",
+                  "value": {
+                    "stringValue": "evals%2Fosworld%2Feval%2Fosworld::default::run=model%3Dgpt-5.5%26repeat%3D1::eval=default"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1791746473041000000",
+              "name": "vieval.case",
+              "startTimeUnixNano": "1791746333977000000"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "auv.linux_binary.sha256",
+                  "value": {
+                    "stringValue": "07d549bbb44e45df1cfd53060b0de060357fd24d59e174b341ab24a2ceb27c86"
+                  }
+                },
+                {
+                  "key": "auv.run.ids",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "57a2c0d9-423e-24dd-f635-555b43ba3d84"
+                        },
+                        {
+                          "stringValue": "e2d76e99-b9f7-2c02-6d62-1ff6613ecc61"
+                        },
+                        {
+                          "stringValue": "55203674-669b-83d1-fa93-238fbf7889d2"
+                        },
+                        {
+                          "stringValue": "cd308fef-d991-ea5a-6de4-c3e391006136"
+                        },
+                        {
+                          "stringValue": "89dac0d5-c8d2-01ef-7025-f59ac4d43842"
+                        },
+                        {
+                          "stringValue": "e6a7841d-4c1d-cb6d-4840-12945c1fe770"
+                        },
+                        {
+                          "stringValue": "e97d0a1b-3fd2-d320-368d-5ac520e0d541"
+                        },
+                        {
+                          "stringValue": "ad3e4591-1f0d-f5f5-1ed4-cd87d541b1f2"
+                        },
+                        {
+                          "stringValue": "2e72488b-f633-67ff-e513-cb84d1107aea"
+                        },
+                        {
+                          "stringValue": "441d44c4-3249-7a1f-fcf2-2487bff9d025"
+                        },
+                        {
+                          "stringValue": "5bd14cde-1f00-a08c-a969-bf93cb3a1113"
+                        },
+                        {
+                          "stringValue": "6af1c981-fb82-374a-0711-6aac7f46eb3f"
+                        },
+                        {
+                          "stringValue": "8166a987-c12f-d7b8-b1c4-9f827249799e"
+                        },
+                        {
+                          "stringValue": "119edb19-94f4-dd00-3d5e-17fe2587bb1f"
+                        },
+                        {
+                          "stringValue": "8bfc851e-5738-fc7a-1a39-4c092760c9f7"
+                        },
+                        {
+                          "stringValue": "c8652f37-232d-43af-92e0-0de1c0a4ab6c"
+                        },
+                        {
+                          "stringValue": "5f7f1198-6ecd-f48e-dc9b-9b6dcc7e3f7c"
+                        },
+                        {
+                          "stringValue": "d5d62fd1-797f-6ff3-a470-f3854018e7b0"
+                        },
+                        {
+                          "stringValue": "33ca97c3-f535-8e93-35aa-badb1348c9b1"
+                        },
+                        {
+                          "stringValue": "3e7bab57-5dfa-ae0d-1a2a-ea1c31788dca"
+                        },
+                        {
+                          "stringValue": "9ca90c83-6ae5-22f4-26c8-857e081154f4"
+                        },
+                        {
+                          "stringValue": "15617958-0d96-e799-42b8-fcb15e54f9b9"
+                        },
+                        {
+                          "stringValue": "86261013-ea72-44d6-9dd0-1cb1aa763980"
+                        },
+                        {
+                          "stringValue": "869164f9-862f-4c4e-901b-4b6c522be3cf"
+                        },
+                        {
+                          "stringValue": "f9dcf37c-1d21-4831-fa80-2270a3e9ca0a"
+                        },
+                        {
+                          "stringValue": "29037581-1849-35f1-3605-cfd7a8f5532f"
+                        },
+                        {
+                          "stringValue": "a903d08b-834e-3596-7d77-e4a3eac7603d"
+                        },
+                        {
+                          "stringValue": "c3482151-efe1-c0bf-519e-f0c848af4cac"
+                        },
+                        {
+                          "stringValue": "5e91cdc5-ffb7-3aec-1b99-5336fb853b91"
+                        },
+                        {
+                          "stringValue": "26831d79-fff7-d48a-fb6e-692b4e4c3524"
+                        },
+                        {
+                          "stringValue": "326e31af-139c-2168-9091-97e7de38a2f8"
+                        },
+                        {
+                          "stringValue": "25d61c14-ba73-2b5d-44b6-04a1a7361960"
+                        },
+                        {
+                          "stringValue": "b1ebb94c-eb0b-4402-1fec-0aa72e72cfb0"
+                        },
+                        {
+                          "stringValue": "3143d060-26ce-cda9-332d-49cc742d90e7"
+                        },
+                        {
+                          "stringValue": "c102daf6-377b-e949-6429-5d7295477408"
+                        },
+                        {
+                          "stringValue": "f15b186b-a04d-e66d-b63b-8795afb74db8"
+                        },
+                        {
+                          "stringValue": "43fb424c-6d7a-74cd-a4cf-8fd150c8af85"
+                        },
+                        {
+                          "stringValue": "96273415-a4f4-8a60-d880-5fd1ce74bf99"
+                        },
+                        {
+                          "stringValue": "5655c4bf-87e8-807c-f83a-05d31af5486f"
+                        },
+                        {
+                          "stringValue": "cd88d6c4-3624-1b76-d56b-30c09db9a9df"
+                        },
+                        {
+                          "stringValue": "709e8263-b3e7-bc89-9553-18de97667603"
+                        },
+                        {
+                          "stringValue": "39535112-9580-c5bc-4ad6-ff28af1a87d7"
+                        },
+                        {
+                          "stringValue": "aa3a4b40-5715-00ea-deed-6b77245004ea"
+                        },
+                        {
+                          "stringValue": "b9c81491-dcda-d5a5-70e1-7e27c54d8d9c"
+                        },
+                        {
+                          "stringValue": "f4dcfb1c-8dd9-2510-870d-7fe2e806e744"
+                        },
+                        {
+                          "stringValue": "b5013a28-0b93-6928-254b-80f37e64d250"
+                        },
+                        {
+                          "stringValue": "7f1da95a-3d5d-8987-a5d0-ddfce3739799"
+                        },
+                        {
+                          "stringValue": "122a101a-bb0a-ced4-ff1b-94cab07d0269"
+                        },
+                        {
+                          "stringValue": "980a0d22-dbad-e11b-83de-4579a41fd1cc"
+                        },
+                        {
+                          "stringValue": "5e9dfc2e-319a-6549-3a3a-115e51ff3acb"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "osworld.agent.last_action",
+                  "value": {
+                    "stringValue": "none"
+                  }
+                },
+                {
+                  "key": "osworld.agent.steps",
+                  "value": {
+                    "doubleValue": 50
+                  }
+                },
+                {
+                  "key": "osworld.domain",
+                  "value": {
+                    "stringValue": "chrome"
+                  }
+                },
+                {
+                  "key": "osworld.evaluator.func",
+                  "value": {
+                    "stringValue": "\"is_cookie_deleted\""
+                  }
+                },
+                {
+                  "key": "osworld.evidence",
+                  "value": {
+                    "stringValue": "__VIEVAL_DIR__/episodes/7b6c7e24-c58a-49fc-a5bb-d57b80e5b4c3/2026-10-11T19-14-06.062Z-gpt-5.5-r1"
+                  }
+                },
+                {
+                  "key": "osworld.model",
+                  "value": {
+                    "stringValue": "gpt-5.5"
+                  }
+                },
+                {
+                  "key": "osworld.model.api",
+                  "value": {
+                    "stringValue": "responses"
+                  }
+                },
+                {
+                  "key": "osworld.pod",
+                  "value": {
+                    "stringValue": "osworld-7b6c7e24-d63d3a"
+                  }
+                },
+                {
+                  "key": "osworld.repeat",
+                  "value": {
+                    "doubleValue": 1
+                  }
+                },
+                {
+                  "key": "osworld.task.file",
+                  "value": {
+                    "stringValue": "tasks/chrome/7b6c7e24-c58a-49fc-a5bb-d57b80e5b4c3.json"
+                  }
+                },
+                {
+                  "key": "vieval.case.duration_ms",
+                  "value": {
+                    "doubleValue": 506796
+                  }
+                },
+                {
+                  "key": "vieval.case.id",
+                  "value": {
+                    "stringValue": "0:chrome%2F7b6c7e24-c58a-49fc-a5bb-d57b80e5b4c3"
+                  }
+                },
+                {
+                  "key": "vieval.case.name",
+                  "value": {
+                    "stringValue": "chrome/7b6c7e24-c58a-49fc-a5bb-d57b80e5b4c3"
+                  }
+                },
+                {
+                  "key": "vieval.case.retry_count",
+                  "value": {
+                    "doubleValue": 0
+                  }
+                },
+                {
+                  "key": "vieval.case.state",
+                  "value": {
+                    "stringValue": "passed"
+                  }
+                },
+                {
+                  "key": "vieval.project.name",
+                  "value": {
+                    "stringValue": "osworld-kubernetes"
+                  }
+                },
+                {
+                  "key": "vieval.task.id",
+                  "value": {
+                    "stringValue": "evals%2Fosworld%2Feval%2Fosworld::default::run=model%3Dgpt-5.5%26repeat%3D1::eval=default"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1791746552789000000",
+              "name": "vieval.case",
+              "startTimeUnixNano": "1791746045993000000"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "auv.linux_binary.sha256",
+                  "value": {
+                    "stringValue": "07d549bbb44e45df1cfd53060b0de060357fd24d59e174b341ab24a2ceb27c86"
+                  }
+                },
+                {
+                  "key": "auv.run.ids",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "0f9a5e98-fe68-12b2-793a-423e1d0af6b4"
+                        },
+                        {
+                          "stringValue": "c5ed57fe-72e7-a39d-bd11-dfd975fe9687"
+                        },
+                        {
+                          "stringValue": "e54ba116-6839-8bc2-a87a-8b1e181ad407"
+                        },
+                        {
+                          "stringValue": "3435fdc4-1dbf-49f3-bab1-97094a42134c"
+                        },
+                        {
+                          "stringValue": "01c95781-d9db-4bd4-5f3b-162bea21a565"
+                        },
+                        {
+                          "stringValue": "40adafda-c899-8bca-9a4b-fdbcc885e214"
+                        },
+                        {
+                          "stringValue": "1116f716-f17f-3531-9b69-5aeabf594cea"
+                        },
+                        {
+                          "stringValue": "a55fc692-d886-6171-62dc-16d4c8178ee9"
+                        },
+                        {
+                          "stringValue": "5fdfb7cb-8e2d-da4c-84eb-e3f8a421d908"
+                        },
+                        {
+                          "stringValue": "fb8d74aa-d814-bdb9-0c4c-77b775cf8ef2"
+                        },
+                        {
+                          "stringValue": "f42fa1c1-ea4b-cb0d-a0b2-861333a51bb2"
+                        },
+                        {
+                          "stringValue": "c92e144b-0dae-c45d-66e5-29c37639b403"
+                        },
+                        {
+                          "stringValue": "b28cb371-6236-e9a5-3fd3-37f74c4e6035"
+                        },
+                        {
+                          "stringValue": "63b1a0c5-1094-8f8a-59b0-d6570b3dec7f"
+                        },
+                        {
+                          "stringValue": "960fefc4-4d1f-7a8a-0e02-bd8507e39b4b"
+                        },
+                        {
+                          "stringValue": "1ab4cb89-5259-8f7a-9bb8-758fe852f8e9"
+                        },
+                        {
+                          "stringValue": "838fdb09-579e-b2f4-33f9-8bf564972040"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "osworld.agent.last_action",
+                  "value": {
+                    "stringValue": "DONE"
+                  }
+                },
+                {
+                  "key": "osworld.agent.steps",
+                  "value": {
+                    "doubleValue": 18
+                  }
+                },
+                {
+                  "key": "osworld.domain",
+                  "value": {
+                    "stringValue": "chrome"
+                  }
+                },
+                {
+                  "key": "osworld.evaluator.func",
+                  "value": {
+                    "stringValue": "\"exact_match\""
+                  }
+                },
+                {
+                  "key": "osworld.evidence",
+                  "value": {
+                    "stringValue": "__VIEVAL_DIR__/episodes/2ae9ba84-3a0d-4d4c-8338-3a1478dc5fe3/2026-10-11T19-21-12.909Z-gpt-5.5-r1"
+                  }
+                },
+                {
+                  "key": "osworld.model",
+                  "value": {
+                    "stringValue": "gpt-5.5"
+                  }
+                },
+                {
+                  "key": "osworld.model.api",
+                  "value": {
+                    "stringValue": "responses"
+                  }
+                },
+                {
+                  "key": "osworld.pod",
+                  "value": {
+                    "stringValue": "osworld-2ae9ba84-004323"
+                  }
+                },
+                {
+                  "key": "osworld.repeat",
+                  "value": {
+                    "doubleValue": 1
+                  }
+                },
+                {
+                  "key": "osworld.task.file",
+                  "value": {
+                    "stringValue": "tasks/chrome/2ae9ba84-3a0d-4d4c-8338-3a1478dc5fe3.json"
+                  }
+                },
+                {
+                  "key": "vieval.case.duration_ms",
+                  "value": {
+                    "doubleValue": 139640
+                  }
+                },
+                {
+                  "key": "vieval.case.id",
+                  "value": {
+                    "stringValue": "6:chrome%2F2ae9ba84-3a0d-4d4c-8338-3a1478dc5fe3"
+                  }
+                },
+                {
+                  "key": "vieval.case.name",
+                  "value": {
+                    "stringValue": "chrome/2ae9ba84-3a0d-4d4c-8338-3a1478dc5fe3"
+                  }
+                },
+                {
+                  "key": "vieval.case.retry_count",
+                  "value": {
+                    "doubleValue": 0
+                  }
+                },
+                {
+                  "key": "vieval.case.state",
+                  "value": {
+                    "stringValue": "passed"
+                  }
+                },
+                {
+                  "key": "vieval.project.name",
+                  "value": {
+                    "stringValue": "osworld-kubernetes"
+                  }
+                },
+                {
+                  "key": "vieval.task.id",
+                  "value": {
+                    "stringValue": "evals%2Fosworld%2Feval%2Fosworld::default::run=model%3Dgpt-5.5%26repeat%3D1::eval=default"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1791746612439000000",
+              "name": "vieval.case",
+              "startTimeUnixNano": "1791746472799000000"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "auv.linux_binary.sha256",
+                  "value": {
+                    "stringValue": "07d549bbb44e45df1cfd53060b0de060357fd24d59e174b341ab24a2ceb27c86"
+                  }
+                },
+                {
+                  "key": "auv.run.ids",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "0fd46f09-65e2-d5ac-b323-2fa09f5bf403"
+                        },
+                        {
+                          "stringValue": "330ccc1d-da9a-25e9-2f9f-ce639826c15d"
+                        },
+                        {
+                          "stringValue": "559125ba-d05b-133b-205d-c25dbf2f1136"
+                        },
+                        {
+                          "stringValue": "5adb7abb-0069-4d63-0a94-7efd2d4467ff"
+                        },
+                        {
+                          "stringValue": "23552df7-c02d-fd80-093d-c574ecda8aa7"
+                        },
+                        {
+                          "stringValue": "f6ce2758-88b5-39fe-fc71-fe5b29574a16"
+                        },
+                        {
+                          "stringValue": "80d55ca2-cf68-e325-fd44-bad3b9b09894"
+                        },
+                        {
+                          "stringValue": "a427ffad-066e-8c00-c9b2-cb1242c780c4"
+                        },
+                        {
+                          "stringValue": "99ae98c0-f23e-69b8-1215-73980b365cb1"
+                        },
+                        {
+                          "stringValue": "e4e9df49-12a3-79f3-ed70-502a311a3029"
+                        },
+                        {
+                          "stringValue": "6941b4a9-36ef-1d84-f78c-5213ad9bb3c7"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "osworld.agent.last_action",
+                  "value": {
+                    "stringValue": "DONE"
+                  }
+                },
+                {
+                  "key": "osworld.agent.steps",
+                  "value": {
+                    "doubleValue": 12
+                  }
+                },
+                {
+                  "key": "osworld.domain",
+                  "value": {
+                    "stringValue": "chrome"
+                  }
+                },
+                {
+                  "key": "osworld.evaluator.func",
+                  "value": {
+                    "stringValue": "\"check_font_size\""
+                  }
+                },
+                {
+                  "key": "osworld.evidence",
+                  "value": {
+                    "stringValue": "__VIEVAL_DIR__/episodes/af630914-714e-4a24-a7bb-f9af687d3b91/2026-10-11T19-22-32.860Z-gpt-5.5-r1"
+                  }
+                },
+                {
+                  "key": "osworld.model",
+                  "value": {
+                    "stringValue": "gpt-5.5"
+                  }
+                },
+                {
+                  "key": "osworld.model.api",
+                  "value": {
+                    "stringValue": "responses"
+                  }
+                },
+                {
+                  "key": "osworld.pod",
+                  "value": {
+                    "stringValue": "osworld-af630914-1acfcc"
+                  }
+                },
+                {
+                  "key": "osworld.repeat",
+                  "value": {
+                    "doubleValue": 1
+                  }
+                },
+                {
+                  "key": "osworld.task.file",
+                  "value": {
+                    "stringValue": "tasks/chrome/af630914-714e-4a24-a7bb-f9af687d3b91.json"
+                  }
+                },
+                {
+                  "key": "vieval.case.duration_ms",
+                  "value": {
+                    "doubleValue": 101422
+                  }
+                },
+                {
+                  "key": "vieval.case.id",
+                  "value": {
+                    "stringValue": "8:chrome%2Faf630914-714e-4a24-a7bb-f9af687d3b91"
+                  }
+                },
+                {
+                  "key": "vieval.case.name",
+                  "value": {
+                    "stringValue": "chrome/af630914-714e-4a24-a7bb-f9af687d3b91"
+                  }
+                },
+                {
+                  "key": "vieval.case.retry_count",
+                  "value": {
+                    "doubleValue": 0
+                  }
+                },
+                {
+                  "key": "vieval.case.state",
+                  "value": {
+                    "stringValue": "passed"
+                  }
+                },
+                {
+                  "key": "vieval.project.name",
+                  "value": {
+                    "stringValue": "osworld-kubernetes"
+                  }
+                },
+                {
+                  "key": "vieval.task.id",
+                  "value": {
+                    "stringValue": "evals%2Fosworld%2Feval%2Fosworld::default::run=model%3Dgpt-5.5%26repeat%3D1::eval=default"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1791746654212000000",
+              "name": "vieval.case",
+              "startTimeUnixNano": "1791746552790000000"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "auv.linux_binary.sha256",
+                  "value": {
+                    "stringValue": "07d549bbb44e45df1cfd53060b0de060357fd24d59e174b341ab24a2ceb27c86"
+                  }
+                },
+                {
+                  "key": "auv.run.ids",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "e7233e57-7f5a-a4b4-5c78-9e35691502ae"
+                        },
+                        {
+                          "stringValue": "be0ede42-f98b-757a-a60d-b241457b5eed"
+                        },
+                        {
+                          "stringValue": "3318b6f2-0854-039c-19f5-63afee4bc154"
+                        },
+                        {
+                          "stringValue": "76466e29-2dc3-06aa-2896-2318ea2b15ae"
+                        },
+                        {
+                          "stringValue": "6e47111e-a797-59fb-2d4f-aa8a0426301e"
+                        },
+                        {
+                          "stringValue": "10c08eeb-38f4-1d2c-d2c3-fa32e5871ebf"
+                        },
+                        {
+                          "stringValue": "505b9407-7af7-d8df-689f-2983f4abe321"
+                        },
+                        {
+                          "stringValue": "9575b7a4-d4ec-66d4-bace-f9ec47084431"
+                        },
+                        {
+                          "stringValue": "72f97bf4-fe88-be60-eacd-d844be41312a"
+                        },
+                        {
+                          "stringValue": "d2e73cc7-885b-293d-cd6d-f1ced0cbf263"
+                        },
+                        {
+                          "stringValue": "fef469ff-6a2d-c6d5-3b34-99443c89c912"
+                        },
+                        {
+                          "stringValue": "cfd8c665-6316-57b8-4db6-7e1c5bc59fe2"
+                        },
+                        {
+                          "stringValue": "0e2a5f36-1084-48b0-6daf-b7153e3d6cbc"
+                        },
+                        {
+                          "stringValue": "8c449646-2441-5448-2ff1-5a24185a4196"
+                        },
+                        {
+                          "stringValue": "5e0906d4-ace6-4ce0-f657-b6976c986dce"
+                        },
+                        {
+                          "stringValue": "d654cc67-7ab3-44a0-718c-53319dc2aaf3"
+                        },
+                        {
+                          "stringValue": "7e5a2393-13f7-8415-e235-942d4cf5a8e6"
+                        },
+                        {
+                          "stringValue": "ae6f46ad-8ab5-cae3-14a4-14f5fe47a0d6"
+                        },
+                        {
+                          "stringValue": "da810650-34a9-b977-12b5-622e97fc3285"
+                        },
+                        {
+                          "stringValue": "2af4400a-f4e6-85d9-7683-fb6f8e645662"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "osworld.agent.last_action",
+                  "value": {
+                    "stringValue": "FAIL"
+                  }
+                },
+                {
+                  "key": "osworld.agent.steps",
+                  "value": {
+                    "doubleValue": 21
+                  }
+                },
+                {
+                  "key": "osworld.domain",
+                  "value": {
+                    "stringValue": "chrome"
+                  }
+                },
+                {
+                  "key": "osworld.evaluator.func",
+                  "value": {
+                    "stringValue": "\"infeasible\""
+                  }
+                },
+                {
+                  "key": "osworld.evidence",
+                  "value": {
+                    "stringValue": "__VIEVAL_DIR__/episodes/3720f614-37fd-4d04-8a6b-76f54f8c222d/2026-10-11T19-23-32.504Z-gpt-5.5-r1"
+                  }
+                },
+                {
+                  "key": "osworld.model",
+                  "value": {
+                    "stringValue": "gpt-5.5"
+                  }
+                },
+                {
+                  "key": "osworld.model.api",
+                  "value": {
+                    "stringValue": "responses"
+                  }
+                },
+                {
+                  "key": "osworld.pod",
+                  "value": {
+                    "stringValue": "osworld-3720f614-a3afd3"
+                  }
+                },
+                {
+                  "key": "osworld.repeat",
+                  "value": {
+                    "doubleValue": 1
+                  }
+                },
+                {
+                  "key": "osworld.task.file",
+                  "value": {
+                    "stringValue": "tasks/chrome/3720f614-37fd-4d04-8a6b-76f54f8c222d.json"
+                  }
+                },
+                {
+                  "key": "vieval.case.duration_ms",
+                  "value": {
+                    "doubleValue": 127883
+                  }
+                },
+                {
+                  "key": "vieval.case.id",
+                  "value": {
+                    "stringValue": "9:chrome%2F3720f614-37fd-4d04-8a6b-76f54f8c222d"
+                  }
+                },
+                {
+                  "key": "vieval.case.name",
+                  "value": {
+                    "stringValue": "chrome/3720f614-37fd-4d04-8a6b-76f54f8c222d"
+                  }
+                },
+                {
+                  "key": "vieval.case.retry_count",
+                  "value": {
+                    "doubleValue": 0
+                  }
+                },
+                {
+                  "key": "vieval.case.state",
+                  "value": {
+                    "stringValue": "passed"
+                  }
+                },
+                {
+                  "key": "vieval.project.name",
+                  "value": {
+                    "stringValue": "osworld-kubernetes"
+                  }
+                },
+                {
+                  "key": "vieval.task.id",
+                  "value": {
+                    "stringValue": "evals%2Fosworld%2Feval%2Fosworld::default::run=model%3Dgpt-5.5%26repeat%3D1::eval=default"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1791746740323000000",
+              "name": "vieval.case",
+              "startTimeUnixNano": "1791746612440000000"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "auv.linux_binary.sha256",
+                  "value": {
+                    "stringValue": "07d549bbb44e45df1cfd53060b0de060357fd24d59e174b341ab24a2ceb27c86"
+                  }
+                },
+                {
+                  "key": "auv.run.ids",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "d0adaa21-d213-f9cd-7161-a8302a0cf5ae"
+                        },
+                        {
+                          "stringValue": "c6864c42-24ac-2e17-702f-b3946eaa0d6e"
+                        },
+                        {
+                          "stringValue": "5c4bbc08-87c7-f1a9-6086-6117ce0166d8"
+                        },
+                        {
+                          "stringValue": "aa3e6e0c-fc22-d519-8af7-46af279e86ea"
+                        },
+                        {
+                          "stringValue": "6b3c7baf-b993-f1eb-815a-a05511c2538a"
+                        },
+                        {
+                          "stringValue": "5e0e7912-97da-0ed5-92a5-c0be7fb5a3ab"
+                        },
+                        {
+                          "stringValue": "dcc6481c-3a7e-6e5b-7387-70ee4ac5dcd0"
+                        },
+                        {
+                          "stringValue": "dcd453f1-035f-3fcd-57c6-739cd14cb28f"
+                        },
+                        {
+                          "stringValue": "5aefc831-5ced-48e1-6816-5ff3142e4c1d"
+                        },
+                        {
+                          "stringValue": "3fffcefe-eb2b-d344-8fca-b38b75038f6b"
+                        },
+                        {
+                          "stringValue": "a32e2490-7f44-573d-c419-b373bf59eb3a"
+                        },
+                        {
+                          "stringValue": "e6e8c5c3-5d4b-de95-1460-633ecc81d135"
+                        },
+                        {
+                          "stringValue": "1965eae6-bbe8-f11d-e72e-c87c58121355"
+                        },
+                        {
+                          "stringValue": "3fb41d9d-285f-3035-6ae8-dab725a3af56"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "osworld.agent.last_action",
+                  "value": {
+                    "stringValue": "DONE"
+                  }
+                },
+                {
+                  "key": "osworld.agent.steps",
+                  "value": {
+                    "doubleValue": 15
+                  }
+                },
+                {
+                  "key": "osworld.domain",
+                  "value": {
+                    "stringValue": "chrome"
+                  }
+                },
+                {
+                  "key": "osworld.evaluator.func",
+                  "value": {
+                    "stringValue": "\"exact_match\""
+                  }
+                },
+                {
+                  "key": "osworld.evidence",
+                  "value": {
+                    "stringValue": "__VIEVAL_DIR__/episodes/99146c54-4f37-4ab8-9327-5f3291665e1e/2026-10-11T19-24-14.269Z-gpt-5.5-r1"
+                  }
+                },
+                {
+                  "key": "osworld.model",
+                  "value": {
+                    "stringValue": "gpt-5.5"
+                  }
+                },
+                {
+                  "key": "osworld.model.api",
+                  "value": {
+                    "stringValue": "responses"
+                  }
+                },
+                {
+                  "key": "osworld.pod",
+                  "value": {
+                    "stringValue": "osworld-99146c54-b6912e"
+                  }
+                },
+                {
+                  "key": "osworld.repeat",
+                  "value": {
+                    "doubleValue": 1
+                  }
+                },
+                {
+                  "key": "osworld.task.file",
+                  "value": {
+                    "stringValue": "tasks/chrome/99146c54-4f37-4ab8-9327-5f3291665e1e.json"
+                  }
+                },
+                {
+                  "key": "vieval.case.duration_ms",
+                  "value": {
+                    "doubleValue": 104925
+                  }
+                },
+                {
+                  "key": "vieval.case.id",
+                  "value": {
+                    "stringValue": "10:chrome%2F99146c54-4f37-4ab8-9327-5f3291665e1e"
+                  }
+                },
+                {
+                  "key": "vieval.case.name",
+                  "value": {
+                    "stringValue": "chrome/99146c54-4f37-4ab8-9327-5f3291665e1e"
+                  }
+                },
+                {
+                  "key": "vieval.case.retry_count",
+                  "value": {
+                    "doubleValue": 0
+                  }
+                },
+                {
+                  "key": "vieval.case.state",
+                  "value": {
+                    "stringValue": "passed"
+                  }
+                },
+                {
+                  "key": "vieval.project.name",
+                  "value": {
+                    "stringValue": "osworld-kubernetes"
+                  }
+                },
+                {
+                  "key": "vieval.task.id",
+                  "value": {
+                    "stringValue": "evals%2Fosworld%2Feval%2Fosworld::default::run=model%3Dgpt-5.5%26repeat%3D1::eval=default"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1791746759137000000",
+              "name": "vieval.case",
+              "startTimeUnixNano": "1791746654212000000"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "auv.linux_binary.sha256",
+                  "value": {
+                    "stringValue": "07d549bbb44e45df1cfd53060b0de060357fd24d59e174b341ab24a2ceb27c86"
+                  }
+                },
+                {
+                  "key": "auv.run.ids",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "4e6d8957-8251-96cb-e992-062c46c81d6b"
+                        },
+                        {
+                          "stringValue": "38fa305a-8802-a9e9-169b-47a009226e12"
+                        },
+                        {
+                          "stringValue": "108d142e-ffce-3a83-e411-c5ff506ec0d1"
+                        },
+                        {
+                          "stringValue": "f32796ad-9635-7719-fef3-cf7a81d39048"
+                        },
+                        {
+                          "stringValue": "92bc72c4-84a8-4a77-f4ca-65ed3cf50948"
+                        },
+                        {
+                          "stringValue": "a1a87341-ae9e-f3cb-1c90-47822ce105ed"
+                        },
+                        {
+                          "stringValue": "872ad29c-4724-81c0-faff-e31b11449963"
+                        },
+                        {
+                          "stringValue": "66aa3fa1-4558-323d-6298-61c2dc68241b"
+                        },
+                        {
+                          "stringValue": "974e428d-8a56-a5ba-f192-15bd87937f34"
+                        },
+                        {
+                          "stringValue": "ea313189-e736-ad7c-3ae8-7a9e852292d3"
+                        },
+                        {
+                          "stringValue": "0e251863-faba-ee72-3f76-89bc2404123b"
+                        },
+                        {
+                          "stringValue": "3610e612-7191-48bc-49ac-3b5efd3a6b9a"
+                        },
+                        {
+                          "stringValue": "27a10af6-5306-328d-e80f-d4b13ece9460"
+                        },
+                        {
+                          "stringValue": "a1736127-7b9d-cf9d-f833-aec169a8d0eb"
+                        },
+                        {
+                          "stringValue": "da52a1d4-4809-f884-940e-e4c67505f814"
+                        },
+                        {
+                          "stringValue": "62a5d2ad-ccb7-e5ff-0070-3f9829c6e735"
+                        },
+                        {
+                          "stringValue": "e2b8c379-fc3c-4c72-a070-1c2d5f31d764"
+                        },
+                        {
+                          "stringValue": "22f1e1be-cc9a-ee20-1c90-27c161529daa"
+                        },
+                        {
+                          "stringValue": "1e568e0c-cca7-f993-1d9d-8bd60146c966"
+                        },
+                        {
+                          "stringValue": "fb34b88b-3fb4-8472-e4a4-07d3acca8dbb"
+                        },
+                        {
+                          "stringValue": "c516d635-d440-8897-f6c1-68d4e91b55f8"
+                        },
+                        {
+                          "stringValue": "ce168168-9f6a-ed51-6655-3c2e3f108b97"
+                        },
+                        {
+                          "stringValue": "0bb207fb-c857-61d2-ca66-37f40c96cb4b"
+                        },
+                        {
+                          "stringValue": "ef16bc20-6f82-7a70-45f3-1f1cd3dec229"
+                        },
+                        {
+                          "stringValue": "a8a42aa6-58ac-6b8c-c323-04eb9a81dfe1"
+                        },
+                        {
+                          "stringValue": "9bed18f7-068b-fec9-dbfb-b9ae8f9ed667"
+                        },
+                        {
+                          "stringValue": "94bfb787-6ba8-c951-59fc-e42672097f98"
+                        },
+                        {
+                          "stringValue": "d1335548-a570-40ea-85c7-58421601170e"
+                        },
+                        {
+                          "stringValue": "58e1f5b9-4bc3-98f7-c1fa-53d47a9d6d8b"
+                        },
+                        {
+                          "stringValue": "8052e573-1f86-9ed8-5178-001ffb624af2"
+                        },
+                        {
+                          "stringValue": "eb864f7c-e922-a1f5-82d3-19fc3a8529c3"
+                        },
+                        {
+                          "stringValue": "49cf13de-6aa8-9bcd-836f-53516bbb472d"
+                        },
+                        {
+                          "stringValue": "5e0bee47-1ecc-5f63-ad6a-7c7737c93acc"
+                        },
+                        {
+                          "stringValue": "dd33b4ba-d774-7a5b-664d-eaf879f3fa3f"
+                        },
+                        {
+                          "stringValue": "7c1aa95e-9253-f4da-9988-544345869c58"
+                        },
+                        {
+                          "stringValue": "0e998bff-129a-564d-39e4-e9590d39d772"
+                        },
+                        {
+                          "stringValue": "549d8216-ae88-7ebb-bc07-9370356302da"
+                        },
+                        {
+                          "stringValue": "34fe8896-7301-0fac-f4d0-932f2cdc4978"
+                        },
+                        {
+                          "stringValue": "8483c9e7-1df2-a2e5-445e-2fa92ded01fb"
+                        },
+                        {
+                          "stringValue": "2832ae61-46af-6a38-5d69-5455b839a603"
+                        },
+                        {
+                          "stringValue": "e3a4c429-f8b1-5553-54c1-9c10117ac1dc"
+                        },
+                        {
+                          "stringValue": "773bbc06-953f-bcb3-aec9-5ce329a4cbd7"
+                        },
+                        {
+                          "stringValue": "b1002976-3bd3-1f43-f741-fe96e42e9ab9"
+                        },
+                        {
+                          "stringValue": "16832bcc-b381-584f-fa27-ec4f23725be6"
+                        },
+                        {
+                          "stringValue": "cb66200e-cb9e-1ad6-c567-42532283667c"
+                        },
+                        {
+                          "stringValue": "b9d98bf1-44c6-f04e-d023-94f139ad95df"
+                        },
+                        {
+                          "stringValue": "b0710018-396e-e53d-9f08-a8cc98ada2ed"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "osworld.agent.last_action",
+                  "value": {
+                    "stringValue": "DONE"
+                  }
+                },
+                {
+                  "key": "osworld.agent.steps",
+                  "value": {
+                    "doubleValue": 48
+                  }
+                },
+                {
+                  "key": "osworld.domain",
+                  "value": {
+                    "stringValue": "chrome"
+                  }
+                },
+                {
+                  "key": "osworld.evaluator.func",
+                  "value": {
+                    "stringValue": "\"infeasible\""
+                  }
+                },
+                {
+                  "key": "osworld.evidence",
+                  "value": {
+                    "stringValue": "__VIEVAL_DIR__/episodes/480bcfea-d68f-4aaa-a0a9-2589ef319381/2026-10-11T19-21-13.134Z-gpt-5.5-r1"
+                  }
+                },
+                {
+                  "key": "osworld.model",
+                  "value": {
+                    "stringValue": "gpt-5.5"
+                  }
+                },
+                {
+                  "key": "osworld.model.api",
+                  "value": {
+                    "stringValue": "responses"
+                  }
+                },
+                {
+                  "key": "osworld.pod",
+                  "value": {
+                    "stringValue": "osworld-480bcfea-ec301a"
+                  }
+                },
+                {
+                  "key": "osworld.repeat",
+                  "value": {
+                    "doubleValue": 1
+                  }
+                },
+                {
+                  "key": "osworld.task.file",
+                  "value": {
+                    "stringValue": "tasks/chrome/480bcfea-d68f-4aaa-a0a9-2589ef319381.json"
+                  }
+                },
+                {
+                  "key": "vieval.case.duration_ms",
+                  "value": {
+                    "doubleValue": 348077
+                  }
+                },
+                {
+                  "key": "vieval.case.id",
+                  "value": {
+                    "stringValue": "7:chrome%2F480bcfea-d68f-4aaa-a0a9-2589ef319381"
+                  }
+                },
+                {
+                  "key": "vieval.case.name",
+                  "value": {
+                    "stringValue": "chrome/480bcfea-d68f-4aaa-a0a9-2589ef319381"
+                  }
+                },
+                {
+                  "key": "vieval.case.retry_count",
+                  "value": {
+                    "doubleValue": 0
+                  }
+                },
+                {
+                  "key": "vieval.case.state",
+                  "value": {
+                    "stringValue": "failed"
+                  }
+                },
+                {
+                  "key": "vieval.project.name",
+                  "value": {
+                    "stringValue": "osworld-kubernetes"
+                  }
+                },
+                {
+                  "key": "vieval.task.id",
+                  "value": {
+                    "stringValue": "evals%2Fosworld%2Feval%2Fosworld::default::run=model%3Dgpt-5.5%26repeat%3D1::eval=default"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1791746821118000000",
+              "name": "vieval.case",
+              "startTimeUnixNano": "1791746473041000000"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "auv.linux_binary.sha256",
+                  "value": {
+                    "stringValue": "07d549bbb44e45df1cfd53060b0de060357fd24d59e174b341ab24a2ceb27c86"
+                  }
+                },
+                {
+                  "key": "auv.run.ids",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "2963c2e2-1f89-a096-1ebe-7eaf92065e46"
+                        },
+                        {
+                          "stringValue": "4e0372bc-b487-e3af-7231-04d2da8201b7"
+                        },
+                        {
+                          "stringValue": "22fa34c3-084f-45de-5560-8a6182c54251"
+                        },
+                        {
+                          "stringValue": "84e10f86-4bf1-9d06-a72b-0c78d14324e9"
+                        },
+                        {
+                          "stringValue": "4cd62fa9-a1b5-7854-b81e-19b3e89150a2"
+                        },
+                        {
+                          "stringValue": "eead0f83-1000-bce6-ef6f-30c7e166bf4b"
+                        },
+                        {
+                          "stringValue": "22c5358f-436a-e2db-9ca2-3c422e7c72f6"
+                        },
+                        {
+                          "stringValue": "6ac4a067-f900-90ff-e614-17d42c90a8ff"
+                        },
+                        {
+                          "stringValue": "7788c53a-47fe-e2af-54a0-086c340ab26e"
+                        },
+                        {
+                          "stringValue": "5f696e34-76b3-37bb-807a-ceec43c99ea1"
+                        },
+                        {
+                          "stringValue": "ffd1dda9-3830-22f4-b2ad-de4b4cb0451b"
+                        },
+                        {
+                          "stringValue": "743ab0b6-3337-e402-a743-bce3686f508f"
+                        },
+                        {
+                          "stringValue": "fb895282-2852-89a5-229a-d3fff57ed378"
+                        },
+                        {
+                          "stringValue": "724f8678-dd3e-1a9f-578f-f934f07ac6e5"
+                        },
+                        {
+                          "stringValue": "3d883ba2-ccc5-e127-e186-d323d17db741"
+                        },
+                        {
+                          "stringValue": "6fc1bbb7-a733-8c5f-6be1-82da7da34653"
+                        },
+                        {
+                          "stringValue": "c745eaff-b4ea-287f-16c0-44a94bdc9a1f"
+                        },
+                        {
+                          "stringValue": "e9e1dc6d-edb7-1ca1-5718-b86a58bdb4f5"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "osworld.agent.last_action",
+                  "value": {
+                    "stringValue": "DONE"
+                  }
+                },
+                {
+                  "key": "osworld.agent.steps",
+                  "value": {
+                    "doubleValue": 19
+                  }
+                },
+                {
+                  "key": "osworld.domain",
+                  "value": {
+                    "stringValue": "chrome"
+                  }
+                },
+                {
+                  "key": "osworld.evaluator.func",
+                  "value": {
+                    "stringValue": "\"is_expected_active_tab_approximate\""
+                  }
+                },
+                {
+                  "key": "osworld.evidence",
+                  "value": {
+                    "stringValue": "__VIEVAL_DIR__/episodes/12086550-11c0-466b-b367-1d9e75b3910e/2026-10-11T19-25-40.365Z-gpt-5.5-r1"
+                  }
+                },
+                {
+                  "key": "osworld.model",
+                  "value": {
+                    "stringValue": "gpt-5.5"
+                  }
+                },
+                {
+                  "key": "osworld.model.api",
+                  "value": {
+                    "stringValue": "responses"
+                  }
+                },
+                {
+                  "key": "osworld.pod",
+                  "value": {
+                    "stringValue": "osworld-12086550-2b5033"
+                  }
+                },
+                {
+                  "key": "osworld.repeat",
+                  "value": {
+                    "doubleValue": 1
+                  }
+                },
+                {
+                  "key": "osworld.task.file",
+                  "value": {
+                    "stringValue": "tasks/chrome/12086550-11c0-466b-b367-1d9e75b3910e.json"
+                  }
+                },
+                {
+                  "key": "vieval.case.duration_ms",
+                  "value": {
+                    "doubleValue": 110044
+                  }
+                },
+                {
+                  "key": "vieval.case.id",
+                  "value": {
+                    "stringValue": "11:chrome%2F12086550-11c0-466b-b367-1d9e75b3910e"
+                  }
+                },
+                {
+                  "key": "vieval.case.name",
+                  "value": {
+                    "stringValue": "chrome/12086550-11c0-466b-b367-1d9e75b3910e"
+                  }
+                },
+                {
+                  "key": "vieval.case.retry_count",
+                  "value": {
+                    "doubleValue": 0
+                  }
+                },
+                {
+                  "key": "vieval.case.state",
+                  "value": {
+                    "stringValue": "passed"
+                  }
+                },
+                {
+                  "key": "vieval.project.name",
+                  "value": {
+                    "stringValue": "osworld-kubernetes"
+                  }
+                },
+                {
+                  "key": "vieval.task.id",
+                  "value": {
+                    "stringValue": "evals%2Fosworld%2Feval%2Fosworld::default::run=model%3Dgpt-5.5%26repeat%3D1::eval=default"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1791746850367000000",
+              "name": "vieval.case",
+              "startTimeUnixNano": "1791746740323000000"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "auv.linux_binary.sha256",
+                  "value": {
+                    "stringValue": "07d549bbb44e45df1cfd53060b0de060357fd24d59e174b341ab24a2ceb27c86"
+                  }
+                },
+                {
+                  "key": "auv.run.ids",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "1f35452b-27d1-6b80-7f53-5d6891721513"
+                        },
+                        {
+                          "stringValue": "2d8de726-aae4-8cf2-84e8-dd3edd47b903"
+                        },
+                        {
+                          "stringValue": "e1d3f454-7f66-a132-05c7-82f3b9326713"
+                        },
+                        {
+                          "stringValue": "727c8e31-b21b-85d6-7df2-035c775e8283"
+                        },
+                        {
+                          "stringValue": "b472dd48-3116-5a6c-4886-4006a53d51b3"
+                        },
+                        {
+                          "stringValue": "8de8d87c-959a-9ce6-77d3-7842662db847"
+                        },
+                        {
+                          "stringValue": "467175cc-5c7a-613a-2b80-e73b63041ba4"
+                        },
+                        {
+                          "stringValue": "89693650-e567-c4ab-a085-d6ba55f09be7"
+                        },
+                        {
+                          "stringValue": "6ab39e25-6131-4688-df50-62cbb4b8f047"
+                        },
+                        {
+                          "stringValue": "66f63aa8-9a02-d15e-829d-e055a98da1f5"
+                        },
+                        {
+                          "stringValue": "726dbda2-3636-d07a-6356-151100372eac"
+                        },
+                        {
+                          "stringValue": "70a927cd-eeb3-26a1-e56b-2c146b261045"
+                        },
+                        {
+                          "stringValue": "4cdae1d1-5a80-f069-08a4-32033d574962"
+                        },
+                        {
+                          "stringValue": "d4ea467e-1bbf-cb53-8f9b-5bed00b1f87e"
+                        },
+                        {
+                          "stringValue": "cf1606ed-0a39-574b-b269-3f5736837607"
+                        },
+                        {
+                          "stringValue": "04f5cbce-ef97-c9e5-28ed-15995841f2ac"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "osworld.agent.last_action",
+                  "value": {
+                    "stringValue": "DONE"
+                  }
+                },
+                {
+                  "key": "osworld.agent.steps",
+                  "value": {
+                    "doubleValue": 17
+                  }
+                },
+                {
+                  "key": "osworld.domain",
+                  "value": {
+                    "stringValue": "chrome"
+                  }
+                },
+                {
+                  "key": "osworld.evaluator.func",
+                  "value": {
+                    "stringValue": "[\"match_in_list\",\"is_expected_url_pattern_match\"]"
+                  }
+                },
+                {
+                  "key": "osworld.evidence",
+                  "value": {
+                    "stringValue": "__VIEVAL_DIR__/episodes/93eabf48-6a27-4cb6-b963-7d5fe1e0d3a9/2026-10-11T19-27-01.140Z-gpt-5.5-r1"
+                  }
+                },
+                {
+                  "key": "osworld.model",
+                  "value": {
+                    "stringValue": "gpt-5.5"
+                  }
+                },
+                {
+                  "key": "osworld.model.api",
+                  "value": {
+                    "stringValue": "responses"
+                  }
+                },
+                {
+                  "key": "osworld.pod",
+                  "value": {
+                    "stringValue": "osworld-93eabf48-e94487"
+                  }
+                },
+                {
+                  "key": "osworld.repeat",
+                  "value": {
+                    "doubleValue": 1
+                  }
+                },
+                {
+                  "key": "osworld.task.file",
+                  "value": {
+                    "stringValue": "tasks/chrome/93eabf48-6a27-4cb6-b963-7d5fe1e0d3a9.json"
+                  }
+                },
+                {
+                  "key": "vieval.case.duration_ms",
+                  "value": {
+                    "doubleValue": 104339
+                  }
+                },
+                {
+                  "key": "vieval.case.id",
+                  "value": {
+                    "stringValue": "13:chrome%2F93eabf48-6a27-4cb6-b963-7d5fe1e0d3a9"
+                  }
+                },
+                {
+                  "key": "vieval.case.name",
+                  "value": {
+                    "stringValue": "chrome/93eabf48-6a27-4cb6-b963-7d5fe1e0d3a9"
+                  }
+                },
+                {
+                  "key": "vieval.case.retry_count",
+                  "value": {
+                    "doubleValue": 0
+                  }
+                },
+                {
+                  "key": "vieval.case.state",
+                  "value": {
+                    "stringValue": "passed"
+                  }
+                },
+                {
+                  "key": "vieval.project.name",
+                  "value": {
+                    "stringValue": "osworld-kubernetes"
+                  }
+                },
+                {
+                  "key": "vieval.task.id",
+                  "value": {
+                    "stringValue": "evals%2Fosworld%2Feval%2Fosworld::default::run=model%3Dgpt-5.5%26repeat%3D1::eval=default"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1791746925457000000",
+              "name": "vieval.case",
+              "startTimeUnixNano": "1791746821118000000"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "auv.linux_binary.sha256",
+                  "value": {
+                    "stringValue": "07d549bbb44e45df1cfd53060b0de060357fd24d59e174b341ab24a2ceb27c86"
+                  }
+                },
+                {
+                  "key": "auv.run.ids",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "80909ad8-f02c-f38b-0700-fd1ac6072228"
+                        },
+                        {
+                          "stringValue": "47158092-f636-85dc-28e9-84f5332fe9ad"
+                        },
+                        {
+                          "stringValue": "6d36679e-5b92-fdd8-3aaa-d749490482da"
+                        },
+                        {
+                          "stringValue": "0a29244d-1ceb-10d4-900e-31208c13df3e"
+                        },
+                        {
+                          "stringValue": "2faa9f85-7189-1239-f4db-6556fe8286c7"
+                        },
+                        {
+                          "stringValue": "43c74854-caf5-1443-4c3b-986991c229b5"
+                        },
+                        {
+                          "stringValue": "9400204b-25ce-5baa-33b3-e970ec3d38d2"
+                        },
+                        {
+                          "stringValue": "ead1e4a4-daf0-7246-aede-e96ca8a6417e"
+                        },
+                        {
+                          "stringValue": "f6fa6a21-3e4b-3858-d879-98766277151c"
+                        },
+                        {
+                          "stringValue": "6ecf3c12-fdc2-ed3f-0e94-951e0e6ad249"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "osworld.agent.last_action",
+                  "value": {
+                    "stringValue": "DONE"
+                  }
+                },
+                {
+                  "key": "osworld.agent.steps",
+                  "value": {
+                    "doubleValue": 11
+                  }
+                },
+                {
+                  "key": "osworld.domain",
+                  "value": {
+                    "stringValue": "chrome"
+                  }
+                },
+                {
+                  "key": "osworld.evaluator.func",
+                  "value": {
+                    "stringValue": "\"exact_match\""
+                  }
+                },
+                {
+                  "key": "osworld.evidence",
+                  "value": {
+                    "stringValue": "__VIEVAL_DIR__/episodes/3299584d-8f11-4457-bf4c-ce98f7600250/2026-10-11T19-28-45.484Z-gpt-5.5-r1"
+                  }
+                },
+                {
+                  "key": "osworld.model",
+                  "value": {
+                    "stringValue": "gpt-5.5"
+                  }
+                },
+                {
+                  "key": "osworld.model.api",
+                  "value": {
+                    "stringValue": "responses"
+                  }
+                },
+                {
+                  "key": "osworld.pod",
+                  "value": {
+                    "stringValue": "osworld-3299584d-e2fde8"
+                  }
+                },
+                {
+                  "key": "osworld.repeat",
+                  "value": {
+                    "doubleValue": 1
+                  }
+                },
+                {
+                  "key": "osworld.task.file",
+                  "value": {
+                    "stringValue": "tasks/chrome/3299584d-8f11-4457-bf4c-ce98f7600250.json"
+                  }
+                },
+                {
+                  "key": "vieval.case.duration_ms",
+                  "value": {
+                    "doubleValue": 70860
+                  }
+                },
+                {
+                  "key": "vieval.case.id",
+                  "value": {
+                    "stringValue": "15:chrome%2F3299584d-8f11-4457-bf4c-ce98f7600250"
+                  }
+                },
+                {
+                  "key": "vieval.case.name",
+                  "value": {
+                    "stringValue": "chrome/3299584d-8f11-4457-bf4c-ce98f7600250"
+                  }
+                },
+                {
+                  "key": "vieval.case.retry_count",
+                  "value": {
+                    "doubleValue": 0
+                  }
+                },
+                {
+                  "key": "vieval.case.state",
+                  "value": {
+                    "stringValue": "passed"
+                  }
+                },
+                {
+                  "key": "vieval.project.name",
+                  "value": {
+                    "stringValue": "osworld-kubernetes"
+                  }
+                },
+                {
+                  "key": "vieval.task.id",
+                  "value": {
+                    "stringValue": "evals%2Fosworld%2Feval%2Fosworld::default::run=model%3Dgpt-5.5%26repeat%3D1::eval=default"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1791746996318000000",
+              "name": "vieval.case",
+              "startTimeUnixNano": "1791746925458000000"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "auv.linux_binary.sha256",
+                  "value": {
+                    "stringValue": "07d549bbb44e45df1cfd53060b0de060357fd24d59e174b341ab24a2ceb27c86"
+                  }
+                },
+                {
+                  "key": "auv.run.ids",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "2114cb1d-ee83-644a-fa5c-d3d7aefc82cd"
+                        },
+                        {
+                          "stringValue": "2fbf9799-eadb-cad8-2146-2e7f28fba21a"
+                        },
+                        {
+                          "stringValue": "0248689b-acf0-cba5-47d3-10e6ba8a5fff"
+                        },
+                        {
+                          "stringValue": "caddbc1c-8001-fea4-e957-db89ea653a9b"
+                        },
+                        {
+                          "stringValue": "8dda2b9d-5fc7-ef75-a813-91a3fd04dad3"
+                        },
+                        {
+                          "stringValue": "23883639-7974-f8d9-bd96-2a269054e811"
+                        },
+                        {
+                          "stringValue": "22fe8694-af91-cb1f-6c7b-266179602a1d"
+                        },
+                        {
+                          "stringValue": "b9a29a0f-8a64-ac79-6e61-48a8eb8b177e"
+                        },
+                        {
+                          "stringValue": "dd2f09f1-b129-5dec-5a93-cf9516984d11"
+                        },
+                        {
+                          "stringValue": "8c73479b-76cd-06a8-b84a-93f689a6d079"
+                        },
+                        {
+                          "stringValue": "069df994-c480-d271-9bc2-35ec174f7970"
+                        },
+                        {
+                          "stringValue": "0db0fc5d-574d-2e86-516e-0e5fff2e3e71"
+                        },
+                        {
+                          "stringValue": "5d0d54f7-981a-5ffb-e011-8cb3de485b6a"
+                        },
+                        {
+                          "stringValue": "9f3cc401-eb84-0a15-f608-793c6e6c3bc6"
+                        },
+                        {
+                          "stringValue": "a2ed395b-408a-210c-e308-6ee183c3874f"
+                        },
+                        {
+                          "stringValue": "a8345888-d789-baa5-1f78-2b866d20f2b0"
+                        },
+                        {
+                          "stringValue": "fd92e601-364d-96a5-f762-ae44bb800d74"
+                        },
+                        {
+                          "stringValue": "fd660c01-3db4-7c6e-f1c7-cdbc13703113"
+                        },
+                        {
+                          "stringValue": "ab56be1b-a8f9-23de-e1f0-24aa05c931c5"
+                        },
+                        {
+                          "stringValue": "e630d394-ecc8-0497-9af0-147b2255a266"
+                        },
+                        {
+                          "stringValue": "1fb3d0d8-aa84-b974-c1f5-ab3818bdf1f2"
+                        },
+                        {
+                          "stringValue": "58bfb27a-8c03-eeb8-61f5-da563ff337a6"
+                        },
+                        {
+                          "stringValue": "6c097d75-9da0-df17-1163-1b0690ab5725"
+                        },
+                        {
+                          "stringValue": "3d44b019-49bb-9b0d-5b66-3d086d66a7f4"
+                        },
+                        {
+                          "stringValue": "02d4e409-88fc-2c4b-c31b-607c72b0803c"
+                        },
+                        {
+                          "stringValue": "b707b42c-dc55-ecf7-1da7-d81e2f44560d"
+                        },
+                        {
+                          "stringValue": "fc6655d6-40cf-69bb-94f0-0a168c08f324"
+                        },
+                        {
+                          "stringValue": "c70c2156-1a66-a4bf-9bbb-02f46fbef776"
+                        },
+                        {
+                          "stringValue": "7ca60128-94c4-b2f3-17fe-3deb06ca935a"
+                        },
+                        {
+                          "stringValue": "2ed12090-81db-e161-4311-3cd4016a34f1"
+                        },
+                        {
+                          "stringValue": "22e70f25-6f1e-12c4-2a3d-628329358291"
+                        },
+                        {
+                          "stringValue": "7b58074b-8d71-22cd-bdae-09121e6778a6"
+                        },
+                        {
+                          "stringValue": "f474b9a2-6b75-4649-4bc7-9a8dfa2a7baf"
+                        },
+                        {
+                          "stringValue": "a5e39e0b-ed11-5330-e91e-490675ef71fd"
+                        },
+                        {
+                          "stringValue": "4d722f98-c174-fe01-58ed-9847def5f5b0"
+                        },
+                        {
+                          "stringValue": "ba583be9-6778-3c34-897e-8d2035aa3324"
+                        },
+                        {
+                          "stringValue": "48abaa94-7815-b42a-e76a-eb7c3d57bd69"
+                        },
+                        {
+                          "stringValue": "17c2fcf5-32c0-97fc-8a33-67846c6eb805"
+                        },
+                        {
+                          "stringValue": "9a3d4065-bbe5-f8af-cbe8-3f5d444f66cc"
+                        },
+                        {
+                          "stringValue": "b5bcfded-110c-c06f-5852-d0d97caf197e"
+                        },
+                        {
+                          "stringValue": "e072df72-d4bf-70e9-c833-b27513ed770e"
+                        },
+                        {
+                          "stringValue": "17e30947-fdbe-1a39-3a63-ea09cd2f8ef4"
+                        },
+                        {
+                          "stringValue": "a6df051e-04cd-b402-23f6-468b9e9ba8a0"
+                        },
+                        {
+                          "stringValue": "0073af34-176e-287d-0f2a-1cc099e41ecf"
+                        },
+                        {
+                          "stringValue": "48722b90-33cf-ccb8-94ea-b0d9cb60e1f2"
+                        },
+                        {
+                          "stringValue": "404335ea-d710-aebe-f159-fecd48db3f67"
+                        },
+                        {
+                          "stringValue": "af0516e4-5fa7-795b-9920-2db84f18367a"
+                        },
+                        {
+                          "stringValue": "4ecfbcd6-c1a1-6395-3901-9592c689d71e"
+                        },
+                        {
+                          "stringValue": "e83badb8-d039-08c1-61f9-2a6ab08be8d0"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "osworld.agent.last_action",
+                  "value": {
+                    "stringValue": "none"
+                  }
+                },
+                {
+                  "key": "osworld.agent.steps",
+                  "value": {
+                    "doubleValue": 50
+                  }
+                },
+                {
+                  "key": "osworld.domain",
+                  "value": {
+                    "stringValue": "chrome"
+                  }
+                },
+                {
+                  "key": "osworld.evaluator.func",
+                  "value": {
+                    "stringValue": "\"is_in_list\""
+                  }
+                },
+                {
+                  "key": "osworld.evidence",
+                  "value": {
+                    "stringValue": "__VIEVAL_DIR__/episodes/6766f2b8-8a72-417f-a9e5-56fcaa735837/2026-10-11T19-25-59.183Z-gpt-5.5-r1"
+                  }
+                },
+                {
+                  "key": "osworld.model",
+                  "value": {
+                    "stringValue": "gpt-5.5"
+                  }
+                },
+                {
+                  "key": "osworld.model.api",
+                  "value": {
+                    "stringValue": "responses"
+                  }
+                },
+                {
+                  "key": "osworld.pod",
+                  "value": {
+                    "stringValue": "osworld-6766f2b8-e37b73"
+                  }
+                },
+                {
+                  "key": "osworld.repeat",
+                  "value": {
+                    "doubleValue": 1
+                  }
+                },
+                {
+                  "key": "osworld.task.file",
+                  "value": {
+                    "stringValue": "tasks/chrome/6766f2b8-8a72-417f-a9e5-56fcaa735837.json"
+                  }
+                },
+                {
+                  "key": "vieval.case.duration_ms",
+                  "value": {
+                    "doubleValue": 241291
+                  }
+                },
+                {
+                  "key": "vieval.case.id",
+                  "value": {
+                    "stringValue": "12:chrome%2F6766f2b8-8a72-417f-a9e5-56fcaa735837"
+                  }
+                },
+                {
+                  "key": "vieval.case.name",
+                  "value": {
+                    "stringValue": "chrome/6766f2b8-8a72-417f-a9e5-56fcaa735837"
+                  }
+                },
+                {
+                  "key": "vieval.case.retry_count",
+                  "value": {
+                    "doubleValue": 0
+                  }
+                },
+                {
+                  "key": "vieval.case.state",
+                  "value": {
+                    "stringValue": "failed"
+                  }
+                },
+                {
+                  "key": "vieval.project.name",
+                  "value": {
+                    "stringValue": "osworld-kubernetes"
+                  }
+                },
+                {
+                  "key": "vieval.task.id",
+                  "value": {
+                    "stringValue": "evals%2Fosworld%2Feval%2Fosworld::default::run=model%3Dgpt-5.5%26repeat%3D1::eval=default"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1791747000429000000",
+              "name": "vieval.case",
+              "startTimeUnixNano": "1791746759138000000"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "osworld.domain",
+                  "value": {
+                    "stringValue": "chrome"
+                  }
+                },
+                {
+                  "key": "osworld.evaluator.func",
+                  "value": {
+                    "stringValue": "\"infeasible\""
+                  }
+                },
+                {
+                  "key": "osworld.model",
+                  "value": {
+                    "stringValue": "gpt-5.5"
+                  }
+                },
+                {
+                  "key": "osworld.model.api",
+                  "value": {
+                    "stringValue": "responses"
+                  }
+                },
+                {
+                  "key": "osworld.repeat",
+                  "value": {
+                    "doubleValue": 1
+                  }
+                },
+                {
+                  "key": "osworld.task.file",
+                  "value": {
+                    "stringValue": "tasks/chrome/ae78f875-5b98-4907-bbb5-9c737fc68c03.json"
+                  }
+                },
+                {
+                  "key": "vieval.case.duration_ms",
+                  "value": {
+                    "doubleValue": 232182
+                  }
+                },
+                {
+                  "key": "vieval.case.id",
+                  "value": {
+                    "stringValue": "14:chrome%2Fae78f875-5b98-4907-bbb5-9c737fc68c03"
+                  }
+                },
+                {
+                  "key": "vieval.case.name",
+                  "value": {
+                    "stringValue": "chrome/ae78f875-5b98-4907-bbb5-9c737fc68c03"
+                  }
+                },
+                {
+                  "key": "vieval.case.retry_count",
+                  "value": {
+                    "doubleValue": 0
+                  }
+                },
+                {
+                  "key": "vieval.case.state",
+                  "value": {
+                    "stringValue": "failed"
+                  }
+                },
+                {
+                  "key": "vieval.project.name",
+                  "value": {
+                    "stringValue": "osworld-kubernetes"
+                  }
+                },
+                {
+                  "key": "vieval.task.id",
+                  "value": {
+                    "stringValue": "evals%2Fosworld%2Feval%2Fosworld::default::run=model%3Dgpt-5.5%26repeat%3D1::eval=default"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1791747082549000000",
+              "name": "vieval.case",
+              "startTimeUnixNano": "1791746850367000000"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "osworld.domain",
+                  "value": {
+                    "stringValue": "chrome"
+                  }
+                },
+                {
+                  "key": "osworld.evaluator.func",
+                  "value": {
+                    "stringValue": "\"exact_match\""
+                  }
+                },
+                {
+                  "key": "osworld.model",
+                  "value": {
+                    "stringValue": "gpt-5.5"
+                  }
+                },
+                {
+                  "key": "osworld.model.api",
+                  "value": {
+                    "stringValue": "responses"
+                  }
+                },
+                {
+                  "key": "osworld.repeat",
+                  "value": {
+                    "doubleValue": 1
+                  }
+                },
+                {
+                  "key": "osworld.task.file",
+                  "value": {
+                    "stringValue": "tasks/chrome/9656a811-9b5b-4ddf-99c7-5117bcef0626.json"
+                  }
+                },
+                {
+                  "key": "vieval.case.duration_ms",
+                  "value": {
+                    "doubleValue": 82433
+                  }
+                },
+                {
+                  "key": "vieval.case.id",
+                  "value": {
+                    "stringValue": "17:chrome%2F9656a811-9b5b-4ddf-99c7-5117bcef0626"
+                  }
+                },
+                {
+                  "key": "vieval.case.name",
+                  "value": {
+                    "stringValue": "chrome/9656a811-9b5b-4ddf-99c7-5117bcef0626"
+                  }
+                },
+                {
+                  "key": "vieval.case.retry_count",
+                  "value": {
+                    "doubleValue": 0
+                  }
+                },
+                {
+                  "key": "vieval.case.state",
+                  "value": {
+                    "stringValue": "failed"
+                  }
+                },
+                {
+                  "key": "vieval.project.name",
+                  "value": {
+                    "stringValue": "osworld-kubernetes"
+                  }
+                },
+                {
+                  "key": "vieval.task.id",
+                  "value": {
+                    "stringValue": "evals%2Fosworld%2Feval%2Fosworld::default::run=model%3Dgpt-5.5%26repeat%3D1::eval=default"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1791747082862000000",
+              "name": "vieval.case",
+              "startTimeUnixNano": "1791747000429000000"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "osworld.domain",
+                  "value": {
+                    "stringValue": "chrome"
+                  }
+                },
+                {
+                  "key": "osworld.evaluator.func",
+                  "value": {
+                    "stringValue": "\"exact_match\""
+                  }
+                },
+                {
+                  "key": "osworld.model",
+                  "value": {
+                    "stringValue": "gpt-5.5"
+                  }
+                },
+                {
+                  "key": "osworld.model.api",
+                  "value": {
+                    "stringValue": "responses"
+                  }
+                },
+                {
+                  "key": "osworld.repeat",
+                  "value": {
+                    "doubleValue": 1
+                  }
+                },
+                {
+                  "key": "osworld.task.file",
+                  "value": {
+                    "stringValue": "tasks/chrome/030eeff7-b492-4218-b312-701ec99ee0cc.json"
+                  }
+                },
+                {
+                  "key": "vieval.case.duration_ms",
+                  "value": {
+                    "doubleValue": 88174
+                  }
+                },
+                {
+                  "key": "vieval.case.id",
+                  "value": {
+                    "stringValue": "16:chrome%2F030eeff7-b492-4218-b312-701ec99ee0cc"
+                  }
+                },
+                {
+                  "key": "vieval.case.name",
+                  "value": {
+                    "stringValue": "chrome/030eeff7-b492-4218-b312-701ec99ee0cc"
+                  }
+                },
+                {
+                  "key": "vieval.case.retry_count",
+                  "value": {
+                    "doubleValue": 0
+                  }
+                },
+                {
+                  "key": "vieval.case.state",
+                  "value": {
+                    "stringValue": "failed"
+                  }
+                },
+                {
+                  "key": "vieval.project.name",
+                  "value": {
+                    "stringValue": "osworld-kubernetes"
+                  }
+                },
+                {
+                  "key": "vieval.task.id",
+                  "value": {
+                    "stringValue": "evals%2Fosworld%2Feval%2Fosworld::default::run=model%3Dgpt-5.5%26repeat%3D1::eval=default"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1791747084492000000",
+              "name": "vieval.case",
+              "startTimeUnixNano": "1791746996318000000"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+/home/user/Git/github.com/moeru-ai/auv-pr-258/.pixi/envs/osworld/lib/python3.12/site-packages/requests/__init__.py:109: RequestsDependencyWarning: urllib3 (2.8.0) or chardet (7.6.0)/charset_normalizer (3.5.2) doesn't match a supported version!
+  warnings.warn(
+warning: The `fitz` API is deprecated and will be removed in future. Use `import pymupdf` instead.
+INFO:desktopenv.providers.aws.ProxyPool:Loaded 1 proxies from evaluation_examples/settings/proxy/dataimpulse.json
+INFO:desktopenv.setup:try to connect http://127.0.0.1:49580
+INFO:desktopenv.getters.chrome:[OPEN_TABS_INFO] Attempt 1/2
+INFO:desktopenv.getters.chrome:[OPEN_TABS_INFO] Successfully connected to existing Chrome instance
+INFO:desktopenv.getters.chrome:[OPEN_TABS_INFO] Tab info: 'Travel Guides & Travel Inspiration - Lonely Planet' -> https://www.lonelyplanet.com/
+INFO:desktopenv.getters.chrome:[OPEN_TABS_INFO] Tab info: 'Airbnb | Holiday rentals, cabins, beach houses & more' -> https://www.airbnb.com.sg/
+INFO:desktopenv.getters.chrome:[OPEN_TABS_INFO] Successfully retrieved info for 2 tabs
+ERROR:desktopenv.metrics.chrome:list not match
+ERROR:desktopenv.metrics.chrome:['https://www.lonelyplanet.com', 'https://www.airbnb.com', 'https://www.tripadvisor.com']
+ERROR:desktopenv.metrics.chrome:['https://www.lonelyplanet.com/', 'https://www.airbnb.com.sg/']
+
+--- stdout (exit 0) ---
+{"score": 0.0}

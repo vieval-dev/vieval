@@ -126,6 +126,9 @@ docs/superpowers/*
 
 # Local eval workspace cache
 .vieval/
+# The viewer's test fixture is a trimmed, anonymized `.vieval` directory (see packages/viewer/test/fixtures/README.md).
+!packages/viewer/test/fixtures/osworld/.vieval/
+!packages/viewer/test/fixtures/osworld/.vieval/**/*.log
 
 # Local eval workspace reports
 docs/reports/*
