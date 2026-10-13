@@ -19,7 +19,7 @@ import { href } from '../router'
  * Between server updates the elapsed time and the ETA move with the local clock, so a live run never looks frozen;
  * each server `progress` event (or snapshot) resets them to the server's numbers.
  */
-const props = defineProps<{ connection: LiveConnection, eventCount: number, receivedAt: number, snapshot: RunSnapshot }>()
+const props = defineProps<{ connection: LiveConnection, receivedAt: number, snapshot: RunSnapshot }>()
 
 // Once per second: elapsed and ETA show whole seconds (the default scheduler would update every frame).
 const now = useTimestamp({ scheduler: callback => useIntervalFn(callback, 1000) })
@@ -53,12 +53,9 @@ const connectionText = computed(() => ({
   <section :class="['card p-3 flex flex-col gap-3']" data-testid="progress-panel">
     <div :class="['flex items-center gap-3 flex-wrap text-sm']">
       <StateBadge :state="props.snapshot.state" />
-      <span :class="['badge', props.connection === 'open' ? 'state-running' : props.connection === 'error' ? 'state-failed' : 'state-neutral']" data-testid="live-indicator">
+      <span :class="['badge', props.connection === 'open' ? 'state-running' : props.connection === 'error' ? 'state-failed' : 'state-neutral']" :title="props.connection === 'open' ? `updated ${formatTime(new Date(props.receivedAt).toISOString())}` : undefined" data-testid="live-indicator">
         <span :class="[props.connection === 'open' ? 'i-mingcute-airdrop-line vv-pulse' : 'i-mingcute-signal-line']" aria-hidden="true" />{{ connectionText }}
       </span>
-      <span class="text-xs muted">source <b>{{ props.snapshot.source }}</b></span>
-      <span class="text-xs muted">seq <b class="tabular-nums" data-testid="seq">{{ props.snapshot.seq }}</b></span>
-      <span v-if="props.connection === 'open'" class="text-xs muted">{{ props.eventCount }} live events · updated {{ formatTime(new Date(props.receivedAt).toISOString()) }}</span>
       <!-- Only while the run should be moving but no live stream proves it: then the last event tells whether it stalled. -->
       <span v-if="props.snapshot.current.lastEvent && props.connection !== 'open' && (props.snapshot.state === 'running' || props.snapshot.state === 'stale')" class="text-xs muted ml-auto">last event <b>{{ props.snapshot.current.lastEvent.event }}</b> at {{ formatTime(props.snapshot.current.lastEvent.time) }}</span>
     </div>

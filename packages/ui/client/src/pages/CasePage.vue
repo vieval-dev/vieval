@@ -9,6 +9,7 @@ import { computed, toRef, watch } from 'vue'
 import ArtifactsPanel from '../components/ArtifactsPanel.vue'
 import CaseTimeline from '../components/CaseTimeline.vue'
 import EvidencePanel from '../components/EvidencePanel.vue'
+import InferencePanel from '../components/InferencePanel.vue'
 import LogView from '../components/LogView.vue'
 import ObjectTree from '../components/ObjectTree.vue'
 import PageHeader from '../components/PageHeader.vue'
@@ -51,7 +52,8 @@ const tabs = computed<ViewTab<Tab>[]>(() => [
   { count: detail.data.value?.logLineCount, icon: 'i-mingcute-terminal-box-line', label: 'Console log', value: 'logs' },
   { count: detail.data.value?.artifacts.length, icon: 'i-mingcute-attachment-line', label: 'Artifacts', value: 'artifacts' },
   { count: detail.data.value?.evidence.length, icon: 'i-mingcute-file-search-line', label: 'Evidence', value: 'evidence' },
-  { count: detail.data.value?.inference.length, icon: 'i-mingcute-robot-line', label: 'Inference', value: 'inference' },
+  // Calls, not events: every call writes a request, a response, and two events per tool call.
+  { count: detail.data.value == null ? undefined : detail.data.value.inference.filter(entry => entry.event === 'inference.requested').length, icon: 'i-mingcute-robot-line', label: 'Inference', value: 'inference' },
 ])
 const tabRoute = (value: Tab): Route => ({ ...props.route, tab: value === 'overview' ? undefined : value })
 // An unknown `tab` in the address shows the overview.
@@ -181,18 +183,9 @@ const running = computed(() => detail.data.value?.state === 'running')
           </StateView>
         </template>
 
-        <section v-else-if="tab === 'inference'" class="card">
-          <StateView :empty="detail.data.value.inference.length === 0" empty-text="No inference events" empty-hint="Model calls made through vieval's inference executors appear here.">
-            <div :class="['p-3 flex flex-col gap-2']">
-              <details v-for="item in detail.data.value.inference" :key="item.seq" :class="['rounded border border-neutral-200/50 dark:border-neutral-800/50 p-2']">
-                <summary :class="['text-sm cursor-pointer']">
-                  <span class="text-xs mono">{{ item.event }}</span> <span class="text-xs muted">{{ formatTime(item.time) }} · round {{ item.roundIndex ?? 0 }}</span>
-                </summary>
-                <ObjectTree :value="item.data" />
-              </details>
-            </div>
-          </StateView>
-        </section>
+        <StateView v-else-if="tab === 'inference'" :empty="detail.data.value.inference.length === 0" empty-text="No inference events" empty-hint="Model calls made through vieval's inference executors appear here.">
+          <InferencePanel :events="detail.data.value.inference" />
+        </StateView>
       </ViewTabs>
     </template>
   </StateView>

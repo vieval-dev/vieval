@@ -129,7 +129,7 @@ const caseHref = (line: LogLine) => href({ caseId: line.caseId!, name: 'case', r
 
   <StateView :error="live.error.value && !live.snapshot.value ? live.error.value : undefined" :loading="!live.snapshot.value" loading-text="Reading the run…" skeleton="run" @retry="live.reload">
     <template v-if="live.snapshot.value">
-      <ProgressPanel :snapshot="live.snapshot.value" :connection="live.connection.value" :received-at="live.receivedAt.value" :event-count="live.eventCount.value" />
+      <ProgressPanel :snapshot="live.snapshot.value" :connection="live.connection.value" :received-at="live.receivedAt.value" />
       <div v-if="live.error.value" role="alert" :class="['mt-2 text-xs rounded state-failed px-2 py-1']">
         Refresh failed: {{ live.error.value.message }} — showing the last snapshot.
       </div>

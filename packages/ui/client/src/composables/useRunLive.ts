@@ -44,7 +44,6 @@ export function useRunLive(runKey: Ref<string>) {
   const snapshot = computed<RunSnapshot | undefined>(() => (query.data.value?.runKey === runKey.value ? query.data.value : undefined))
   const connection = shallowRef<LiveConnection>('closed')
   const receivedAt = shallowRef(Date.now())
-  const eventCount = shallowRef(0)
   let source: EventSource | undefined
   let refetchTimer: ReturnType<typeof setTimeout> | undefined
   let lastFetch = 0
@@ -77,10 +76,7 @@ export function useRunLive(runKey: Ref<string>) {
     const stream = openRunStream(mine, after)
     source = stream
     stream.addEventListener('open', () => (connection.value = 'open'))
-    stream.addEventListener('run-event', () => {
-      eventCount.value += 1
-      scheduleRefetch()
-    })
+    stream.addEventListener('run-event', scheduleRefetch)
     stream.addEventListener('progress', (message) => {
       const update = JSON.parse((message as MessageEvent<string>).data) as ProgressResponse
       const current = queryCache.getQueryData<RunSnapshot>(['runs', mine, 'snapshot'])
@@ -108,7 +104,6 @@ export function useRunLive(runKey: Ref<string>) {
   watch(runKey, () => {
     close()
     connection.value = 'closed'
-    eventCount.value = 0
   })
   watch(snapshot, (value) => {
     if (value == null)
@@ -128,5 +123,5 @@ export function useRunLive(runKey: Ref<string>) {
 
   onScopeDispose(close)
 
-  return { connection, error: query.error, eventCount, receivedAt, refreshKey, reload: refetch, snapshot }
+  return { connection, error: query.error, receivedAt, refreshKey, reload: refetch, snapshot }
 }

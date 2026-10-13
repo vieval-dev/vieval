@@ -16,6 +16,7 @@ import type { RunHandle } from './store'
 import { readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 
+import { sumInference } from '../shared/inference'
 import { average, buildProjectNodes, buildTaskNodes, caseKeyOf, currentPosition, estimateProgress, hybridAverage, scoreRounds, toCaseNode } from '../shared/reduce'
 import { ViewerError } from './errors'
 import { classifyPreview, contentTypeFromName } from './files'
@@ -74,32 +75,8 @@ export function buildMetrics(handle: RunHandle, filter: { caseId?: string, taskI
     list.push(metric)
     target.set(metric.name, list)
   }
-  const inference = { failed: 0, requests: 0, responses: 0, totals: {} as Record<string, number> }
-  for (const reduced of reducer.cases.values()) {
-    if ((filter.taskId != null && reduced.taskId !== filter.taskId) || (filter.caseId != null && reduced.caseId !== filter.caseId)) {
-      continue
-    }
-    for (const entry of reduced.inference) {
-      if (entry.event === 'inference.requested') {
-        inference.requests += 1
-      }
-      else if (entry.event === 'inference.failed') {
-        inference.failed += 1
-      }
-      else if (entry.event === 'inference.responded') {
-        inference.responses += 1
-        const data = entry.data as { metering?: { dimensions?: Record<string, number>, latency_ms?: number }, metrics?: Record<string, number> }
-        for (const [name, value] of Object.entries({ ...data.metrics, ...data.metering?.dimensions })) {
-          if (typeof value === 'number') {
-            inference.totals[name] = (inference.totals[name] ?? 0) + value
-          }
-        }
-        if (typeof data.metering?.latency_ms === 'number') {
-          inference.totals.latency_ms = (inference.totals.latency_ms ?? 0) + data.metering.latency_ms
-        }
-      }
-    }
-  }
+  const cases = [...reducer.cases.values()].filter(reduced => (filter.taskId == null || reduced.taskId === filter.taskId) && (filter.caseId == null || reduced.caseId === filter.caseId))
+  const inference = sumInference(cases.flatMap(reduced => reduced.inference))
   return {
     inference,
     nonNumeric: [...nonNumeric].map(([name, values]) => ({ name, values })).sort((left, right) => left.name.localeCompare(right.name)),
