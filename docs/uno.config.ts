@@ -1,4 +1,4 @@
-import { defineConfig, presetWebFonts, presetWind4 } from 'unocss'
+import { defineConfig, presetIcons, presetWebFonts, presetWind4 } from 'unocss'
 
 /** @see {@link https://github.com/unocss-community/unocss-preset-shadcn#usage} */
 export default defineConfig({
@@ -16,6 +16,8 @@ export default defineConfig({
     },
   },
   presets: [
+    // Icons come from installed `@iconify-json/*` sets (mingcute for UI glyphs, simple-icons for brands).
+    presetIcons({ scale: 1 }),
     presetWind4({
       dark: {
         dark: ':is(.dark, [data-theme="dark"])',
@@ -29,13 +31,26 @@ export default defineConfig({
           name: 'DM Sans',
           provider: 'fontsource',
         },
-        'sans-title': {
-          name: 'Momo Trust Display',
-          provider: 'google',
-        },
+        // NOTICE: Momo Trust Display has no CJK glyphs, so Chinese characters fall through to Alimama FangYuanTi.
+        // It is self-hosted (provider `none` only adds the family name): its @font-face rules, one per
+        // unicode-range chunk, live in `.vitepress/theme/fonts/alimamaFangYuanTi.css`.
+        'sans-title': [
+          {
+            name: 'Momo Trust Display',
+            provider: 'google',
+          },
+          {
+            name: 'Alimama FangYuanTi',
+            provider: 'none',
+          },
+        ],
       },
     }),
   ],
+  shortcuts: {
+    // Section headings on the home page: plainer and one size smaller than the theme's display headings.
+    'section-title': 'font-sans font-medium tracking-tight text-2xl md:text-4xl text-white text-balance',
+  },
   theme: {
     colors: {
       beige: 'var(--color-beige)',
@@ -49,7 +64,7 @@ export default defineConfig({
     },
     fontFamily: {
       'sans': '"DM Sans Variable", "DM Sans", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";',
-      'sans-title': '"Momo Trust Display", "DM Sans Variable", "DM Sans", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";',
+      'sans-title': '"Momo Trust Display", "Alimama FangYuanTi", "DM Sans Variable", "DM Sans", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";',
     },
   },
 })

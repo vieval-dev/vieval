@@ -8,9 +8,13 @@
     "preview": "vitepress preview"
   },
   "dependencies": {
+    "animejs": "catalog:",
     "vue": "catalog:"
   },
   "devDependencies": {
+    "@iconify-json/mingcute": "catalog:",
+    "@iconify-json/simple-icons": "catalog:",
+    "@moeru/std": "catalog:",
     "@shikijs/transformers": "catalog:",
     "@voidzero-dev/vitepress-theme": "catalog:",
     "@vue/tsconfig": "catalog:",
