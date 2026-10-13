@@ -117,7 +117,7 @@ export interface RunVievalCliOptions extends LoadVievalCliConfigOptions {
   /**
    * Most cases running at once in the whole run.
    *
-   * Combined with the top-level `concurrency.case` by taking the smaller value, so it never raises a configured
+   * Combined with the top-level `scheduler.concurrency.case` by taking the smaller value, so it never raises a configured
    * value.
    */
   caseConcurrency?: number
@@ -141,7 +141,7 @@ export interface RunVievalCliOptions extends LoadVievalCliConfigOptions {
   /**
    * Most projects running at once.
    *
-   * Combined with the top-level `concurrency.project` by taking the smaller value.
+   * Combined with the top-level `scheduler.concurrency.project` by taking the smaller value.
    */
   projectConcurrency?: number
   /**
@@ -165,7 +165,7 @@ export interface RunVievalCliOptions extends LoadVievalCliConfigOptions {
   /**
    * Most scheduled tasks running at once in the whole run.
    *
-   * Combined with the top-level `concurrency.task` by taking the smaller value.
+   * Combined with the top-level `scheduler.concurrency.task` by taking the smaller value.
    */
   taskConcurrency?: number
   /**
@@ -527,7 +527,7 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
       'vieval.run.id': identity.runId,
       'vieval.workspace.id': identity.workspaceId,
     }, async () => {
-      const runConcurrency = resolveRunConcurrency(loadedConfig.concurrency, options)
+      const runConcurrency = resolveRunConcurrency(loadedConfig.scheduler?.concurrency, options)
       const runScheduler = createScheduler({
         concurrency: runConcurrency,
         context: {
@@ -1347,8 +1347,8 @@ function resolveProjectConcurrency(
   const hasRunWidePool = runConcurrency.task != null || runConcurrency.case != null
 
   return {
-    case: project.concurrency?.case,
-    task: project.concurrency?.task ?? (hasRunWidePool ? undefined : 1),
+    case: project.scheduler?.concurrency?.case,
+    task: project.scheduler?.concurrency?.task ?? (hasRunWidePool ? undefined : 1),
   }
 }
 

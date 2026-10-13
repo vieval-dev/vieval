@@ -32,7 +32,7 @@ CLI 参数 `--attempt` 只为本次运行设置报告中的 `attemptId`。它不
 
 ## 在共享资源的位置设置并发
 
-每个并发值都是一个槽位池。键名决定这个池数的是什么，写在哪里决定哪些工作共用这个池。
+并发属于调度器配置，而不是会被继承的默认值：顶层配置和每个项目都把它写在 `scheduler.concurrency` 下，和调度中间件放在一起。每个并发值都是一个槽位池。键名决定这个池数的是什么，写在哪里决定哪些工作共用这个池。
 
 | 键 | 计数对象 |
 | --- | --- |
@@ -42,8 +42,8 @@ CLI 参数 `--attempt` 只为本次运行设置报告中的 `attemptId`。它不
 
 | 写在哪里 | 可用的键 | 由哪些工作共用 |
 | --- | --- | --- |
-| 顶层 `concurrency`；`--project-concurrency`、`--task-concurrency`、`--case-concurrency` | `project`、`task`、`case` | 整个运行 |
-| 项目级 `concurrency` | `task`、`case` | 该项目的任务和用例 |
+| 顶层 `scheduler.concurrency`；`--project-concurrency`、`--task-concurrency`、`--case-concurrency` | `project`、`task`、`case` | 整个运行 |
+| 项目级 `scheduler.concurrency` | `task`、`case` | 该项目的任务和用例 |
 | `describeTask(..., { concurrency: { case } })` | `case` | 该任务的所有用例，跨越它的全部用例组 |
 | `casesFromInputs(..., { concurrency })` | 一个数字 | 这一组用例 |
 
@@ -57,11 +57,6 @@ CLI 参数 `--attempt` 只为本次运行设置报告中的 `attemptId`。它不
 import { defineConfig } from 'vieval'
 
 export default defineConfig({
-  // 整个运行最多同时 7 个用例，例如每个用例都要独占一台虚拟机。
-  concurrency: {
-    case: 7,
-    task: 4,
-  },
   projects: [
     {
       include: ['evals/*.eval.ts'],
@@ -69,6 +64,13 @@ export default defineConfig({
       root: '.',
     },
   ],
+  // 整个运行最多同时 7 个用例，例如每个用例都要独占一台虚拟机。
+  scheduler: {
+    concurrency: {
+      case: 7,
+      task: 4,
+    },
+  },
 })
 ```
 
@@ -100,7 +102,7 @@ describeTask('retrieval', ({ casesFromInputs }) => {
 
 这里的三个输入共用一个大小为 `2` 的组池，组池外面还有大小为 `4` 的任务池，再外面是项目和整个运行的池。传入 `--case-concurrency 1` 会让整个运行同一时间只执行一个用例。
 
-调度中间件可以包住每个被放行的项目、任务和用例，例如记录调度遥测，或者用动态条件暂缓执行。在顶层或项目上用 `scheduler: { middleware: [...] }` 声明。中间件在工作拿到全部槽位之后运行，顶层中间件包在项目中间件外面。
+调度中间件可以包住每个被放行的项目、任务和用例，例如记录调度遥测，或者用动态条件暂缓执行。和槽位池写在一起，在顶层或项目上用 `scheduler: { middleware: [...] }` 声明。中间件在工作拿到全部槽位之后运行，顶层中间件包在项目中间件外面。
 
 ::: warning 提高并发会增加同时发出的请求数
 矩阵、推理执行器注册和并发配置本身不会调用模型服务。如果用例会调用模型或其他计费服务，提高任务或用例并发可能触发限流，并在短时间内产生更多费用。请根据服务方允许的请求速率，以及每个用例实际发出的请求数设置上限。

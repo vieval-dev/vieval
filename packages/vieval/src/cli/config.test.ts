@@ -78,10 +78,6 @@ describe('loadVievalCliConfig', () => {
     await writeFile(
       configFilePath,
       JSON.stringify({
-        concurrency: {
-          case: 3,
-          task: 2,
-        },
         models: [
           {
             id: 'openai/gpt-5-mini',
@@ -119,14 +115,6 @@ describe('loadVievalCliConfig', () => {
     expect(loaded.projects.map(project => project.models.map(model => model.id))).toEqual([
       ['openai/gpt-5-mini'],
       ['openai/gpt-5-mini'],
-    ])
-    expect(loaded.concurrency).toEqual({
-      case: 3,
-      task: 2,
-    })
-    expect(loaded.projects.map(project => project.concurrency)).toEqual([
-      undefined,
-      undefined,
     ])
     expect(loaded.projects.map(project => project.reporters)).toEqual([
       ['./workspace-reporter.js'],
@@ -279,12 +267,12 @@ describe('loadVievalCliConfig', () => {
         '}',
         '',
         'export default {',
-        '  concurrency: { task: 4 },',
+        '  scheduler: { concurrency: { task: 4 } },',
         '  models: [model("global:model")],',
         '  plugins: [topLevelModelPlugin],',
         '  projects: [',
         '    {',
-        '      concurrency: { case: 9 },',
+        '      scheduler: { concurrency: { case: 9 } },',
         '      name: "with-project-plugin",',
         '      plugins: [projectModelPlugin],',
         '    },',
@@ -319,7 +307,7 @@ describe('loadVievalCliConfig', () => {
       'explicit-project:model',
       'project-local:model',
     ])
-    expect(loaded.projects[0]?.concurrency).toEqual({
+    expect(loaded.projects[0]?.scheduler?.concurrency).toEqual({
       case: 9,
       task: undefined,
     })
@@ -417,22 +405,26 @@ describe('loadVievalCliConfig', () => {
     await writeFile(
       configFilePath,
       JSON.stringify({
-        concurrency: {
-          case: 6,
-          project: 3,
-          task: 4,
-        },
         projects: [
           {
-            concurrency: {
-              case: 9,
-            },
             name: 'fixture-project',
+            scheduler: {
+              concurrency: {
+                case: 9,
+              },
+            },
           },
           {
             name: 'plain-project',
           },
         ],
+        scheduler: {
+          concurrency: {
+            case: 6,
+            project: 3,
+            task: 4,
+          },
+        },
       }),
       'utf-8',
     )
@@ -441,15 +433,15 @@ describe('loadVievalCliConfig', () => {
       cwd: temporaryDirectory,
     })
 
-    expect(loaded.concurrency).toEqual({
+    expect(loaded.scheduler?.concurrency).toEqual({
       case: 6,
       project: 3,
       task: 4,
     })
-    expect(loaded.projects[0]?.concurrency).toEqual({
+    expect(loaded.projects[0]?.scheduler?.concurrency).toEqual({
       case: 9,
     })
-    expect(loaded.projects[1]?.concurrency).toBeUndefined()
+    expect(loaded.projects[1]?.scheduler).toBeUndefined()
   })
 
   it('loads scheduler middleware from the top-level config and projects', async () => {

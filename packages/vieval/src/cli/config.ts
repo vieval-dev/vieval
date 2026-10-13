@@ -118,15 +118,6 @@ export type CliProjectConcurrencyConfig = Pick<SchedulerConcurrencyConfig, 'case
  */
 export interface CliProjectConfig {
   /**
-   * Pools shared by the tasks and cases of this project.
-   *
-   * Tasks and cases also need a slot in the run-wide pools of the top-level config and the CLI, so a project value
-   * can only lower concurrency for this project.
-   *
-   * @default `{ task: 1 }` when neither the top-level config nor the CLI declares `task` or `case`; otherwise `{}`
-   */
-  concurrency?: CliProjectConcurrencyConfig
-  /**
    * Optional eval-time matrix dimensions.
    */
   evalMatrix?: MatrixDefinition | MatrixLayer
@@ -192,11 +183,11 @@ export interface CliProjectConfig {
    */
   runMatrix?: MatrixDefinition | MatrixLayer
   /**
-   * Scheduler extensions for the projects, tasks, and cases of this project.
+   * Scheduler settings for the tasks and cases of this project.
    *
    * @default undefined
    */
-  scheduler?: CliSchedulerConfig
+  scheduler?: CliProjectSchedulerConfig
 }
 
 /**
@@ -238,13 +229,52 @@ export interface CliProjectModeConfig extends CliConfigBase {
 }
 
 /**
- * Scheduler extensions declared in CLI-facing config.
+ * Scheduler settings of one project.
+ */
+export interface CliProjectSchedulerConfig {
+  /**
+   * Pools shared by the tasks and cases of this project.
+   *
+   * Tasks and cases also need a slot in the run-wide pools of the top-level `scheduler.concurrency` and the CLI, so a
+   * project value can only lower concurrency for this project.
+   *
+   * @default `{ task: 1 }` when neither the top-level config nor the CLI declares `task` or `case`; otherwise `{}`
+   */
+  concurrency?: CliProjectConcurrencyConfig
+  /**
+   * Middleware wrapped around every task and case of this project, inside the top-level middleware.
+   *
+   * Each hook runs after the unit holds all of its slots.
+   *
+   * @default []
+   */
+  middleware?: SchedulerMiddleware[]
+}
+
+/**
+ * Scheduler settings of the whole run, declared on the top-level config.
+ *
+ * Unlike models or reporters, these settings are not inherited by projects as defaults: they configure the run
+ * scheduler, and projects configure their own scheduler below it.
  */
 export interface CliSchedulerConfig {
   /**
-   * Middleware wrapped around every project, task, and case admitted under this config level.
+   * Pools shared by the whole run.
    *
-   * Root middleware wraps project middleware. Each hook runs after the unit holds all of its slots.
+   * Use when:
+   * - one resource bounds the run as a whole, for example "at most 7 cases in the whole run"
+   *
+   * Expects:
+   * - each provided value to be a positive integer; projects, tasks, and case groups can only declare smaller pools
+   *   for their own work, and CLI flags can only lower these values
+   *
+   * @default `{ project: 1 }`
+   */
+  concurrency?: SchedulerConcurrencyConfig
+  /**
+   * Middleware wrapped around every project, task, and case of the run.
+   *
+   * Top-level middleware wraps project middleware. Each hook runs after the unit holds all of its slots.
    *
    * @default []
    */
@@ -278,7 +308,6 @@ export interface CliWorkspaceModeConfig extends CliConfigBase {
  * Result of loading and normalizing a config file.
  */
 export interface LoadedCliConfig {
-  concurrency?: SchedulerConcurrencyConfig
   configFilePath: null | string
   env: NodeJS.ProcessEnv
   projects: NormalizedCliProjectConfig[]
@@ -311,7 +340,6 @@ export interface LoadVievalCliConfigOptions {
  * Normalized CLI project used by runtime orchestration.
  */
 export interface NormalizedCliProjectConfig {
-  concurrency?: CliProjectConcurrencyConfig
   evalMatrix?: MatrixLayer
   exclude: string[]
   executor?: (task: ScheduledTask, context: CliProjectExecutorContext) => Promise<RunResult>
@@ -322,26 +350,13 @@ export interface NormalizedCliProjectConfig {
   reporters: VievalVitestCompatReporterReference[]
   root: string
   runMatrix?: MatrixLayer
-  scheduler?: CliSchedulerConfig
+  scheduler?: CliProjectSchedulerConfig
 }
 
 /**
  * Top-level CLI config loaded from `vieval.config.*`.
  */
 interface CliConfigBase {
-  /**
-   * Pools shared by the whole run.
-   *
-   * Use when:
-   * - one resource bounds the run as a whole, for example "at most 7 cases in the whole run"
-   *
-   * Expects:
-   * - each provided value to be a positive integer; projects, tasks, and case groups can only declare smaller pools
-   *   for their own work, and CLI flags can only lower these values
-   *
-   * @default `{ project: 1 }`
-   */
-  concurrency?: SchedulerConcurrencyConfig
   /**
    * Environment variables injected into `process.env` during `vieval run`.
    *
@@ -377,7 +392,7 @@ interface CliConfigBase {
    */
   reporting?: CliReportingConfig
   /**
-   * Scheduler extensions for every project, task, and case of the run.
+   * Scheduler settings of the whole run: run-wide concurrency pools and middleware.
    *
    * @default undefined
    */
@@ -487,7 +502,6 @@ export async function loadVievalCliConfig(options: LoadVievalCliConfigOptions = 
     const loadedConfig = await loadRawVievalConfig(options)
     if (loadedConfig.configFilePath == null || loadedConfig.config == null) {
       return {
-        concurrency: undefined,
         configFilePath: null,
         env: {},
         projects: await normalizeConfig(null, cwd),
@@ -499,7 +513,6 @@ export async function loadVievalCliConfig(options: LoadVievalCliConfigOptions = 
     const config = loadedConfig.config
 
     return {
-      concurrency: config.concurrency,
       configFilePath: loadedConfig.configFilePath,
       env: config.env ?? {},
       projects: await normalizeConfig(config, dirname(loadedConfig.configFilePath)),
@@ -537,15 +550,15 @@ async function applyProjectPlugins(
   return normalizeProjectConfig(
     {
       ...resolvedProject,
-      concurrency: resolvedProject.concurrency === scopedProject.concurrency
-        ? toProjectConcurrency(resolvedConfig.concurrency)
-        : resolvedProject.concurrency,
       models: resolvedProject.models === scopedProject.models
         ? resolvedConfig.models
         : resolvedProject.models,
       reporters: resolvedProject.reporters === scopedProject.reporters
         ? resolvedConfig.reporters
         : resolvedProject.reporters,
+      scheduler: resolvedProject.scheduler === scopedProject.scheduler
+        ? toProjectScheduler(resolvedConfig.scheduler)
+        : resolvedProject.scheduler,
     },
     cwd,
     resolvedConfig.models ?? [],
@@ -593,15 +606,12 @@ function createProjectScopedConfig(
   project: CliProjectConfig,
   normalizedProject: NormalizedCliProjectConfig,
 ): CliProjectModeConfig {
-  // Inside a project-local plugin, the top-level `concurrency` stands for the project's own pools.
   return {
-    concurrency: normalizedProject.concurrency,
     env: config?.env,
     models: normalizedProject.models,
     plugins: project.plugins,
     projects: [
       {
-        concurrency: normalizedProject.concurrency,
         evalMatrix: normalizedProject.evalMatrix,
         exclude: normalizedProject.exclude,
         executor: normalizedProject.executor,
@@ -618,6 +628,8 @@ function createProjectScopedConfig(
     ],
     reporters: normalizedProject.reporters,
     reporting: config?.reporting,
+    // Inside a project-local plugin, the top-level `scheduler` stands for the project's own scheduler.
+    scheduler: normalizedProject.scheduler,
   }
 }
 
@@ -767,7 +779,6 @@ function normalizeProjectConfig(
     : (isAbsolute(project.root) ? project.root : resolve(cwd, project.root))
   const reporters = project.reporters ?? [...inheritedReporterReferences]
   return {
-    concurrency: project.concurrency,
     evalMatrix: normalizeMatrixLayerInput(project.evalMatrix),
     exclude,
     executor: project.executor,
@@ -852,15 +863,21 @@ async function resolveVievalConfig(
   }
 }
 
-function toProjectConcurrency(
-  concurrency: SchedulerConcurrencyConfig | undefined,
-): CliProjectConcurrencyConfig | undefined {
-  if (concurrency == null) {
+function toProjectScheduler(
+  scheduler: CliSchedulerConfig | undefined,
+): CliProjectSchedulerConfig | undefined {
+  if (scheduler == null) {
     return undefined
   }
 
   return {
-    case: concurrency.case,
-    task: concurrency.task,
+    // A project cannot declare the run-wide `project` pool.
+    concurrency: scheduler.concurrency == null
+      ? undefined
+      : {
+          case: scheduler.concurrency.case,
+          task: scheduler.concurrency.task,
+        },
+    middleware: scheduler.middleware,
   }
 }

@@ -162,7 +162,7 @@ export default defineEval({
       name: '${project.name}',
       root: './${project.name}',
       include: ['evals/*.eval.ts'],
-      ${project.concurrencySource == null ? '' : `concurrency: ${project.concurrencySource},`}
+      ${project.concurrencySource == null ? '' : `scheduler: { concurrency: ${project.concurrencySource} },`}
       executor: async (task) => {
         const state = globalThis.${blockingRunStateKey}
 
@@ -209,7 +209,7 @@ export default defineEval({
 import { defineConfig } from '${cliConfigImportPath}'
 
 export default defineConfig({
-  ${options.topLevelConcurrencySource == null ? '' : `concurrency: ${options.topLevelConcurrencySource},`}
+  ${options.topLevelConcurrencySource == null ? '' : `scheduler: { concurrency: ${options.topLevelConcurrencySource} },`}
   projects: [
 ${projectEntries}
   ],
@@ -269,7 +269,7 @@ async function createDslProject(options: {
 import { defineConfig } from '${vievalImportPath}'
 
 export default defineConfig({
-  ${options.topLevelConcurrencySource == null ? '' : `concurrency: ${options.topLevelConcurrencySource},`}
+  ${options.topLevelConcurrencySource == null ? '' : `scheduler: { concurrency: ${options.topLevelConcurrencySource} },`}
   models: [
     {
       aliases: [],

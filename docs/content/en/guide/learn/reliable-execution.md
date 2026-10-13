@@ -32,7 +32,7 @@ The `--attempt` CLI flag is related but distinct: it assigns an `attemptId` to t
 
 ## Set concurrency where the work is shared
 
-Each concurrency value is a pool of slots. The place where you write the value decides which work shares the pool, and the key decides what the pool counts.
+Concurrency is scheduler configuration, not an inherited default: the top-level config and each project declare it under `scheduler.concurrency`, next to scheduler middleware. Each concurrency value is a pool of slots. The place where you write the value decides which work shares the pool, and the key decides what the pool counts.
 
 | Key | Counts |
 | --- | --- |
@@ -42,8 +42,8 @@ Each concurrency value is a pool of slots. The place where you write the value d
 
 | Declared in | Keys | Shared by |
 | --- | --- | --- |
-| Top-level `concurrency`; `--project-concurrency`, `--task-concurrency`, `--case-concurrency` | `project`, `task`, `case` | the whole run |
-| Project `concurrency` | `task`, `case` | the tasks and cases of that project |
+| Top-level `scheduler.concurrency`; `--project-concurrency`, `--task-concurrency`, `--case-concurrency` | `project`, `task`, `case` | the whole run |
+| Project `scheduler.concurrency` | `task`, `case` | the tasks and cases of that project |
 | `describeTask(..., { concurrency: { case } })` | `case` | the cases of that task, across all of its case groups |
 | `casesFromInputs(..., { concurrency })` | a number | the cases of that group |
 
@@ -55,11 +55,6 @@ A top-level value and a CLI flag for the same key both bound the whole run, so t
 import { defineConfig } from 'vieval'
 
 export default defineConfig({
-  // At most 7 cases in the whole run, for example because every case owns one VM.
-  concurrency: {
-    case: 7,
-    task: 4,
-  },
   projects: [
     {
       include: ['evals/*.eval.ts'],
@@ -67,6 +62,13 @@ export default defineConfig({
       root: '.',
     },
   ],
+  // At most 7 cases in the whole run, for example because every case owns one VM.
+  scheduler: {
+    concurrency: {
+      case: 7,
+      task: 4,
+    },
+  },
 })
 ```
 
@@ -92,7 +94,7 @@ describeTask('retrieval', ({ casesFromInputs }) => {
 
 Here the three queries share a group pool of `2`, inside the task pool of `4`, inside any project and run pools. `--case-concurrency 1` would bound the whole run to one case.
 
-Scheduler middleware can wrap every admitted project, task, and case, for example to record admission telemetry or to hold work behind a dynamic gate. Declare it with `scheduler: { middleware: [...] }` at the top level or on a project. Middleware runs after the unit holds all of its slots, and top-level middleware wraps project middleware.
+Scheduler middleware can wrap every admitted project, task, and case, for example to record admission telemetry or to hold work behind a dynamic gate. Declare it next to the pools, with `scheduler: { middleware: [...] }` at the top level or on a project. Middleware runs after the unit holds all of its slots, and top-level middleware wraps project middleware.
 
 ::: warning Concurrency multiplies real calls only when task code makes them
 Matrices, inference-executor registrations, and concurrency settings do not call a provider by themselves. If cases do invoke a model or another metered service, higher task or case concurrency can increase rate-limit failures and create a sudden cost spike. Choose limits from provider capacity and the number of calls each case actually makes.
