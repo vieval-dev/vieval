@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { data as contributors } from './contributors.data'
+import type { Changelog } from '@nolebase/vitepress-plugin-git-changelog/client'
+
+import gitChangelog from 'virtual:nolebase-git-changelog'
 
 /**
  * A project, organization, or university thanked on the home page, shown by its GitHub avatar.
@@ -23,6 +25,34 @@ defineProps<{
   thanks: ThanksEntry[]
   title?: string
 }>()
+
+// NOTICE:
+// The virtual module declaration resolves to `any`, so the import is re-annotated with the exported contract.
+// `src/types/virtual.d.ts` in `@nolebase/vitepress-plugin-git-changelog@2.21.0` imports `Changelog` from `'./types'`,
+// but the only sibling module is `index.ts`, and `skipLibCheck` hides the failed resolution.
+// Source: `node_modules/@nolebase/vitepress-plugin-git-changelog/dist/types/virtual.d.ts`, line 2.
+// Removal condition: the declaration imports from `'./index'` (or `'.'`) upstream.
+const changelog: Changelog = gitChangelog
+
+const commitCounts = new Map<string, number>()
+for (const commit of changelog.commits) {
+  for (const name of commit.authors)
+    commitCounts.set(name, (commitCounts.get(name) ?? 0) + 1)
+}
+
+/**
+ * Authors gathered by the git-changelog plugin from `git log` at build time, most commits first.
+ *
+ * NOTICE:
+ * Only authors resolved to a profile link are shown. Git-changelog derives `url` from `mapAuthors` in
+ * `docs/.vitepress/config.ts` or from a GitHub noreply email, so agent `Co-authored-by` trailers such as
+ * `Claude <noreply@anthropic.com>` drop out here, since they have no profile to link to.
+ * A human contributor who commits with a private email needs a `mapAuthors` entry to appear.
+ * The list is empty under `vitepress dev`, because the plugin only collects git logs during `vitepress build`.
+ */
+const contributors = changelog.authors
+  .filter(author => author.url)
+  .sort((a, b) => (commitCounts.get(b.name) ?? 0) - (commitCounts.get(a.name) ?? 0))
 </script>
 
 <template>
@@ -64,9 +94,9 @@ defineProps<{
       <div v-if="contributors.length" class="flex flex-col gap-3">
         <span class="text-xs text-grey tracking-wide font-mono uppercase">{{ contributorsTitle ?? '' }}</span>
         <ul class="flex flex-wrap gap-2">
-          <li v-for="contributor in contributors" :key="contributor.login">
-            <a :href="contributor.url" target="_blank" rel="noopener noreferrer" :title="contributor.login">
-              <img :src="contributor.avatar" :alt="contributor.login" width="36" height="36" loading="lazy" class="border border-white/10 rounded-full size-9">
+          <li v-for="contributor in contributors" :key="contributor.name">
+            <a :href="contributor.url" target="_blank" rel="noopener noreferrer" :title="contributor.name">
+              <img :src="contributor.avatarUrl" :alt="contributor.name" width="36" height="36" loading="lazy" class="border border-white/10 rounded-full size-9">
             </a>
           </li>
         </ul>

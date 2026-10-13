@@ -1,10 +1,12 @@
 import type { Theme } from 'vitepress'
 import type { Component } from 'vue'
 
+import { NolebaseGitChangelogPlugin } from '@nolebase/vitepress-plugin-git-changelog/client'
 import { themeContextKey, VoidZeroTheme } from '@voidzero-dev/vitepress-theme'
 
 import Layout from './Layout.vue'
 
+import '@nolebase/vitepress-plugin-git-changelog/client/theme/voidzero.css'
 import './fonts/alimamaFangYuanTi.css'
 import './styles.css'
 import 'uno.css'
@@ -25,6 +27,7 @@ export default {
     })
 
     VoidZeroTheme.enhanceApp(ctx)
+    ctx.app.use(NolebaseGitChangelogPlugin)
   },
   Layout: Layout as Component,
 } satisfies Theme

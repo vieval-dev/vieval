@@ -1,10 +1,19 @@
+import { fileURLToPath } from 'node:url'
+
 import UnoCSS from 'unocss/vite'
 
+import { GitChangelog } from '@nolebase/vitepress-plugin-git-changelog/vite'
 import { transformerNotationWordHighlight } from '@shikijs/transformers'
 import { extendConfig } from '@voidzero-dev/vitepress-theme/config'
 import { defineConfig } from 'vitepress'
 
 import { version } from '../../packages/vieval/package.json'
+
+/**
+ * Repository root, so git-changelog walks the history of the whole workspace instead of only the docs folder.
+ * The home page lists everyone who touched the code, not just the people who wrote docs pages.
+ */
+const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url))
 
 export default extendConfig(defineConfig({
   cleanUrls: true,
@@ -231,6 +240,17 @@ export default extendConfig(defineConfig({
   title: 'Vieval',
   vite: {
     plugins: [
+      // Collects authors (including `Co-authored-by` trailers) from `git log` at build time;
+      // the home page contributors section reads them from `virtual:nolebase-git-changelog`.
+      GitChangelog({
+        cwd: repositoryRoot,
+        // `.agents` holds vendored skills, so its history says nothing about who built Vieval.
+        include: ['*.md', 'docs/**', 'evals/**', 'examples/**', 'packages/**', '!**/node_modules/**'],
+        mapAuthors: [
+          { mapByNameAliases: ['Neko Ayaka', 'Neko'], name: 'Neko Ayaka', username: 'nekomeowww' },
+        ],
+        repoURL: 'https://github.com/vieval-dev/vieval',
+      }),
       UnoCSS() as any,
     ],
   },
