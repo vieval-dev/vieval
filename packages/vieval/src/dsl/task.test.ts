@@ -1,4 +1,5 @@
 import type { RunEventBus } from '../core/runner/event-bus'
+import type { SchedulerScopeContext } from '../core/scheduler/types'
 import type { TelemetryAttributes, TelemetryRuntime } from '../core/telemetry'
 import type { CaseEndedData, CaseStartedData, RunEventEnvelope } from '../events'
 
@@ -8,6 +9,7 @@ import { describe, expect, it, vi } from 'vitest'
 import * as v from 'valibot'
 
 import { createRunEventBus } from '../core/runner/event-bus'
+import { createScheduler } from '../core/scheduler/runtime'
 import { caseEnded, caseEndedDataSchema, caseStarted, caseStartedDataSchema, metricRecorded, scoreRecorded } from '../events'
 import { caseOf, casesFromInputs, describeEval, describeTask } from './task'
 
@@ -633,13 +635,11 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
       caseOf('case-1', () => {})
     }, {
       concurrency: {
-        attempt: 2,
         case: 3,
       },
     })
 
     expect(taskDefinition.task?.concurrency).toEqual({
-      attempt: 2,
       case: 3,
     })
   })
@@ -1368,16 +1368,16 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
   })
 
   /**
-   * it('caps cases running at once within one attempt across case groups') verifies `concurrency.attempt`.
+   * it('caps cases of the task across case groups with the task case pool') verifies task `concurrency.case`.
    *
    * @example
-   * two casesFromInputs groups of 2 with case cap 2 each and attempt cap 1 -> one case at a time.
+   * two casesFromInputs groups of 2 with group pools of 2 and a task case pool of 1 -> one case at a time.
    */
-  it('caps cases running at once within one attempt across case groups', async () => {
+  it('caps cases of the task across case groups with the task case pool', async () => {
     let active = 0
     let peak = 0
 
-    const taskDefinition = describeTask('dsl-attempt-concurrency', (task) => {
+    const taskDefinition = describeTask('dsl-task-case-pool-across-groups', (task) => {
       const runCase = async () => {
         active += 1
         peak = Math.max(peak, active)
@@ -1388,7 +1388,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
       task.casesFromInputs('right', [1, 2], runCase, { concurrency: 2 })
     }, {
       concurrency: {
-        attempt: 1,
+        case: 1,
       },
     })
 
@@ -1403,7 +1403,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
           id: 'x',
           name: 'x',
         },
-        id: 'task-attempt-concurrency',
+        id: 'task-case-pool-across-groups',
         inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
         matrix: createScheduledTaskMatrix(),
       },
@@ -1414,15 +1414,18 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
   })
 
   /**
-   * it('lets the runtime attempt cap override the task attempt cap in every auto attempt') verifies `--attempt-concurrency`.
+   * it('admits cases through the scheduler of the run context in every auto attempt') verifies run-wide pools.
+   *
+   * @example
+   * a run-wide case pool of 2 below a task case pool of 4 -> at most 2 cases at once in both attempts.
    */
-  it('lets the runtime attempt cap override the task attempt cap in every auto attempt', async () => {
+  it('admits cases through the scheduler of the run context in every auto attempt', async () => {
     let active = 0
     const peaksByAttempt: number[] = [0, 0]
     let attemptIndex = 0
     let flakyRuns = 0
 
-    const taskDefinition = describeTask('dsl-runtime-attempt-concurrency', (task) => {
+    const taskDefinition = describeTask('dsl-run-scheduler-concurrency', (task) => {
       task.casesFromInputs('sample', [1, 2, 3, 4], async (context) => {
         active += 1
         peaksByAttempt[attemptIndex] = Math.max(peaksByAttempt[attemptIndex]!, active)
@@ -1438,16 +1441,14 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
       }, { autoAttempt: 1 })
     }, {
       concurrency: {
-        attempt: 4,
+        case: 4,
       },
     })
 
     await taskDefinition.task!.run({
       cache: createTestTaskCacheRuntime(),
       models: createTestModels(),
-      runtimeConcurrency: {
-        attempt: 2,
-      },
+      scheduler: createScheduler({ concurrency: { case: 2 } }),
       task: {
         entry: {
           description: 'd',
@@ -1456,22 +1457,117 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
           id: 'x',
           name: 'x',
         },
-        id: 'task-runtime-attempt-concurrency',
+        id: 'task-run-scheduler-concurrency',
         inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
         matrix: createScheduledTaskMatrix(),
       },
     })
 
+    /**
+     * @example
+     * expect(peaksByAttempt).toEqual([2, 2])
+     */
     expect(flakyRuns).toBe(2)
     expect(peaksByAttempt).toEqual([2, 2])
   })
 
-  it('rejects an invalid attempt concurrency cap', async () => {
-    const taskDefinition = describeTask('dsl-invalid-attempt-concurrency', () => {
+  /**
+   * it('passes the task id, case id, and attempt index to scheduler middleware') verifies admission context.
+   */
+  it('passes the task id, case id, and attempt index to scheduler middleware', async () => {
+    const contexts: SchedulerScopeContext[] = []
+    const taskDefinition = describeTask('dsl-scheduler-context', () => {
+      caseOf('case', async () => {})
+    })
+
+    await taskDefinition.task!.run({
+      cache: createTestTaskCacheRuntime(),
+      models: createTestModels(),
+      scheduler: createScheduler({
+        middleware: [{
+          async onAcquire(context, next) {
+            contexts.push(context)
+            await next()
+          },
+        }],
+      }),
+      task: {
+        entry: {
+          description: 'd',
+          directory: 'x',
+          filePath: '/tmp/x.eval.ts',
+          id: 'x',
+          name: 'x',
+        },
+        id: 'task-scheduler-context',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: createScheduledTaskMatrix(),
+      },
+    })
+
+    /**
+     * @example
+     * expect(contexts).toEqual([{ attemptIndex: 0, caseId: '0:case', scope: 'case', taskId: 'task-scheduler-context' }])
+     */
+    expect(contexts).toEqual([{
+      attemptIndex: 0,
+      caseId: '0:case',
+      scope: 'case',
+      taskId: 'task-scheduler-context',
+    }])
+  })
+
+  /**
+   * it('starts the case timeout only after the case holds its slots') verifies queue time is not charged.
+   *
+   * @example
+   * three 20ms cases with a 30ms timeout and a task case pool of 1 -> all pass after about 60ms.
+   */
+  it('starts the case timeout only after the case holds its slots', async () => {
+    const endPayloads: CaseEndedData[] = []
+    const taskDefinition = describeTask('dsl-timeout-after-admission', (task) => {
+      task.casesFromInputs('sample', [1, 2, 3], async () => {
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }, { timeout: 30 })
+    }, {
+      concurrency: {
+        case: 1,
+      },
+    })
+
+    await taskDefinition.task!.run({
+      cache: createTestTaskCacheRuntime(),
+      events: createTestRunEvents({
+        onCaseEnd: data => endPayloads.push(data),
+      }),
+      models: createTestModels(),
+      task: {
+        entry: {
+          description: 'd',
+          directory: 'x',
+          filePath: '/tmp/x.eval.ts',
+          id: 'x',
+          name: 'x',
+        },
+        id: 'task-timeout-after-admission',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: createScheduledTaskMatrix(),
+      },
+    })
+
+    /**
+     * @example
+     * expect(endPayloads.map(payload => payload.state)).toEqual(['passed', 'passed', 'passed'])
+     */
+    expect(endPayloads.map(payload => payload.state)).toEqual(['passed', 'passed', 'passed'])
+  })
+
+  it('rejects an invalid task case pool size', async () => {
+    const taskDefinition = describeTask('dsl-invalid-case-concurrency', () => {
       caseOf('case', async () => {})
     }, {
       concurrency: {
-        attempt: 0,
+        case: 0,
       },
     })
 
@@ -1486,11 +1582,11 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
           id: 'x',
           name: 'x',
         },
-        id: 'task-invalid-attempt-concurrency',
+        id: 'task-invalid-case-concurrency',
         inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
         matrix: createScheduledTaskMatrix(),
       },
-    })).rejects.toThrow('Invalid task attempt concurrency: 0')
+    })).rejects.toThrow('Invalid scheduler concurrency for "case": 0')
   })
 
   it('passes an abort signal into case execution and aborts it on timeout', async () => {

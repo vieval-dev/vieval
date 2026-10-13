@@ -1,11 +1,12 @@
 import type { TaskCacheRuntime } from '../cache'
+import type { Scheduler } from '../scheduler/types'
 import type { AggregatedRunResults, RunResult } from './aggregate'
 import type { ScheduledTask } from './schedule'
 import type { TaskExecutionContext } from './task-context'
 
 import { errorMessageFrom } from '@moeru/std'
-import { limitConcurrency } from '@vitest/runner/utils'
 
+import { createScheduler } from '../scheduler/runtime'
 import { aggregateRunResults } from './aggregate'
 
 /**
@@ -38,12 +39,6 @@ export interface RunScheduledTasksOptions {
    */
   createExecutionContext?: (task: ScheduledTask) => TaskExecutionContext
   /**
-   * Maximum number of tasks to execute concurrently.
-   *
-   * @default 1
-   */
-  maxConcurrency?: number
-  /**
    * Runs after the executor settles for a task.
    *
    * Use when:
@@ -64,6 +59,15 @@ export interface RunScheduledTasksOptions {
    * - thrown errors abort the task before executor work starts
    */
   onTaskStart?: (task: ScheduledTask) => void
+  /**
+   * Scheduler that admits every task with `scope: 'task'`.
+   *
+   * Use when:
+   * - tasks should run concurrently under task pools and scheduler middleware
+   *
+   * @default a scheduler with a task pool of `1`, so tasks run one after another in schedule order
+   */
+  scheduler?: Scheduler
   /**
    * Stops starting new tasks once aborted, for example when the run is interrupted.
    *
@@ -112,14 +116,15 @@ export class RunnerExecutionError extends Error {
 }
 
 /**
- * Executes runner tasks sequentially and aggregates the normalized results.
+ * Executes runner tasks through a scheduler and aggregates the normalized results in schedule order.
  *
  * Call stack:
  *
  * {@link createRunnerSchedule}
  *   -> {@link runScheduledTasks}
- *     -> `executor(task)`
- *       -> {@link aggregateRunResults}
+ *     -> {@link Scheduler.run} (`scope: 'task'`)
+ *       -> `executor(task)`
+ *     -> {@link aggregateRunResults}
  *
  * Use when:
  * - the caller already expanded the runner matrix
@@ -127,7 +132,7 @@ export class RunnerExecutionError extends Error {
  *
  * Expects:
  * - `executor` to return normalized `0..1` scores
- * - callers to handle concurrency outside this helper when needed
+ * - `options.scheduler` to own task concurrency; without it tasks run one after another
  * - `onTaskStart` / `onTaskEnd` hooks to be synchronous lifecycle observers
  *
  * Returns:
@@ -145,9 +150,12 @@ export async function runScheduledTasks(
     return aggregateRunResults([])
   }
 
+  // Tasks queued behind a failed task must not start: the caller already treats the whole run as failed.
+  let failed = false
+
   async function executeScheduledTask(task: ScheduledTask): Promise<RunResult | undefined> {
     // An interrupted run finishes the tasks in flight but starts no new ones.
-    if (options.signal?.aborted === true) {
+    if (options.signal?.aborted === true || failed) {
       return undefined
     }
 
@@ -191,21 +199,17 @@ export async function runScheduledTasks(
     return runResult
   }
 
-  const maxConcurrency = options.maxConcurrency ?? 1
-  if (maxConcurrency <= 1) {
-    const results: RunResult[] = []
-    for (const task of tasks) {
-      const result = await executeScheduledTask(task)
-      if (result != null) {
-        results.push(result)
-      }
-    }
-    return aggregateRunResults(results)
-  }
-
-  const runWithLimit = limitConcurrency(maxConcurrency)
+  const scheduler = options.scheduler ?? createScheduler({ concurrency: { task: 1 } })
   const resultPairs = await Promise.all(tasks.map(async (task, index) => {
-    const result = await runWithLimit(async () => executeScheduledTask(task))
+    const result = await scheduler.run({ scope: 'task', taskId: task.id }, async () => {
+      try {
+        return await executeScheduledTask(task)
+      }
+      catch (error) {
+        failed = true
+        throw error
+      }
+    })
     return { index, result }
   }))
 

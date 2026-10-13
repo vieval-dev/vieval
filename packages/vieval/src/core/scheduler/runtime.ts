@@ -1,21 +1,18 @@
+import type { SchedulerQueue } from './queue'
 import type {
-  CreateSchedulerRuntimeOptions,
+  CreateSchedulerOptions,
+  Scheduler,
+  SchedulerBoundContext,
   SchedulerConcurrencyConfig,
   SchedulerMiddleware,
-  SchedulerRuntime,
+  SchedulerRunContext,
   SchedulerScope,
   SchedulerScopeContext,
 } from './types'
 
 import { createSchedulerQueue } from './queue'
 
-const schedulerScopeOrder: SchedulerScope[] = [
-  'workspace',
-  'project',
-  'task',
-  'attempt',
-  'case',
-]
+const schedulerScopes: SchedulerScope[] = ['project', 'task', 'case']
 
 interface SchedulerEnvelopeResult<T> {
   outcome: SchedulerExecutionOutcome<T>
@@ -41,94 +38,52 @@ interface SchedulerExecutionSuccess<T> {
   value: T
 }
 
-interface SchedulerScopeQueueRegistry {
-  concurrency: number
-  instances: Map<string, ReturnType<typeof createSchedulerQueue>>
+interface SchedulerNode extends Scheduler {
+  admit: <T>(context: SchedulerScopeContext, execute: () => Promise<T>) => Promise<T>
+  boundContext: SchedulerBoundContext
 }
 
 /**
- * Creates the core scheduler runtime used to serialize work by scope.
+ * Creates the root of a scheduler tree.
  *
  * Call stack:
  *
- * {@link createSchedulerRuntime}
- *   -> `createRuntimeQueues`
- *     -> `runtime.runCase(context, execute)`
- *       -> `runWithQueues`
- *         -> `runAcquireMiddleware`
- *           -> `execute`
- *         -> `runReleaseMiddleware`
+ * {@link createScheduler}
+ *   -> {@link Scheduler.child} (project, task, case group)
+ *     -> {@link Scheduler.run}
+ *       -> own pool for `context.scope`
+ *         -> parent {@link Scheduler.run} ... up to the root pool
+ *           -> `runWithMiddlewareEnvelope` (root middleware, then each child's)
+ *             -> `execute`
  *
  * Use when:
- * - runner code needs concurrency caps for queued case execution
- * - middleware should wrap work with acquire/release lifecycle hooks
+ * - a run, or a task running outside `vieval run`, needs one admission boundary for projects, tasks, and cases
  *
  * Expects:
+ * - pool sizes are positive integers when provided
  * - middleware is ordered from outermost to innermost concern
- * - concurrency caps are positive integers when provided
  *
  * Returns:
- * - a scheduler runtime with case execution support
+ * - a scheduler whose pools bound every unit run through it or its children
  */
-export function createSchedulerRuntime(
-  options: CreateSchedulerRuntimeOptions = {},
-): SchedulerRuntime {
-  const middleware = options.middleware ?? []
-  const queues = createRuntimeQueues(options.concurrency ?? {})
-
-  return {
-    runCase<T>(context: SchedulerScopeContext, execute: () => Promise<T>) {
-      const activeScopes = getActiveScopes(context)
-
-      return runWithQueues(activeScopes, context, queues, () => {
-        if (middleware.length === 0) {
-          return execute()
-        }
-
-        return runWithMiddlewareEnvelope(middleware, context, execute)
-      })
-    },
-  }
+export function createScheduler(options: CreateSchedulerOptions = {}): Scheduler {
+  return createSchedulerNode(options, undefined)
 }
 
-/**
- * Resolves the scheduler scopes that apply to a context.
- *
- * Before:
- * - `{ scope: 'case', workspaceId: 'ws', projectName: 'project', caseId: 'case-1' }`
- *
- * After:
- * - `['workspace', 'project', 'task', 'attempt', 'case']` up to the requested scope
- */
-export function getActiveScopes(context: SchedulerScopeContext): SchedulerScope[] {
-  const targetScopeIndex = schedulerScopeOrder.indexOf(context.scope)
+function createPools(concurrency: SchedulerConcurrencyConfig): Map<SchedulerScope, SchedulerQueue> {
+  const pools = new Map<SchedulerScope, SchedulerQueue>()
 
-  if (targetScopeIndex < 0) {
-    return []
-  }
-
-  return schedulerScopeOrder.slice(0, targetScopeIndex + 1)
-}
-
-function createRuntimeQueues(concurrency: SchedulerConcurrencyConfig) {
-  const queues = new Map<SchedulerScope, SchedulerScopeQueueRegistry>()
-
-  for (const scope of schedulerScopeOrder) {
-    const scopeConcurrency = concurrency[scope]
-
-    if (scopeConcurrency === undefined) {
+  for (const scope of schedulerScopes) {
+    const size = concurrency[scope]
+    if (size === undefined) {
       continue
     }
 
-    validateSchedulerConcurrency(scope, scopeConcurrency)
-
-    queues.set(scope, {
-      concurrency: scopeConcurrency,
-      instances: new Map<string, ReturnType<typeof createSchedulerQueue>>(),
-    })
+    validateSchedulerConcurrency(scope, size)
+    pools.set(scope, createSchedulerQueue(size))
   }
 
-  return queues
+  return pools
 }
 
 async function createSchedulerExecutionResult<T>(
@@ -168,6 +123,36 @@ function createSchedulerFailureResult<T>(
   }
 }
 
+function createSchedulerNode(options: CreateSchedulerOptions, parent: SchedulerNode | undefined): SchedulerNode {
+  const pools = createPools(options.concurrency ?? {})
+  const middleware = options.middleware ?? []
+  // Each node keeps every id bound on its path, so its middleware sees the full context.
+  const boundContext: SchedulerBoundContext = { ...parent?.boundContext, ...options.context }
+
+  const node: SchedulerNode = {
+    admit<T>(context: SchedulerScopeContext, execute: () => Promise<T>) {
+      const wrapped = middleware.length === 0
+        ? execute
+        : async () => await runWithMiddlewareEnvelope(middleware, context, execute)
+      // The parent admits after this node, so its pools are acquired narrow to broad and its middleware wraps ours.
+      const admitted = parent == null ? wrapped : async () => await parent.admit(context, wrapped)
+      const pool = pools.get(context.scope)
+
+      return pool == null ? admitted() : pool.run(admitted)
+    },
+    boundContext,
+    child(childOptions = {}) {
+      return createSchedulerNode(childOptions, node)
+    },
+    run<T>(runContext: SchedulerRunContext, execute: () => Promise<T>) {
+      const context: SchedulerScopeContext = { ...boundContext, ...runContext }
+      return node.admit(context, execute)
+    },
+  }
+
+  return node
+}
+
 function createSchedulerShortCircuitError(): Error {
   return new Error('Scheduler middleware short-circuited execution.')
 }
@@ -179,52 +164,6 @@ function createSchedulerShortCircuitResult<T>(): SchedulerEnvelopeResult<T> {
     },
     releaseStack: [],
   }
-}
-
-function getSchedulerScopeInstanceKey(
-  scope: SchedulerScope,
-  context: SchedulerScopeContext,
-): string {
-  const workspaceKey = `workspace:${context.workspaceId}`
-  const projectKey = `${workspaceKey}:project:${context.projectName ?? '(missing-project)'}`
-  const taskKey = `${projectKey}:task:${context.taskId ?? '(missing-task)'}`
-  const attemptKey = `${taskKey}:attempt:${context.attemptIndex ?? '(missing-attempt)'}`
-
-  switch (scope) {
-    case 'attempt':
-      return attemptKey
-    case 'case':
-      return attemptKey
-    case 'project':
-      return projectKey
-    case 'task':
-      return taskKey
-    case 'workspace':
-      return workspaceKey
-  }
-}
-
-function getScopeQueue(
-  scope: SchedulerScope,
-  context: SchedulerScopeContext,
-  queues: Map<SchedulerScope, SchedulerScopeQueueRegistry>,
-) {
-  const queueRegistry = queues.get(scope)
-
-  if (queueRegistry === undefined) {
-    return undefined
-  }
-
-  const scopeKey = getSchedulerScopeInstanceKey(scope, context)
-  const existingQueue = queueRegistry.instances.get(scopeKey)
-
-  if (existingQueue !== undefined) {
-    return existingQueue
-  }
-
-  const queue = createSchedulerQueue(queueRegistry.concurrency)
-  queueRegistry.instances.set(scopeKey, queue)
-  return queue
 }
 
 async function runAcquireMiddleware<T>(
@@ -313,28 +252,6 @@ async function runWithMiddlewareEnvelope<T>(
   finally {
     await runReleaseMiddleware(result.releaseStack, context, result.releaseStack.length - 1)
   }
-}
-
-async function runWithQueues<T>(
-  scopes: SchedulerScope[],
-  context: SchedulerScopeContext,
-  queues: Map<SchedulerScope, SchedulerScopeQueueRegistry>,
-  execute: () => Promise<T>,
-  index = 0,
-): Promise<T> {
-  const scope = scopes[index]
-
-  if (scope === undefined) {
-    return execute()
-  }
-
-  const queue = getScopeQueue(scope, context, queues)
-
-  if (queue === undefined) {
-    return runWithQueues(scopes, context, queues, execute, index + 1)
-  }
-
-  return queue.run(() => runWithQueues(scopes, context, queues, execute, index + 1))
 }
 
 function validateSchedulerConcurrency(scope: SchedulerScope, concurrency: number): void {

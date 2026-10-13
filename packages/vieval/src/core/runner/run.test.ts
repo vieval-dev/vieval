@@ -4,6 +4,7 @@ import type { ScheduledTask } from './schedule'
 
 import { describe, expect, it, vi } from 'vitest'
 
+import { createScheduler } from '../scheduler/runtime'
 import { runScheduledTasks } from './run'
 
 function createScheduledTask() {
@@ -221,7 +222,7 @@ describe('runScheduledTasks', () => {
     ])
   })
 
-  it('supports parallel execution when maxConcurrency is greater than one', async () => {
+  it('runs tasks concurrently up to the task pool of the scheduler', async () => {
     const taskA = createScheduledTaskWithId('task-a')
     const taskB = createScheduledTaskWithId('task-b')
     const callOrder: string[] = []
@@ -237,7 +238,7 @@ describe('runScheduledTasks', () => {
     })
 
     const result = await runScheduledTasks([taskA, taskB], executor, {
-      maxConcurrency: 2,
+      scheduler: createScheduler({ concurrency: { task: 2 } }),
     })
 
     expect(callOrder).toEqual(['task-a', 'task-b'])
@@ -245,6 +246,30 @@ describe('runScheduledTasks', () => {
     expect(result.overall.runCount).toBe(2)
     expect(result.runs[0]?.id).toBe('task-a')
     expect(result.runs[1]?.id).toBe('task-b')
+  })
+
+  /**
+   * @example
+   * it('starts no queued task after a task fails', async () => {})
+   */
+  it('starts no queued task after a task fails', async () => {
+    const executed: string[] = []
+    const executor: ScheduledTaskExecutor = async (task) => {
+      executed.push(task.id)
+      throw new Error(`${task.id} failed`)
+    }
+
+    await expect(runScheduledTasks([createScheduledTaskWithId('task-a'), createScheduledTaskWithId('task-b')], executor))
+      .rejects
+      .toThrowError('Runner task "task-a" failed: task-a failed')
+    // Let the queued task reach its admission check.
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    /**
+     * @example
+     * expect(executed).toEqual(['task-a'])
+     */
+    expect(executed).toEqual(['task-a'])
   })
 
   /**

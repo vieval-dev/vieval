@@ -1,6 +1,7 @@
 import type { RunScore } from '../core/runner'
 import type { ScheduledTask } from '../core/runner/schedule'
 import type { TaskExecutionContext } from '../core/runner/task-context'
+import type { Scheduler } from '../core/scheduler/types'
 import type { TelemetryRuntime } from '../core/telemetry'
 import type { RunEventEmitter } from '../events'
 
@@ -338,28 +339,16 @@ export type TaskAutoRetryDelay = ((retryIndex: number) => number) | number
 export type TaskCaseState = 'failed' | 'passed' | 'timeout'
 
 /**
- * Task-local concurrency metadata.
- *
- * Use when:
- * - task declarations need to preserve attempt and case caps for later runtime coordination
- * - DSL execution needs to resolve the default task-level case concurrency for registered cases
- *
- * Expects:
- * - each provided value to be a positive integer chosen by the caller
- *
- * Returns:
- * - one partial task-local concurrency descriptor
+ * Pools a task declares for its own cases.
  */
 export interface TaskConcurrencyConfig {
   /**
-   * Cap on cases running at once within one task attempt, across every case group of the task.
+   * Most cases of this task running at once, across all of its case groups.
    *
-   * Applies on top of the case caps. Auto attempts of a task run one after another, and each attempt gets
-   * its own cap. Overridden by `--attempt-concurrency`.
-   */
-  attempt?: number
-  /**
-   * Case-level concurrency cap for this task.
+   * The pool is shared only by this task. Cases also need a slot in every project-wide and run-wide pool, so the
+   * value can only lower concurrency. Auto attempts of a task run one after another and share this pool.
+   *
+   * @default unlimited
    */
   case?: number
 }
@@ -369,17 +358,9 @@ export interface TaskConcurrencyConfig {
  */
 export interface TaskDefinition {
   /**
-   * Optional task-local concurrency metadata.
+   * Pools this task declares for its own cases.
    *
-   * Use when:
-   * - task declarations need to preserve task-scoped attempt/case caps for later scheduler wiring
-   * - higher-level orchestration wants to inspect task-local concurrency without executing the task
-   *
-   * Expects:
-   * - each provided value to be a positive integer chosen by the caller
-   *
-   * Returns:
-   * - one partial task-local concurrency descriptor
+   * @default undefined
    */
   concurrency?: TaskConcurrencyConfig
   /**
@@ -506,18 +487,17 @@ export interface TaskRunContext {
    */
   runStorage?: TaskRunStorage
   /**
-   * Optional runtime scheduling overrides supplied by CLI or host execution.
+   * Scheduler that admits the cases of this task.
    *
-   * Use when:
-   * - run operators need to override task/case concurrency without editing eval code
-   * - DSL task runners need to distinguish runtime flags from code defaults
+   * `vieval run` passes the project scheduler bound to this task, so cases share the project-wide and run-wide
+   * pools and run through the configured middleware.
    *
    * Expects:
-   * - values are positive integers when provided
+   * - custom project executors forward the value they receive
    *
-   * @default undefined
+   * @default an unbounded scheduler when the task runs outside `vieval run`
    */
-  runtimeConcurrency?: TaskConcurrencyConfig
+  scheduler?: Scheduler
   /**
    * Cooperative abort signal for the current execution.
    *

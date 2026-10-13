@@ -30,43 +30,49 @@ Cases within an attempt may run concurrently. Attempts created by `autoAttempt` 
 
 The `--attempt` CLI flag is related but distinct: it assigns an `attemptId` to the whole run for report organization. It does not set `autoAttempt` or the number of task attempts.
 
-## Set concurrency at the scope that owns the work
+## Set concurrency where the work is shared
 
-`vieval run` accepts five concurrency names, but the current runtime does not use all of them as parallel queues in the same way.
+Each concurrency value is a pool of slots. The place where you write the value decides which work shares the pool, and the key decides what the pool counts.
 
-| Scope | What it limits today | Where it can be set |
+| Key | Counts |
+| --- | --- |
+| `project` | projects running at once |
+| `task` | scheduled tasks running at once |
+| `case` | case executions running at once |
+
+| Declared in | Keys | Shared by |
 | --- | --- | --- |
-| Workspace | Projects admitted concurrently within one CLI run. The default effective cap is `1`. | Top-level `concurrency.workspace`; `--workspace-concurrency` |
-| Project | An upper bound combined with the task cap when scheduled tasks run inside a project. | Top-level or project `concurrency.project`; `--project-concurrency` |
-| Task | Concurrent scheduled tasks inside a project. The default effective cap is `1`. | Top-level or project `concurrency.task`; `--task-concurrency` |
-| Attempt | Cases of one task that run at the same time within one attempt, across all case groups and on top of their case caps. Automatic attempts stay sequential; each attempt gets its own cap. | Top-level, project, or task `concurrency.attempt`; `--attempt-concurrency` |
-| Case | Concurrent DSL cases. A `casesFromInputs` group can have its own queue; otherwise cases share the task queue. | Top-level, project, or task `concurrency.case`; `casesFromInputs(..., { concurrency })`; `--case-concurrency` |
+| Top-level `concurrency`; `--project-concurrency`, `--task-concurrency`, `--case-concurrency` | `project`, `task`, `case` | the whole run |
+| Project `concurrency` | `task`, `case` | the tasks and cases of that project |
+| `describeTask(..., { concurrency: { case } })` | `case` | the cases of that task, across all of its case groups |
+| `casesFromInputs(..., { concurrency })` | a number | the cases of that group |
 
-For workspace, project, and task scheduling, a CLI value acts as a cap: it cannot raise a lower configured value. For attempt and case settings, the CLI runtime value takes precedence over task and project values. Project config cannot declare `workspace`, and task config contains only `attempt` and `case`.
+A case starts only after it holds a slot in every pool on its path: its group, its task, its project, and the run. Pools do not override each other, so the smallest one wins, and a narrower value can only lower concurrency for its own work. A case waits for its narrow pools before it takes a run-wide slot, and its timeout starts only after it holds every slot.
+
+A top-level value and a CLI flag for the same key both bound the whole run, so the smaller value applies. A flag never raises a configured value, but it can raise a built-in default. Without any declaration, one project runs at a time, each project runs one task at a time, and cases are not limited. A run-wide `task` or `case` value lifts the one-task-per-project default: a run-wide case pool already bounds the real work, so tasks overlap and a slow case of one task no longer holds back the next task.
 
 ```ts [vieval.config.ts]
 import { defineConfig } from 'vieval'
 
 export default defineConfig({
+  // At most 7 cases in the whole run, for example because every case owns one VM.
   concurrency: {
-    workspace: 1,
+    case: 7,
+    task: 4,
   },
   projects: [
     {
-      concurrency: {
-        case: 4,
-        project: 2,
-        task: 2,
-      },
       include: ['evals/*.eval.ts'],
-      name: 'chat-evals',
+      name: 'desktop-agent',
       root: '.',
     },
   ],
 })
 ```
 
-A task can narrow case concurrency, and one generated case group can narrow it again:
+Because the case pool belongs to the run, the work can be split into one task per domain: up to four tasks overlap, and together they never run more than seven cases. `task` can be left out here; the run-wide case pool alone lets every task start.
+
+A task and one of its case groups can narrow concurrency further for their own cases:
 
 ```ts [evals/retrieval.eval.ts]
 import { describeTask } from 'vieval'
@@ -84,7 +90,9 @@ describeTask('retrieval', ({ casesFromInputs }) => {
 })
 ```
 
-Here the group limit of `2` applies unless `--case-concurrency` supplies a runtime override.
+Here the three queries share a group pool of `2`, inside the task pool of `4`, inside any project and run pools. `--case-concurrency 1` would bound the whole run to one case.
+
+Scheduler middleware can wrap every admitted project, task, and case, for example to record admission telemetry or to hold work behind a dynamic gate. Declare it with `scheduler: { middleware: [...] }` at the top level or on a project. Middleware runs after the unit holds all of its slots, and top-level middleware wraps project middleware.
 
 ::: warning Concurrency multiplies real calls only when task code makes them
 Matrices, inference-executor registrations, and concurrency settings do not call a provider by themselves. If cases do invoke a model or another metered service, higher task or case concurrency can increase rate-limit failures and create a sudden cost spike. Choose limits from provider capacity and the number of calls each case actually makes.
@@ -160,6 +168,6 @@ Task aggregation and report artifacts answer related but different questions:
 
 As described in [Assertions, Scores, and Metrics](/en/guide/learn/assertions-scores-and-metrics), a score event emitted before a later failure can remain in a persisted case record even though task aggregation counts that outcome as a failure. Diagnose state and score together.
 
-A common failure is using `autoRetry` to estimate reliability: the recovered case appears as one passing attempt. Use `autoAttempt` when earlier failures should remain in the aggregate, and remember that it reruns cases that already passed. Also avoid treating `--attempt` or `--attempt-concurrency` as a request for more automatic attempts: `--attempt` only labels the run, and `--attempt-concurrency` only limits how many cases of one attempt run at the same time.
+A common failure is using `autoRetry` to estimate reliability: the recovered case appears as one passing attempt. Use `autoAttempt` when earlier failures should remain in the aggregate, and remember that it reruns cases that already passed. Also avoid treating `--attempt` as a request for more automatic attempts: it only labels the run.
 
 Next, retain and inspect this evidence in [Reports and Comparisons](/en/guide/learn/reports-and-comparisons).

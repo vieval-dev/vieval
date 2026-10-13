@@ -2,6 +2,7 @@ import type { CliReportingConfig, ConfigHookPlugin, MatrixDefinition, MatrixLaye
 import type { ModelDefinition } from '../config/models'
 import type { RunResult, TaskExecutionContext } from '../core/runner'
 import type { InferenceExecutor, ScheduledTask } from '../core/runner/schedule'
+import type { SchedulerConcurrencyConfig, SchedulerMiddleware } from '../core/scheduler/types'
 import type { VievalVitestCompatReporterReference } from './reporters/vitest-compat-reporter'
 
 import process from 'node:process'
@@ -91,42 +92,6 @@ export interface CliComparisonModeConfig extends CliConfigBase {
 }
 
 /**
- * Concurrency limits that can be declared in CLI-facing config.
- *
- * Use when:
- * - the CLI needs independent caps for workspace, project, task, attempt, or case scheduling scopes
- * - config authors want to define concurrency without wiring runtime execution yet
- *
- * Expects:
- * - each provided value to be a positive integer chosen by the caller
- *
- * Returns:
- * - one partial concurrency descriptor keyed by scheduling scope
- */
-export interface CliConcurrencyConfig {
-  /**
-   * Attempt-level concurrency cap.
-   */
-  attempt?: number
-  /**
-   * Case-level concurrency cap.
-   */
-  case?: number
-  /**
-   * Project-level concurrency cap.
-   */
-  project?: number
-  /**
-   * Task-level concurrency cap.
-   */
-  task?: number
-  /**
-   * Workspace-level concurrency cap.
-   */
-  workspace?: number
-}
-
-/**
  * Top-level CLI config loaded from `vieval.config.*`.
  *
  * Exactly one top-level mode is allowed:
@@ -144,15 +109,23 @@ export type CliConfigMode = 'comparisons' | 'projects' | 'workspaces'
 export type CliConfigPlugin = ConfigHookPlugin<CliConfig>
 
 /**
+ * Pools a project declares for its own tasks and cases.
+ */
+export type CliProjectConcurrencyConfig = Pick<SchedulerConcurrencyConfig, 'case' | 'task'>
+
+/**
  * Defines one project block for `vieval run`.
  */
 export interface CliProjectConfig {
   /**
-   * Optional project-scoped concurrency overrides.
+   * Pools shared by the tasks and cases of this project.
    *
-   * @default inherited from top-level or CLI execution settings
+   * Tasks and cases also need a slot in the run-wide pools of the top-level config and the CLI, so a project value
+   * can only lower concurrency for this project.
+   *
+   * @default `{ task: 1 }` when neither the top-level config nor the CLI declares `task` or `case`; otherwise `{}`
    */
-  concurrency?: Omit<CliConcurrencyConfig, 'workspace'>
+  concurrency?: CliProjectConcurrencyConfig
   /**
    * Optional eval-time matrix dimensions.
    */
@@ -218,6 +191,12 @@ export interface CliProjectConfig {
    * Optional run-time matrix dimensions.
    */
   runMatrix?: MatrixDefinition | MatrixLayer
+  /**
+   * Scheduler extensions for the projects, tasks, and cases of this project.
+   *
+   * @default undefined
+   */
+  scheduler?: CliSchedulerConfig
 }
 
 /**
@@ -234,12 +213,12 @@ export interface CliProjectConfig {
  * - `runStorage` follows `TaskRunContext['runStorage']`; forward it too, so cases get their ids and artifacts directory
  * - `signal` follows `TaskRunContext['signal']`; forward it too, so an interrupted run aborts running cases
  * - `telemetry` follows `TaskRunContext['telemetry']`
- * - `runtimeConcurrency` follows `TaskRunContext['runtimeConcurrency']`
+ * - `scheduler` follows `TaskRunContext['scheduler']`; forward it too, so cases share the project and run pools
  */
 export interface CliProjectExecutorContext extends TaskExecutionContext {
   events?: TaskRunContext['events']
   runStorage?: TaskRunContext['runStorage']
-  runtimeConcurrency?: TaskRunContext['runtimeConcurrency']
+  scheduler?: TaskRunContext['scheduler']
   signal?: TaskRunContext['signal']
   telemetry?: TaskRunContext['telemetry']
 }
@@ -256,6 +235,20 @@ export interface CliProjectModeConfig extends CliConfigBase {
    */
   projects?: CliProjectConfig[]
   workspaces?: never
+}
+
+/**
+ * Scheduler extensions declared in CLI-facing config.
+ */
+export interface CliSchedulerConfig {
+  /**
+   * Middleware wrapped around every project, task, and case admitted under this config level.
+   *
+   * Root middleware wraps project middleware. Each hook runs after the unit holds all of its slots.
+   *
+   * @default []
+   */
+  middleware?: SchedulerMiddleware[]
 }
 
 /**
@@ -285,11 +278,12 @@ export interface CliWorkspaceModeConfig extends CliConfigBase {
  * Result of loading and normalizing a config file.
  */
 export interface LoadedCliConfig {
-  concurrency?: CliConcurrencyConfig
+  concurrency?: SchedulerConcurrencyConfig
   configFilePath: null | string
   env: NodeJS.ProcessEnv
   projects: NormalizedCliProjectConfig[]
   reporting?: CliReportingConfig
+  scheduler?: CliSchedulerConfig
 }
 
 export interface LoadedRawCliConfig {
@@ -317,7 +311,7 @@ export interface LoadVievalCliConfigOptions {
  * Normalized CLI project used by runtime orchestration.
  */
 export interface NormalizedCliProjectConfig {
-  concurrency?: Omit<CliConcurrencyConfig, 'workspace'>
+  concurrency?: CliProjectConcurrencyConfig
   evalMatrix?: MatrixLayer
   exclude: string[]
   executor?: (task: ScheduledTask, context: CliProjectExecutorContext) => Promise<RunResult>
@@ -328,6 +322,7 @@ export interface NormalizedCliProjectConfig {
   reporters: VievalVitestCompatReporterReference[]
   root: string
   runMatrix?: MatrixLayer
+  scheduler?: CliSchedulerConfig
 }
 
 /**
@@ -335,18 +330,18 @@ export interface NormalizedCliProjectConfig {
  */
 interface CliConfigBase {
   /**
-   * Global concurrency defaults inherited by projects and tasks.
+   * Pools shared by the whole run.
    *
    * Use when:
-   * - config authors want one shared concurrency policy across workspace, project, task, attempt, and case scopes
-   * - project-local overrides should start from a top-level baseline
+   * - one resource bounds the run as a whole, for example "at most 7 cases in the whole run"
    *
    * Expects:
-   * - each provided value to be a positive integer chosen by the caller
+   * - each provided value to be a positive integer; projects, tasks, and case groups can only declare smaller pools
+   *   for their own work, and CLI flags can only lower these values
    *
-   * @default undefined
+   * @default `{ project: 1 }`
    */
-  concurrency?: CliConcurrencyConfig
+  concurrency?: SchedulerConcurrencyConfig
   /**
    * Environment variables injected into `process.env` during `vieval run`.
    *
@@ -381,6 +376,12 @@ interface CliConfigBase {
    * @default undefined
    */
   reporting?: CliReportingConfig
+  /**
+   * Scheduler extensions for every project, task, and case of the run.
+   *
+   * @default undefined
+   */
+  scheduler?: CliSchedulerConfig
 }
 
 /**
@@ -491,6 +492,7 @@ export async function loadVievalCliConfig(options: LoadVievalCliConfigOptions = 
         env: {},
         projects: await normalizeConfig(null, cwd),
         reporting: undefined,
+        scheduler: undefined,
       }
     }
 
@@ -502,6 +504,7 @@ export async function loadVievalCliConfig(options: LoadVievalCliConfigOptions = 
       env: config.env ?? {},
       projects: await normalizeConfig(config, dirname(loadedConfig.configFilePath)),
       reporting: normalizeReportingConfig(config.reporting),
+      scheduler: config.scheduler,
     }
   }
   catch (error) {
@@ -535,7 +538,7 @@ async function applyProjectPlugins(
     {
       ...resolvedProject,
       concurrency: resolvedProject.concurrency === scopedProject.concurrency
-        ? toProjectConcurrencyDefaults(resolvedConfig.concurrency)
+        ? toProjectConcurrency(resolvedConfig.concurrency)
         : resolvedProject.concurrency,
       models: resolvedProject.models === scopedProject.models
         ? resolvedConfig.models
@@ -545,7 +548,6 @@ async function applyProjectPlugins(
         : resolvedProject.reporters,
     },
     cwd,
-    undefined,
     resolvedConfig.models ?? [],
     resolvedConfig.reporters ?? [],
   )
@@ -591,15 +593,9 @@ function createProjectScopedConfig(
   project: CliProjectConfig,
   normalizedProject: NormalizedCliProjectConfig,
 ): CliProjectModeConfig {
-  const concurrency = config?.concurrency == null && normalizedProject.concurrency == null
-    ? undefined
-    : {
-        ...normalizedProject.concurrency,
-        workspace: config?.concurrency?.workspace,
-      }
-
+  // Inside a project-local plugin, the top-level `concurrency` stands for the project's own pools.
   return {
-    concurrency,
+    concurrency: normalizedProject.concurrency,
     env: config?.env,
     models: normalizedProject.models,
     plugins: project.plugins,
@@ -617,6 +613,7 @@ function createProjectScopedConfig(
         reporters: normalizedProject.reporters,
         root: normalizedProject.root,
         runMatrix: normalizedProject.runMatrix,
+        scheduler: normalizedProject.scheduler,
       },
     ],
     reporters: normalizedProject.reporters,
@@ -694,22 +691,6 @@ async function isReadableFile(filePath: string): Promise<boolean> {
   }
 }
 
-function mergeProjectConcurrency(
-  inheritedConcurrency: Omit<CliConcurrencyConfig, 'workspace'> | undefined,
-  projectConcurrency: Omit<CliConcurrencyConfig, 'workspace'> | undefined,
-): Omit<CliConcurrencyConfig, 'workspace'> | undefined {
-  if (inheritedConcurrency == null && projectConcurrency == null) {
-    return undefined
-  }
-
-  return {
-    attempt: projectConcurrency?.attempt ?? inheritedConcurrency?.attempt,
-    case: projectConcurrency?.case ?? inheritedConcurrency?.case,
-    project: projectConcurrency?.project ?? inheritedConcurrency?.project,
-    task: projectConcurrency?.task ?? inheritedConcurrency?.task,
-  }
-}
-
 async function normalizeConfig(config: CliConfig | null | undefined, cwd: string): Promise<NormalizedCliProjectConfig[]> {
   if (config != null) {
     const mode = detectCliConfigMode(config)
@@ -724,7 +705,6 @@ async function normalizeConfig(config: CliConfig | null | undefined, cwd: string
         name: workspace.id,
         root: workspace.root,
       }))
-  const inheritedConcurrency = toProjectConcurrencyDefaults(config?.concurrency)
   const inheritedModels = config?.models ?? []
   const inheritedReporterReferences = config?.reporters ?? []
 
@@ -732,7 +712,6 @@ async function normalizeConfig(config: CliConfig | null | undefined, cwd: string
     const normalizedProject = normalizeProjectConfig(
       project,
       cwd,
-      inheritedConcurrency,
       inheritedModels,
       inheritedReporterReferences,
     )
@@ -765,7 +744,6 @@ function normalizeMatrixLayerInput(matrix: MatrixDefinition | MatrixLayer | unde
 function normalizeProjectConfig(
   project: CliProjectConfig,
   cwd: string,
-  inheritedConcurrency: Omit<CliConcurrencyConfig, 'workspace'> | undefined,
   inheritedModels: readonly ModelDefinition[],
   inheritedReporterReferences: readonly VievalVitestCompatReporterReference[],
 ): NormalizedCliProjectConfig {
@@ -788,10 +766,8 @@ function normalizeProjectConfig(
     ? cwd
     : (isAbsolute(project.root) ? project.root : resolve(cwd, project.root))
   const reporters = project.reporters ?? [...inheritedReporterReferences]
-  const concurrency = mergeProjectConcurrency(inheritedConcurrency, project.concurrency)
-
   return {
-    concurrency,
+    concurrency: project.concurrency,
     evalMatrix: normalizeMatrixLayerInput(project.evalMatrix),
     exclude,
     executor: project.executor,
@@ -802,6 +778,7 @@ function normalizeProjectConfig(
     reporters,
     root,
     runMatrix: normalizeMatrixLayerInput(project.runMatrix),
+    scheduler: project.scheduler,
   }
 }
 
@@ -875,17 +852,15 @@ async function resolveVievalConfig(
   }
 }
 
-function toProjectConcurrencyDefaults(
-  concurrency: CliConcurrencyConfig | undefined,
-): Omit<CliConcurrencyConfig, 'workspace'> | undefined {
+function toProjectConcurrency(
+  concurrency: SchedulerConcurrencyConfig | undefined,
+): CliProjectConcurrencyConfig | undefined {
   if (concurrency == null) {
     return undefined
   }
 
   return {
-    attempt: concurrency.attempt,
     case: concurrency.case,
-    project: concurrency.project,
     task: concurrency.task,
   }
 }

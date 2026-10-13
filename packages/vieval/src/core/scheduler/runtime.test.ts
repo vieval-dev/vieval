@@ -1,198 +1,161 @@
+import type { SchedulerMiddleware, SchedulerScopeContext } from './types'
+
 import { describe, expect, it } from 'vitest'
 
-import { createSchedulerRuntime } from './runtime'
+import { createScheduler } from './runtime'
 
-describe('createSchedulerRuntime', () => {
-  it('isolates project concurrency per project instance', async () => {
-    const started: string[] = []
-    const releases = new Map<string, () => void>()
+describe('createScheduler', () => {
+  it('limits units of one scope to the pool size', async () => {
+    const work = createControlledWork()
+    const scheduler = createScheduler({ concurrency: { case: 2 } })
 
-    const runtime = createSchedulerRuntime({
-      concurrency: {
-        project: 1,
-      },
-    })
+    const runs = ['a', 'b', 'c', 'd'].map(name => scheduler.run({ caseId: name, scope: 'case' }, work.start(name)))
+    await flushMicrotasks()
+
+    expect(work.started).toEqual(['a', 'b'])
+
+    work.release('a')
+    await flushMicrotasks()
+
+    expect(work.started).toEqual(['a', 'b', 'c'])
+
+    work.releaseAll()
+    await Promise.all(runs)
+
+    expect(work.started).toEqual(['a', 'b', 'c', 'd'])
+    expect(work.peak).toBe(2)
+  })
+
+  it('shares a child pool only among work run through that child', async () => {
+    const work = createControlledWork()
+    const root = createScheduler()
+    const alpha = root.child({ concurrency: { case: 1 } })
+    const beta = root.child({ concurrency: { case: 1 } })
 
     const runs = [
-      { caseId: 'alpha-1', projectName: 'alpha' },
-      { caseId: 'alpha-2', projectName: 'alpha' },
-      { caseId: 'beta-1', projectName: 'beta' },
-    ].map(({ caseId, projectName }) =>
-      runtime.runCase(
-        {
-          attemptIndex: 0,
-          caseId,
-          experimentId: 'baseline',
-          projectName,
-          scope: 'case',
-          workspaceId: 'ws',
-        },
-        async () => {
-          started.push(caseId)
-          await new Promise<void>(resolve => releases.set(caseId, resolve))
-        },
-      ),
-    )
+      alpha.run({ scope: 'case' }, work.start('alpha-1')),
+      alpha.run({ scope: 'case' }, work.start('alpha-2')),
+      beta.run({ scope: 'case' }, work.start('beta-1')),
+    ]
+    await flushMicrotasks()
 
-    expect(started).toEqual([
-      'alpha-1',
-      'beta-1',
-    ])
+    expect(work.started).toEqual(['alpha-1', 'beta-1'])
 
-    releases.get('alpha-1')?.()
-    await waitForStartedCount(started, 3)
+    work.releaseAll()
+    await Promise.all(runs)
 
-    expect(started).toEqual([
-      'alpha-1',
-      'beta-1',
-      'alpha-2',
-    ])
-
-    const runCompletion = Promise.all(runs)
-    await drainMappedReleases(releases, runCompletion)
-    await runCompletion
+    expect(work.started).toEqual(['alpha-1', 'beta-1', 'alpha-2'])
   })
 
-  it('limits concurrent case execution to the configured scope cap', async () => {
-    let active = 0
-    let peak = 0
-    const releases: Array<() => void> = []
-    let startedBeforeRelease = 0
+  // The OSWorld shape: several tasks with their own case caps still share one run-wide case pool.
+  it('bounds work of every child by the pool of the parent', async () => {
+    const work = createControlledWork()
+    const run = createScheduler({ concurrency: { case: 3 } })
+    const tasks = ['chrome', 'gimp', 'vlc'].map(name => ({ name, scheduler: run.child({ concurrency: { case: 2 } }) }))
 
-    const runtime = createSchedulerRuntime({
-      concurrency: {
-        case: 2,
-      },
-    })
+    const runs = tasks.flatMap(task => [1, 2].map(index =>
+      task.scheduler.run({ scope: 'case' }, work.start(`${task.name}-${index}`)),
+    ))
+    await flushMicrotasks()
 
-    const runs = [0, 1, 2, 3].map(index =>
-      runtime.runCase(
-        {
-          attemptIndex: 0,
-          caseId: `case-${index}`,
-          experimentId: 'baseline',
-          scope: 'case',
-          workspaceId: 'ws',
-        },
-        async () => {
-          active += 1
-          peak = Math.max(peak, active)
-          startedBeforeRelease += 1
-          await new Promise<void>(resolve => releases.push(resolve))
-          active -= 1
-        },
-      ),
-    )
+    expect(work.started).toEqual(['chrome-1', 'chrome-2', 'gimp-1'])
 
-    expect(startedBeforeRelease).toBe(2)
-    expect(peak).toBeLessThanOrEqual(2)
-    expect(releases).toHaveLength(2)
+    work.releaseAll()
+    await Promise.all(runs)
 
-    await Promise.resolve()
-
-    expect(startedBeforeRelease).toBe(2)
-
-    const runCompletion = Promise.all(runs)
-    await drainQueuedReleases(releases, runCompletion)
-
-    await runCompletion
+    expect(work.peak).toBe(3)
   })
 
-  it('keeps experiment metadata out of scheduler queue partitioning', async () => {
-    const started: string[] = []
-    const releases = new Map<string, () => void>()
-
-    const runtime = createSchedulerRuntime({
-      concurrency: {
-        attempt: 1,
-      },
-    })
+  it('acquires the narrow pool before the broad pool so blocked work holds no broad slot', async () => {
+    const work = createControlledWork()
+    const run = createScheduler({ concurrency: { case: 2 } })
+    const narrowGroup = run.child({ concurrency: { case: 1 } })
+    const otherGroup = run.child()
 
     const runs = [
-      { experimentId: 'baseline', runId: 'baseline-1' },
-      { experimentId: 'candidate', runId: 'candidate-1' },
-    ].map(({ experimentId, runId }) =>
-      runtime.runCase(
-        {
-          attemptIndex: 0,
-          caseId: runId,
-          experimentId,
-          projectName: 'project-a',
-          scope: 'case',
-          taskId: 'task-a',
-          workspaceId: 'ws',
-        },
-        async () => {
-          started.push(runId)
-          await new Promise<void>(resolve => releases.set(runId, resolve))
-        },
-      ),
-    )
+      narrowGroup.run({ scope: 'case' }, work.start('narrow-1')),
+      // Waits for the narrow group, so it must not take the second run-wide slot.
+      narrowGroup.run({ scope: 'case' }, work.start('narrow-2')),
+      otherGroup.run({ scope: 'case' }, work.start('other-1')),
+    ]
+    await flushMicrotasks()
 
-    expect(started).toEqual(['baseline-1'])
+    expect(work.started).toEqual(['narrow-1', 'other-1'])
 
-    releases.get('baseline-1')?.()
-    await waitForStartedCount(started, 2)
-
-    expect(started).toEqual([
-      'baseline-1',
-      'candidate-1',
-    ])
-
-    const runCompletion = Promise.all(runs)
-    await drainMappedReleases(releases, runCompletion)
-    await runCompletion
+    work.releaseAll()
+    await Promise.all(runs)
   })
 
-  it('runs acquire middleware in root-to-leaf order and release middleware in reverse order', async () => {
+  it('counts each scope in its own pool', async () => {
+    const work = createControlledWork()
+    const scheduler = createScheduler({ concurrency: { case: 1, project: 1, task: 1 } })
+
+    const run = scheduler.run({ scope: 'project' }, async () =>
+      await scheduler.run({ scope: 'task' }, async () =>
+        await scheduler.run({ scope: 'case' }, work.start('case'))))
+    await flushMicrotasks()
+
+    expect(work.started).toEqual(['case'])
+
+    work.releaseAll()
+    await run
+  })
+
+  it('merges ids bound on the path into the context seen by middleware', async () => {
+    const contexts: SchedulerScopeContext[] = []
+    const run = createScheduler({
+      context: { experimentId: 'baseline', workspaceId: 'ws' },
+      middleware: [recordingMiddleware(contexts)],
+    })
+    const task = run.child({ context: { projectName: 'chat' } }).child({ context: { taskId: 'task-a' } })
+
+    await task.run({ attemptIndex: 1, caseId: 'case-1', scope: 'case' }, async () => {})
+
+    expect(contexts).toEqual([{
+      attemptIndex: 1,
+      caseId: 'case-1',
+      experimentId: 'baseline',
+      projectName: 'chat',
+      scope: 'case',
+      taskId: 'task-a',
+      workspaceId: 'ws',
+    }])
+  })
+
+  it('runs parent middleware around child middleware once every slot is held', async () => {
     const events: string[] = []
-    const runtime = createSchedulerRuntime({
+    const run = createScheduler({
+      concurrency: { case: 1 },
+      middleware: [namedMiddleware('run', events)],
+    })
+    const project = run.child({ concurrency: { case: 1 }, middleware: [namedMiddleware('project', events)] })
+
+    await project.run({ scope: 'case' }, async () => {
+      events.push('work')
+    })
+
+    expect(events).toEqual([
+      'run:acquire:case',
+      'project:acquire:case',
+      'work',
+      'project:release:case',
+      'run:release:case',
+    ])
+  })
+
+  it('runs acquire middleware in listed order and release middleware in reverse order', async () => {
+    const events: string[] = []
+    const scheduler = createScheduler({
       middleware: [
-        {
-          async onAcquire(context, next) {
-            events.push(`root:acquire:${context.scope}`)
-            await next()
-          },
-          async onRelease(context, next) {
-            events.push(`root:release:${context.scope}`)
-            await next()
-          },
-        },
-        {
-          async onAcquire(context, next) {
-            events.push(`middle:acquire:${context.scope}`)
-            await next()
-          },
-          async onRelease(context, next) {
-            events.push(`middle:release:${context.scope}`)
-            await next()
-          },
-        },
-        {
-          async onAcquire(context, next) {
-            events.push(`leaf:acquire:${context.scope}`)
-            await next()
-          },
-          async onRelease(context, next) {
-            events.push(`leaf:release:${context.scope}`)
-            await next()
-          },
-        },
+        namedMiddleware('root', events),
+        namedMiddleware('middle', events),
+        namedMiddleware('leaf', events),
       ],
     })
 
-    await runtime.runCase(
-      {
-        attemptIndex: 0,
-        caseId: 'case-1',
-        experimentId: 'baseline',
-        scope: 'case',
-        workspaceId: 'ws',
-      },
-      async () => {
-        events.push('work')
-      },
-    )
+    await scheduler.run({ scope: 'case' }, async () => {
+      events.push('work')
+    })
 
     expect(events).toEqual([
       'root:acquire:case',
@@ -207,7 +170,7 @@ describe('createSchedulerRuntime', () => {
 
   it('throws a scheduler-owned error when acquire middleware short-circuits work', async () => {
     const events: string[] = []
-    const runtime = createSchedulerRuntime({
+    const scheduler = createScheduler({
       middleware: [
         {
           async onAcquire(context) {
@@ -218,34 +181,14 @@ describe('createSchedulerRuntime', () => {
             await next()
           },
         },
-        {
-          async onAcquire(context, next) {
-            events.push(`leaf:acquire:${context.scope}`)
-            await next()
-          },
-          async onRelease(context, next) {
-            events.push(`leaf:release:${context.scope}`)
-            await next()
-          },
-        },
+        namedMiddleware('leaf', events),
       ],
     })
 
-    await expect(
-      runtime.runCase(
-        {
-          attemptIndex: 0,
-          caseId: 'case-1',
-          experimentId: 'baseline',
-          scope: 'case',
-          workspaceId: 'ws',
-        },
-        async () => {
-          events.push('work')
-          return 'unreachable'
-        },
-      ),
-    ).rejects.toThrowError('Scheduler middleware short-circuited execution.')
+    await expect(scheduler.run({ scope: 'case' }, async () => {
+      events.push('work')
+      return 'unreachable'
+    })).rejects.toThrowError('Scheduler middleware short-circuited execution.')
 
     expect(events).toEqual([
       'root:acquire:case',
@@ -255,18 +198,9 @@ describe('createSchedulerRuntime', () => {
 
   it('only unwinds release middleware for the acquire chain that was entered', async () => {
     const events: string[] = []
-    const runtime = createSchedulerRuntime({
+    const scheduler = createScheduler({
       middleware: [
-        {
-          async onAcquire(context, next) {
-            events.push(`root:acquire:${context.scope}`)
-            await next()
-          },
-          async onRelease(context, next) {
-            events.push(`root:release:${context.scope}`)
-            await next()
-          },
-        },
+        namedMiddleware('root', events),
         {
           async onAcquire(context) {
             events.push(`middle:acquire:${context.scope}`)
@@ -276,33 +210,13 @@ describe('createSchedulerRuntime', () => {
             await next()
           },
         },
-        {
-          async onAcquire(context, next) {
-            events.push(`leaf:acquire:${context.scope}`)
-            await next()
-          },
-          async onRelease(context, next) {
-            events.push(`leaf:release:${context.scope}`)
-            await next()
-          },
-        },
+        namedMiddleware('leaf', events),
       ],
     })
 
-    await expect(
-      runtime.runCase(
-        {
-          attemptIndex: 0,
-          caseId: 'case-1',
-          experimentId: 'baseline',
-          scope: 'case',
-          workspaceId: 'ws',
-        },
-        async () => {
-          events.push('work')
-        },
-      ),
-    ).rejects.toThrowError('Scheduler middleware short-circuited execution.')
+    await expect(scheduler.run({ scope: 'case' }, async () => {
+      events.push('work')
+    })).rejects.toThrowError('Scheduler middleware short-circuited execution.')
 
     expect(events).toEqual([
       'root:acquire:case',
@@ -314,48 +228,15 @@ describe('createSchedulerRuntime', () => {
 
   it('runs release middleware when work throws and preserves the original error', async () => {
     const events: string[] = []
-    const runtime = createSchedulerRuntime({
-      middleware: [
-        {
-          async onAcquire(context, next) {
-            events.push(`root:acquire:${context.scope}`)
-            await next()
-          },
-          async onRelease(context, next) {
-            events.push(`root:release:${context.scope}`)
-            await next()
-          },
-        },
-        {
-          async onAcquire(context, next) {
-            events.push(`leaf:acquire:${context.scope}`)
-            await next()
-          },
-          async onRelease(context, next) {
-            events.push(`leaf:release:${context.scope}`)
-            await next()
-          },
-        },
-      ],
+    const failure = new Error('scheduler-work-failed')
+    const scheduler = createScheduler({
+      middleware: [namedMiddleware('root', events), namedMiddleware('leaf', events)],
     })
 
-    const failure = new Error('scheduler-work-failed')
-
-    await expect(
-      runtime.runCase(
-        {
-          attemptIndex: 0,
-          caseId: 'case-1',
-          experimentId: 'baseline',
-          scope: 'case',
-          workspaceId: 'ws',
-        },
-        async () => {
-          events.push('work')
-          throw failure
-        },
-      ),
-    ).rejects.toBe(failure)
+    await expect(scheduler.run({ scope: 'case' }, async () => {
+      events.push('work')
+      throw failure
+    })).rejects.toBe(failure)
 
     expect(events).toEqual([
       'root:acquire:case',
@@ -369,18 +250,9 @@ describe('createSchedulerRuntime', () => {
   it('runs outer release middleware when an inner acquire throws and preserves the original error', async () => {
     const events: string[] = []
     const failure = new Error('scheduler-acquire-failed')
-    const runtime = createSchedulerRuntime({
+    const scheduler = createScheduler({
       middleware: [
-        {
-          async onAcquire(context, next) {
-            events.push(`root:acquire:${context.scope}`)
-            await next()
-          },
-          async onRelease(context, next) {
-            events.push(`root:release:${context.scope}`)
-            await next()
-          },
-        },
+        namedMiddleware('root', events),
         {
           async onAcquire(context) {
             events.push(`leaf:acquire:${context.scope}`)
@@ -394,20 +266,9 @@ describe('createSchedulerRuntime', () => {
       ],
     })
 
-    await expect(
-      runtime.runCase(
-        {
-          attemptIndex: 0,
-          caseId: 'case-1',
-          experimentId: 'baseline',
-          scope: 'case',
-          workspaceId: 'ws',
-        },
-        async () => {
-          events.push('work')
-        },
-      ),
-    ).rejects.toBe(failure)
+    await expect(scheduler.run({ scope: 'case' }, async () => {
+      events.push('work')
+    })).rejects.toBe(failure)
 
     expect(events).toEqual([
       'root:acquire:case',
@@ -416,81 +277,91 @@ describe('createSchedulerRuntime', () => {
     ])
   })
 
-  it('throws a scheduler-owned error for invalid concurrency caps', () => {
-    expect(() => {
-      createSchedulerRuntime({
-        concurrency: {
-          case: 0,
-        },
-      })
-    }).toThrowError('Invalid scheduler concurrency for "case": 0')
+  it('releases the slot when work fails', async () => {
+    const scheduler = createScheduler({ concurrency: { case: 1 } })
 
-    expect(() => {
-      createSchedulerRuntime({
-        concurrency: {
-          project: Number.POSITIVE_INFINITY,
-        },
-      })
-    }).toThrowError('Invalid scheduler concurrency for "project": Infinity')
+    await expect(scheduler.run({ scope: 'case' }, async () => {
+      throw new Error('failed')
+    })).rejects.toThrowError('failed')
 
-    expect(() => {
-      createSchedulerRuntime({
-        concurrency: {
-          task: -1,
-        },
-      })
-    }).toThrowError('Invalid scheduler concurrency for "task": -1')
+    await expect(scheduler.run({ scope: 'case' }, async () => 'next')).resolves.toBe('next')
+  })
 
-    expect(() => {
-      createSchedulerRuntime({
-        concurrency: {
-          attempt: 1.5,
-        },
-      })
-    }).toThrowError('Invalid scheduler concurrency for "attempt": 1.5')
+  it('throws a scheduler-owned error for invalid pool sizes', () => {
+    expect(() => createScheduler({ concurrency: { case: 0 } }))
+      .toThrowError('Invalid scheduler concurrency for "case": 0')
+    expect(() => createScheduler({ concurrency: { project: Number.POSITIVE_INFINITY } }))
+      .toThrowError('Invalid scheduler concurrency for "project": Infinity')
+    expect(() => createScheduler().child({ concurrency: { task: -1 } }))
+      .toThrowError('Invalid scheduler concurrency for "task": -1')
+    expect(() => createScheduler({ concurrency: { task: 1.5 } }))
+      .toThrowError('Invalid scheduler concurrency for "task": 1.5')
   })
 })
 
-async function drainMappedReleases(
-  releases: Map<string, () => void>,
-  runCompletion: Promise<unknown>,
-): Promise<void> {
-  for (;;) {
-    const pendingReleases = [...releases.values()]
-    releases.clear()
-    pendingReleases.forEach(resolve => resolve())
+/**
+ * Work items that start when admitted and settle only when the test releases them.
+ */
+function createControlledWork() {
+  const releases = new Map<string, () => void>()
+  const started: string[] = []
+  let active = 0
+  let peak = 0
+  let releasingAll = false
 
-    const isComplete = await Promise.race([
-      runCompletion.then(() => true),
-      new Promise<false>(resolve => setTimeout(resolve, 0, false)),
-    ])
-
-    if (isComplete) {
-      return
-    }
+  return {
+    get peak() {
+      return peak
+    },
+    release(name: string) {
+      releases.get(name)?.()
+      releases.delete(name)
+    },
+    releaseAll() {
+      // Work admitted after this call settles at once.
+      releasingAll = true
+      for (const resolve of releases.values()) {
+        resolve()
+      }
+      releases.clear()
+    },
+    start(name: string) {
+      return async () => {
+        started.push(name)
+        active += 1
+        peak = Math.max(peak, active)
+        if (!releasingAll) {
+          await new Promise<void>(resolve => releases.set(name, resolve))
+        }
+        active -= 1
+      }
+    },
+    started,
   }
 }
 
-async function drainQueuedReleases(
-  releases: Array<() => void>,
-  runCompletion: Promise<unknown>,
-): Promise<void> {
-  for (;;) {
-    releases.splice(0).forEach(resolve => resolve())
+async function flushMicrotasks(): Promise<void> {
+  await new Promise(resolve => setTimeout(resolve, 0))
+}
 
-    const isComplete = await Promise.race([
-      runCompletion.then(() => true),
-      new Promise<false>(resolve => setTimeout(resolve, 0, false)),
-    ])
-
-    if (isComplete) {
-      return
-    }
+function namedMiddleware(name: string, events: string[]): SchedulerMiddleware {
+  return {
+    async onAcquire(context, next) {
+      events.push(`${name}:acquire:${context.scope}`)
+      await next()
+    },
+    async onRelease(context, next) {
+      events.push(`${name}:release:${context.scope}`)
+      await next()
+    },
   }
 }
 
-async function waitForStartedCount(started: string[], count: number): Promise<void> {
-  while (started.length < count) {
-    await new Promise(resolve => setTimeout(resolve, 0))
+function recordingMiddleware(contexts: SchedulerScopeContext[]): SchedulerMiddleware {
+  return {
+    async onAcquire(context, next) {
+      contexts.push(context)
+      await next()
+    },
   }
 }

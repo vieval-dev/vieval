@@ -1,6 +1,10 @@
 import { defineConfig } from '../../../src'
 
 export default defineConfig({
+  concurrency: {
+    project: 2,
+    task: 2,
+  },
   models: [
     {
       aliases: [],
@@ -12,10 +16,6 @@ export default defineConfig({
   ],
   projects: [
     {
-      concurrency: {
-        project: 2,
-        task: 2,
-      },
       include: ['evals/*.eval.ts'],
       name: 'concurrency-cli-overrides',
       root: '.',

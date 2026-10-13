@@ -81,9 +81,6 @@ catalogs:
     '@vitejs/plugin-vue':
       specifier: ^6.0.10
       version: 6.0.10
-    '@vitest/runner':
-      specifier: ^4.1.11
-      version: 4.1.11
     '@voidzero-dev/vitepress-theme':
       specifier: ^4.8.4
       version: 4.8.4
@@ -558,9 +555,6 @@ importers:
         version: 1000.1.5
       '@vitest/expect':
         specifier: catalog:vitest
-        version: 4.1.11
-      '@vitest/runner':
-        specifier: 'catalog:'
         version: 4.1.11
       '@xsai-ext/providers':
         specifier: 'catalog:'
