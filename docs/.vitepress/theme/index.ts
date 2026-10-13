@@ -5,6 +5,7 @@ import { themeContextKey, VoidZeroTheme } from '@voidzero-dev/vitepress-theme'
 
 import Layout from './Layout.vue'
 
+import './fonts/alimamaFangYuanTi.css'
 import './styles.css'
 import 'uno.css'
 
