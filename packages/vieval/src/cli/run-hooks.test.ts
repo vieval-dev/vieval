@@ -30,7 +30,7 @@ import { defineConfig } from '${vievalImportPath}'
 export default defineConfig({
   models: [{ aliases: [], id: 'mock:model-a', inferenceExecutor: 'mock', inferenceExecutorId: 'mock:model-a', model: 'model-a' }],
   projects: [{
-    concurrency: { case: 2, task: 1 },
+    scheduler: { concurrency: { case: 2, task: 1 } },
     include: ['evals/*.eval.ts'],
     name: 'osworld-style',
     root: '.',

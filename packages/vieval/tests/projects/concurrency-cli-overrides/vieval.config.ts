@@ -12,13 +12,15 @@ export default defineConfig({
   ],
   projects: [
     {
-      concurrency: {
-        project: 2,
-        task: 2,
-      },
       include: ['evals/*.eval.ts'],
       name: 'concurrency-cli-overrides',
       root: '.',
     },
   ],
+  scheduler: {
+    concurrency: {
+      project: 2,
+      task: 2,
+    },
+  },
 })

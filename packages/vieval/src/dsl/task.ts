@@ -1,6 +1,6 @@
 import type { TaskConcurrencyConfig, TaskExecutionPolicy, TaskRunContext, TaskRunOutput } from '../config'
 import type { RunScoreKind } from '../core/runner'
-import type { SchedulerQueue } from '../core/scheduler/queue'
+import type { Scheduler } from '../core/scheduler/types'
 import type { TelemetryAttributeValue } from '../core/telemetry'
 import type { RunEventDefinition, RunEventEmitter } from '../events'
 import type { RecordArtifactOptions } from './case-artifacts'
@@ -9,7 +9,7 @@ import { errorMessageFrom, sleep } from '@moeru/std'
 
 import { defineEval, defineTask } from '../config'
 import { runWithCaseOutput } from '../core/runner/case-output'
-import { createSchedulerQueue } from '../core/scheduler/queue'
+import { createScheduler } from '../core/scheduler/runtime'
 import { createNoopTelemetryRuntime } from '../core/telemetry'
 import { artifactRecorded, caseEnded, caseOutput, caseStarted, metricRecorded, scoreRecorded } from '../events'
 import { createCaseArtifacts } from './case-artifacts'
@@ -117,20 +117,15 @@ export type CaseRunner<TInput> = (context: CaseRunContext<TInput>) => Promise<un
 
 /**
  * Per-group options for `casesFromInputs`.
- *
- * Use when:
- * - one generated case group should run with a lower case concurrency than the task default
- * - a task should keep a broader task-level cap while one expensive case family stays bounded
- *
- * Expects:
- * - `concurrency` to be a positive integer when provided
- *
- * Returns:
- * - one partial case-group execution descriptor
  */
 export interface CasesFromInputsOptions extends TaskExecutionPolicy {
   /**
-   * Case-level concurrency cap for cases registered by one `casesFromInputs(...)` call.
+   * Most cases of this group running at once.
+   *
+   * The pool is shared only by the cases of one `casesFromInputs(...)` call. Cases also need a slot in the task,
+   * project, and run pools, so the value can only lower concurrency for this group.
+   *
+   * @default unlimited
    */
   concurrency?: number
 }
@@ -162,16 +157,12 @@ export interface DescribeTaskBuilder {
  */
 export interface DescribeTaskOptions extends TaskExecutionPolicy {
   /**
-   * Optional task-local concurrency overrides.
+   * Pools this task declares for its own cases.
    *
    * Use when:
-   * - one task should cap attempt fan-out independently from the surrounding project
-   * - one task should cap case fan-out without changing global scheduling defaults
+   * - the cases of one task should stay below the project-wide and run-wide limits
    *
-   * Expects:
-   * - each provided value to be a positive integer
-   *
-   * @default inherited from project or CLI concurrency settings
+   * @default undefined
    */
   concurrency?: TaskConcurrencyConfig
   /**
@@ -702,34 +693,33 @@ export function describeTask(
           exact: [],
           judge: [],
         }
-        const defaultCaseQueueKey = {}
-        const caseQueues = new Map<object, ReturnType<typeof createSchedulerQueue>>()
         const hasAutoAttempt = registeredCases.some(taskCase => resolveCaseExecutionPolicy(taskCase, taskExecutionPolicy).autoAttempt > 0)
-        const runtimeTaskConcurrency = context.task.entry.task?.concurrency ?? options.concurrency
-        const attemptConcurrency = resolveAttemptConcurrency(runtimeTaskConcurrency, context.runtimeConcurrency)
-        // Runs one case of one attempt under its case queue, then under the attempt-wide cap.
+        // Outside `vieval run` there is no project or run scheduler, so the task pool is the broadest one.
+        const taskScheduler = (context.scheduler ?? createScheduler()).child({
+          concurrency: { case: options.concurrency?.case },
+          context: { taskId: context.task.id },
+        })
+        const groupSchedulers = new Map<object, Scheduler>()
+        // Runs one case of one attempt once it holds a slot in its group pool, the task pool, and every broader pool.
         const scheduleCase = <T>(
           taskCase: RegisteredCase<unknown>,
-          attemptQueue: SchedulerQueue | undefined,
+          index: number,
+          attemptIndex: number,
           execute: () => Promise<T>,
         ): Promise<T> => {
-          const executeInAttempt = attemptQueue == null ? execute : async () => await attemptQueue.run(execute)
-          const concurrency = resolveCaseConcurrency(taskCase, runtimeTaskConcurrency, context.runtimeConcurrency)
-          if (concurrency == null) {
-            return executeInAttempt()
+          let scheduler = taskScheduler
+          if (taskCase.queueKey != null) {
+            scheduler = groupSchedulers.get(taskCase.queueKey) ?? taskScheduler.child({ concurrency: { case: taskCase.concurrency } })
+            groupSchedulers.set(taskCase.queueKey, scheduler)
           }
 
-          const queueKey = resolveCaseQueueKey(taskCase, defaultCaseQueueKey)
-          const queue = caseQueues.get(queueKey) ?? createSchedulerQueue(concurrency)
-          caseQueues.set(queueKey, queue)
-          return queue.run(executeInAttempt)
+          return scheduler.run({ attemptIndex, caseId: createCaseId(index, taskCase.name), scope: 'case' }, execute)
         }
 
         if (!hasAutoAttempt) {
-          const attemptQueue = attemptConcurrency == null ? undefined : createSchedulerQueue(attemptConcurrency)
           await Promise.all(
             registeredCases.map(async (taskCase, index) => {
-              await scheduleCase(taskCase, attemptQueue, async () => {
+              await scheduleCase(taskCase, index, 0, async () => {
                 const outcome = await executeRegisteredCase(context, taskCase, index, totalCases, taskExecutionPolicy, undefined)
                 // Not started because the run was interrupted.
                 if (outcome == null) {
@@ -745,8 +735,7 @@ export function describeTask(
           let attemptIndex = 0
 
           for (;;) {
-            // Each attempt gets its own cap, matching the scheduler's per-attempt `attempt` scope.
-            const attemptQueue = attemptConcurrency == null ? undefined : createSchedulerQueue(attemptConcurrency)
+            // Attempts run one after another, so they share the task and group pools without competing.
             const autoAttemptOf = (taskCase: RegisteredCase<unknown>): CaseAutoAttempt => ({
               attemptIndex,
               autoAttempt: resolveCaseExecutionPolicy(taskCase, taskExecutionPolicy).autoAttempt,
@@ -754,7 +743,8 @@ export function describeTask(
             const attemptOutcomes = await Promise.all(
               registeredCases.map(async (taskCase, index) => await scheduleCase(
                 taskCase,
-                attemptQueue,
+                index,
+                attemptIndex,
                 async () => await executeRegisteredCase(context, taskCase, index, totalCases, taskExecutionPolicy, autoAttemptOf(taskCase)),
               )),
             )
@@ -820,67 +810,6 @@ function getActiveCases(): RegisteredCase<unknown>[] {
   }
 
   return active
-}
-
-/**
- * Resolves the cap on cases running at once within one task attempt, across every case queue of the task.
- *
- * Before:
- * - CLI `--attempt-concurrency 2`, task `{ attempt: 4 }`
- * - no CLI override, task `{ attempt: 3 }`
- * - no override anywhere
- *
- * After:
- * - `2`
- * - `3`
- * - `undefined` (uncapped)
- */
-function resolveAttemptConcurrency(
-  taskConcurrency: TaskConcurrencyConfig | undefined,
-  runtimeConcurrency: TaskConcurrencyConfig | undefined,
-): number | undefined {
-  const concurrency = runtimeConcurrency?.attempt ?? taskConcurrency?.attempt
-  if (concurrency == null) {
-    return undefined
-  }
-
-  if (!Number.isFinite(concurrency) || !Number.isInteger(concurrency) || concurrency <= 0) {
-    throw new Error(`Invalid task attempt concurrency: ${String(concurrency)}`)
-  }
-
-  return concurrency
-}
-
-/**
- * Resolves the effective case concurrency for one registered task case.
- *
- * Before:
- * - registered case override `2`, task default `4`
- * - registered case override `undefined`, task default `3`
- *
- * After:
- * - `2`
- * - `3`
- */
-function resolveCaseConcurrency(
-  taskCase: RegisteredCase<unknown>,
-  taskConcurrency: TaskConcurrencyConfig | undefined,
-  runtimeConcurrency: TaskConcurrencyConfig | undefined,
-): number | undefined {
-  const concurrency = runtimeConcurrency?.case ?? taskCase.concurrency ?? taskConcurrency?.case
-  if (concurrency == null) {
-    return undefined
-  }
-
-  if (!Number.isFinite(concurrency) || !Number.isInteger(concurrency) || concurrency <= 0) {
-    throw new Error(`Invalid task case concurrency: ${String(concurrency)}`)
-  }
-
-  return concurrency
-}
-
-function resolveCaseQueueKey(taskCase: RegisteredCase<unknown>, defaultQueueKey: object): object {
-  return taskCase.queueKey ?? defaultQueueKey
 }
 
 function withActiveCases<T>(cases: RegisteredCase<unknown>[], callback: () => T): T {

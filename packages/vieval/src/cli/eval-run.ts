@@ -28,7 +28,6 @@ export interface EvalRunCliRuntime {
 
 interface ParsedCliArguments {
   attempt?: string
-  attemptConcurrency?: number
   caseConcurrency?: number
   configFilePath?: string
   experiment?: string
@@ -40,7 +39,6 @@ interface ParsedCliArguments {
   taskConcurrency?: number
   viewer?: ParsedViewerArguments
   workspace?: string
-  workspaceConcurrency?: number
 }
 
 interface ParsedViewerArguments {
@@ -61,11 +59,10 @@ const evalRunHelpText = `
     --workspace  Workspace id used in report artifacts
     --experiment Experiment id used in report artifacts
     --attempt    Attempt id used in report artifacts
-    --workspace-concurrency Workspace scheduling cap
-    --project-concurrency   Project scheduling cap
-    --task-concurrency      Task scheduling cap
-    --attempt-concurrency   Cap on cases of one task running at once within one attempt
-    --case-concurrency      Case scheduling cap
+    --project-concurrency Most projects running at once (default: 1)
+    --task-concurrency    Most tasks running at once in the whole run
+    --case-concurrency    Most cases running at once in the whole run
+                          Concurrency flags apply to the whole run and never raise a value set in config
     --report-out Report output root directory (default: .vieval/reports next to the config file)
     --no-report  Do not write reports or case artifacts
     --json       Print machine-readable JSON output
@@ -100,9 +97,6 @@ export function parseCliArguments(argv: readonly string[]): ParsedCliArguments {
     flags: {
       attempt: {
         type: 'string',
-      },
-      attemptConcurrency: {
-        type: 'number',
       },
       caseConcurrency: {
         type: 'number',
@@ -152,16 +146,12 @@ export function parseCliArguments(argv: readonly string[]): ParsedCliArguments {
       workspace: {
         type: 'string',
       },
-      workspaceConcurrency: {
-        type: 'number',
-      },
     },
     importMeta: import.meta,
   })
 
   return {
     attempt: cli.flags.attempt,
-    attemptConcurrency: cli.flags.attemptConcurrency,
     caseConcurrency: cli.flags.caseConcurrency,
     configFilePath: cli.flags.config,
     experiment: cli.flags.experiment,
@@ -181,7 +171,6 @@ export function parseCliArguments(argv: readonly string[]): ParsedCliArguments {
         }
       : {}),
     workspace: cli.flags.workspace,
-    workspaceConcurrency: cli.flags.workspaceConcurrency,
   }
 }
 
@@ -229,7 +218,6 @@ export async function runEvalRunCli(argv: readonly string[], runtime: EvalRunCli
   try {
     const output = await runVievalCli({
       attempt: parsed.attempt,
-      attemptConcurrency: parsed.attemptConcurrency,
       caseConcurrency: parsed.caseConcurrency,
       configFilePath: parsed.configFilePath,
       experiment: parsed.experiment,
@@ -240,7 +228,6 @@ export async function runEvalRunCli(argv: readonly string[], runtime: EvalRunCli
       taskConcurrency: parsed.taskConcurrency,
       ...(viewer == null ? {} : { onRunReady: viewer.onRunReady }),
       workspace: parsed.workspace,
-      workspaceConcurrency: parsed.workspaceConcurrency,
     })
 
     process.stdout.write(`${parsed.json ? JSON.stringify(output, null, 2) : formatVievalCliRunOutput(output)}\n`)

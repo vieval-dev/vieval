@@ -30,19 +30,26 @@ next:
 
 CLI 参数 `--attempt` 只为本次运行设置报告中的 `attemptId`。它不会启用 `autoAttempt`，也不会改变用例的执行次数。
 
-## 为不同工作设置并发上限
+## 在共享资源的位置设置并发
 
-`vieval run` 支持五种并发设置。它们分别控制不同工作，并非每个设置都对应一个独立的并行队列。
+并发属于调度器配置，而不是会被继承的默认值：顶层配置和每个项目都把它写在 `scheduler.concurrency` 下，和调度中间件放在一起。每个并发值都是一个槽位池。键名决定这个池数的是什么，写在哪里决定哪些工作共用这个池。
 
-| 名称 | 控制对象 | 可配置位置 |
+| 键 | 计数对象 |
+| --- | --- |
+| `project` | 同时运行的项目数 |
+| `task` | 同时运行的调度任务数 |
+| `case` | 同时运行的用例数 |
+
+| 写在哪里 | 可用的键 | 由哪些工作共用 |
 | --- | --- | --- |
-| 工作区 | 一次 CLI 运行最多同时执行多少个项目；默认上限为 `1`。 | 顶层 `concurrency.workspace`；`--workspace-concurrency` |
-| 项目 | 项目执行调度任务时采用的上限；它会与任务上限取较小值。 | 顶层或项目级 `concurrency.project`；`--project-concurrency` |
-| 任务 | 一个项目最多同时执行多少个调度任务；默认上限为 `1`。 | 顶层或项目级 `concurrency.task`；`--task-concurrency` |
-| 尝试 | 一次尝试中同一任务同时运行的用例数上限。该上限跨越任务的所有用例组，并叠加在各组的用例上限之上。自动尝试仍依次执行，每次尝试单独计算上限。 | 顶层、项目级或任务级 `concurrency.attempt`；`--attempt-concurrency` |
-| 用例 | 一个任务最多同时执行多少个用例。单次 `casesFromInputs` 调用可以使用自己的队列和上限。 | 顶层、项目级或任务级 `concurrency.case`；`casesFromInputs(..., { concurrency })`；`--case-concurrency` |
+| 顶层 `scheduler.concurrency`；`--project-concurrency`、`--task-concurrency`、`--case-concurrency` | `project`、`task`、`case` | 整个运行 |
+| 项目级 `scheduler.concurrency` | `task`、`case` | 该项目的任务和用例 |
+| `describeTask(..., { concurrency: { case } })` | `case` | 该任务的所有用例，跨越它的全部用例组 |
+| `casesFromInputs(..., { concurrency })` | 一个数字 | 这一组用例 |
 
-对于工作区、项目和任务，CLI 参数只能收紧配置中的上限，不能把较小的配置值调高。对于尝试和用例，CLI 参数会覆盖任务级或项目级的值。项目配置不能设置 `workspace`；任务配置只能设置 `attempt` 和 `case`。
+一个用例要拿到路径上每个池的槽位才会开始执行，依次是：所在的用例组、任务、项目和整个运行。各层的值不会互相覆盖，最终由最小的那个起作用，所以内层的值只能为自己的工作调低并发。用例会先拿到内层的槽位，再去占用整个运行的槽位；超时也是在拿到全部槽位之后才开始计时。
+
+顶层配置和 CLI 参数设置同一个键时，两者都作用于整个运行，取较小的值。因此 CLI 参数不会调高配置中写明的值，但可以调高内置默认值。什么都不设置时，同一时间只运行一个项目，每个项目同一时间只运行一个任务，用例数不限。只要在整个运行的层面设置了 `task` 或 `case`，就不再套用“每个项目同时一个任务”的默认值：整个运行的用例池已经限制了实际工作量，任务可以同时运行，某个任务的慢用例也不会再拖住下一个任务。
 
 ::: code-group
 
@@ -50,27 +57,28 @@ CLI 参数 `--attempt` 只为本次运行设置报告中的 `attemptId`。它不
 import { defineConfig } from 'vieval'
 
 export default defineConfig({
-  concurrency: {
-    workspace: 1,
-  },
   projects: [
     {
-      concurrency: {
-        case: 4,
-        project: 2,
-        task: 2,
-      },
       include: ['evals/*.eval.ts'],
-      name: 'chat-evals',
+      name: 'desktop-agent',
       root: '.',
     },
   ],
+  // 整个运行最多同时 7 个用例，例如每个用例都要独占一台虚拟机。
+  scheduler: {
+    concurrency: {
+      case: 7,
+      task: 4,
+    },
+  },
 })
 ```
 
 :::
 
-任务可以单独设置用例并发，某一次 `casesFromInputs` 调用还可以使用更小的上限：
+因为用例池属于整个运行，所以可以按领域把工作拆成多个任务：最多 4 个任务同时运行，但它们加起来不会超过 7 个用例。这里也可以不写 `task`，单靠整个运行的用例池就能让所有任务同时开始。
+
+任务和它的某个用例组还可以为自己的用例进一步调低并发：
 
 ::: code-group
 
@@ -92,7 +100,9 @@ describeTask('retrieval', ({ casesFromInputs }) => {
 
 :::
 
-这里的任务级上限是 `4`，但这三个输入共享一个上限为 `2` 的队列。传入 `--case-concurrency` 时，运行时值会覆盖项目级、任务级和这一组输入的用例并发。
+这里的三个输入共用一个大小为 `2` 的组池，组池外面还有大小为 `4` 的任务池，再外面是项目和整个运行的池。传入 `--case-concurrency 1` 会让整个运行同一时间只执行一个用例。
+
+调度中间件可以包住每个被放行的项目、任务和用例，例如记录调度遥测，或者用动态条件暂缓执行。和槽位池写在一起，在顶层或项目上用 `scheduler: { middleware: [...] }` 声明。中间件在工作拿到全部槽位之后运行，顶层中间件包在项目中间件外面。
 
 ::: warning 提高并发会增加同时发出的请求数
 矩阵、推理执行器注册和并发配置本身不会调用模型服务。如果用例会调用模型或其他计费服务，提高任务或用例并发可能触发限流，并在短时间内产生更多费用。请根据服务方允许的请求速率，以及每个用例实际发出的请求数设置上限。
@@ -178,6 +188,6 @@ CLI 默认把缓存写到项目根目录下的 `.vieval/cache`。完整路径依
 
 正如[断言、分数与指标](/zh-hans/guide/learn/assertions-scores-and-metrics)所述，用例在失败前发出的分数事件可能仍会出现在报告记录中，但任务分数会把该用例计为失败。排查问题时，请同时检查用例状态和分数。
 
-不要使用 `autoRetry` 统计多次执行的通过率：重试后恢复的用例在任务分数中只算一次通过。如果希望早期失败也参与最终分数，请使用 `autoAttempt`，并注意它会重新运行已经通过的用例。`--attempt` 和 `--attempt-concurrency` 都不会增加自动尝试次数：`--attempt` 只为运行设置标签，`--attempt-concurrency` 只限制一次尝试中同时运行的用例数。
+不要使用 `autoRetry` 统计多次执行的通过率：重试后恢复的用例在任务分数中只算一次通过。如果希望早期失败也参与最终分数，请使用 `autoAttempt`，并注意它会重新运行已经通过的用例。`--attempt` 不会增加自动尝试次数，它只为运行设置标签。
 
 下一步可在[报告与比较](/zh-hans/guide/learn/reports-and-comparisons)中保存运行记录，并检查或比较结果。

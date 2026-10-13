@@ -4,9 +4,6 @@ import { defineConfig, loadEnv, requiredEnvFrom } from 'vieval'
 import { chatModelFrom, ChatModels } from 'vieval/plugins/chat-models'
 
 export default defineConfig({
-  concurrency: {
-    case: 4,
-  },
   env: loadEnv('test', cwd(), ''),
   plugins: [
     ChatModels({
@@ -71,4 +68,9 @@ export default defineConfig({
       },
     },
   ],
+  scheduler: {
+    concurrency: {
+      case: 4,
+    },
+  },
 })

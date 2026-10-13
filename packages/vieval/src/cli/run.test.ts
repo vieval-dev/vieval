@@ -162,7 +162,7 @@ export default defineEval({
       name: '${project.name}',
       root: './${project.name}',
       include: ['evals/*.eval.ts'],
-      ${project.concurrencySource == null ? '' : `concurrency: ${project.concurrencySource},`}
+      ${project.concurrencySource == null ? '' : `scheduler: { concurrency: ${project.concurrencySource} },`}
       executor: async (task) => {
         const state = globalThis.${blockingRunStateKey}
 
@@ -209,7 +209,7 @@ export default defineEval({
 import { defineConfig } from '${cliConfigImportPath}'
 
 export default defineConfig({
-  ${options.topLevelConcurrencySource == null ? '' : `concurrency: ${options.topLevelConcurrencySource},`}
+  ${options.topLevelConcurrencySource == null ? '' : `scheduler: { concurrency: ${options.topLevelConcurrencySource} },`}
   projects: [
 ${projectEntries}
   ],
@@ -245,6 +245,7 @@ async function createDslProject(options: {
   evalFiles: Record<string, string>
   executorSource?: string
   projectName: string
+  topLevelConcurrencySource?: string
 }): Promise<string> {
   const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-task-project-'))
   temporaryDirectories.push(temporaryDirectory)
@@ -268,6 +269,7 @@ async function createDslProject(options: {
 import { defineConfig } from '${vievalImportPath}'
 
 export default defineConfig({
+  ${options.topLevelConcurrencySource == null ? '' : `scheduler: { concurrency: ${options.topLevelConcurrencySource} },`}
   models: [
     {
       aliases: [],
@@ -1286,24 +1288,24 @@ export default defineConfig({
     expect(output.projects[0].result?.overall.hybridAverage).toBe(1)
   })
 
-  it('runs tasks from multiple projects concurrently while honoring workspace and project caps', async () => {
+  it('runs projects concurrently up to the run-wide project pool while each project keeps its task pool', async () => {
     const state = createBlockingRunState()
     setBlockingRunState(state)
 
     const projectDirectory = await createBlockingExecutorProject({
       projects: [
         {
-          concurrencySource: '{ project: 1, task: 2 }',
+          concurrencySource: '{ task: 1 }',
           evalNames: ['alpha-1', 'alpha-2'],
           name: 'alpha',
         },
         {
-          concurrencySource: '{ project: 1, task: 2 }',
+          concurrencySource: '{ task: 1 }',
           evalNames: ['beta-1', 'beta-2'],
           name: 'beta',
         },
       ],
-      topLevelConcurrencySource: '{ workspace: 2 }',
+      topLevelConcurrencySource: '{ project: 2 }',
     })
 
     const runPromise = runVievalCli({
@@ -1337,7 +1339,7 @@ export default defineConfig({
     expect(output.projects.every(project => project.executed)).toBe(true)
   })
 
-  it('caps task execution concurrency with CLI taskConcurrency over higher project defaults', async () => {
+  it('caps tasks with CLI taskConcurrency below a larger project task pool', async () => {
     const state = createBlockingRunState()
     setBlockingRunState(state)
 
@@ -1378,7 +1380,7 @@ export default defineConfig({
     expect(output.projects[0]?.executed).toBe(true)
   })
 
-  it('does not raise task execution concurrency above the configured project default', async () => {
+  it('does not raise tasks above the project task pool with CLI taskConcurrency', async () => {
     const state = createBlockingRunState()
     setBlockingRunState(state)
 
@@ -1419,6 +1421,112 @@ export default defineConfig({
     expect(output.projects[0]?.executed).toBe(true)
   })
 
+  it('lets CLI taskConcurrency raise the built-in one-task-per-project default', async () => {
+    const state = createBlockingRunState()
+    setBlockingRunState(state)
+
+    const projectDirectory = await createBlockingExecutorProject({
+      projects: [
+        {
+          evalNames: ['task-1', 'task-2', 'task-3'],
+          name: 'alpha',
+        },
+      ],
+    })
+
+    const runPromise = runVievalCli({
+      configFilePath: join(projectDirectory, 'vieval.config.ts'),
+      cwd: projectDirectory,
+      taskConcurrency: 2,
+    })
+
+    await waitForExpectation(() => {
+      expect(state.started).toHaveLength(2)
+      expect(state.peak).toBe(2)
+    })
+
+    state.releases.splice(0).forEach(release => release())
+
+    await waitForExpectation(() => {
+      expect(state.started).toHaveLength(3)
+    })
+
+    state.releases.splice(0).forEach(release => release())
+
+    const output = await runPromise
+
+    expect(output.projects[0]?.executed).toBe(true)
+  })
+
+  // An OSWorld-style benchmark split into one task per domain: tasks overlap freely, while the top-level case pool
+  // bounds the cases (and the Pods they own) of the whole run.
+  it('bounds cases across concurrently running tasks with the top-level case pool', async () => {
+    const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
+    const state = createCaseConcurrencyRunState()
+    setCaseConcurrencyRunState(state)
+
+    const domainTask = (domain: string, offset: number) => `
+describeTask('${domain}', (task) => {
+  task.casesFromInputs('${domain}', [${offset + 1}, ${offset + 2}], async (context) => {
+    const state = globalThis.${caseConcurrencyRunStateKey}
+
+    if (state == null) {
+      throw new Error('Missing case concurrency run state.')
+    }
+
+    state.active += 1
+    state.peak = Math.max(state.peak, state.active)
+    state.started.push(context.matrix.inputs)
+
+    await new Promise<void>((resolve) => {
+      state.releases.push(() => {
+        state.active -= 1
+        resolve()
+      })
+    })
+  })
+}, { concurrency: { case: 2 } })
+`
+    const projectDirectory = await createDslProject({
+      evalFiles: {
+        'domains.eval.ts': `
+import { describeTask } from '${vievalImportPath}'
+${domainTask('chrome', 0)}
+${domainTask('gimp', 10)}
+${domainTask('vlc', 20)}
+`,
+      },
+      projectName: 'osworld-domains',
+      // No `task` value: the run-wide case pool lifts the one-task-per-project default, so domains overlap.
+      topLevelConcurrencySource: '{ case: 3 }',
+    })
+
+    const runPromise = runVievalCli({
+      configFilePath: join(projectDirectory, 'vieval.config.ts'),
+      cwd: projectDirectory,
+      report: false,
+    })
+
+    await waitForExpectation(() => {
+      expect(state.started).toHaveLength(3)
+    })
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    // Three slots, filled by cases of more than one domain task.
+    expect(state.started).toHaveLength(3)
+    expect(new Set(state.started.map(input => Math.floor(input / 10))).size).toBeGreaterThan(1)
+
+    while (state.started.length < 6 || state.releases.length > 0) {
+      state.releases.shift()?.()
+      await new Promise(resolve => setTimeout(resolve, 0))
+    }
+
+    const output = await runPromise
+
+    expect(state.peak).toBe(3)
+    expect(output.projects[0]?.caseSummary).toMatchObject({ passed: 6, total: 6 })
+  })
+
   it('runs the concurrency-cases-from-inputs fixture as an executable example', async () => {
     const output = await runVievalCli({
       configFilePath: join(concurrencyCasesFromInputsProjectDirectory, 'vieval.config.ts'),
@@ -1448,7 +1556,6 @@ export default defineConfig({
       projectConcurrency: 1,
       report: false,
       taskConcurrency: 1,
-      workspaceConcurrency: 1,
     })
 
     expect(output.projects).toHaveLength(1)

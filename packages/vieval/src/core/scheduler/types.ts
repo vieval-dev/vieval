@@ -1,59 +1,120 @@
 /**
- * Options accepted by {@link createSchedulerRuntime}.
- *
- * Use when:
- * - constructing a scheduler runtime with queue limits or middleware
- *
- * Expects:
- * - omitted configuration falls back to unbounded execution for that concern
- *
- * Returns:
- * - queue and middleware configuration for the runtime
+ * Options accepted by {@link Scheduler.child} and `createScheduler`.
  */
-export interface CreateSchedulerRuntimeOptions {
+export interface CreateSchedulerOptions {
+  /**
+   * Pools owned by this scheduler, keyed by the scope they count.
+   *
+   * A pool is shared only by work run through this scheduler or its children. Work also has to hold a slot in every
+   * pool of every parent scheduler, so a child can only lower concurrency for its own work.
+   *
+   * @default {} (no pool of its own)
+   */
   concurrency?: SchedulerConcurrencyConfig
+  /**
+   * Ids merged into the context of every unit run through this scheduler and its children.
+   *
+   * @default {}
+   */
+  context?: SchedulerBoundContext
+  /**
+   * Middleware wrapped around every unit run through this scheduler, after all of its slots are held.
+   *
+   * Listed from outermost to innermost. Middleware of a parent scheduler wraps middleware of its children.
+   *
+   * @default []
+   */
   middleware?: SchedulerMiddleware[]
 }
 
 /**
- * Per-scope concurrency limits used by the scheduler runtime.
+ * Admission boundary for projects, tasks, and cases.
  *
- * Use when:
- * - bounding parallel work for a specific scope
- * - disabling a scope cap by omitting its entry
- *
- * Expects:
- * - values are positive integers when provided
- *
- * Returns:
- * - a partial map of scheduler scope to concurrency cap
+ * Schedulers form a tree. The run owns the root, each project a child of it, each task a child of its project, and
+ * each case group a child of its task. A unit run through any node needs a slot in the pool for its scope on that
+ * node and on every parent node.
  */
-export interface SchedulerConcurrencyConfig {
-  attempt?: number
-  case?: number
-  project?: number
-  task?: number
-  workspace?: number
+export interface Scheduler {
+  /**
+   * Creates a scheduler whose pools are shared only by work run through it.
+   *
+   * Use when:
+   * - one project, task, or case group needs its own pool or middleware below a broader scheduler
+   *
+   * Returns:
+   * - a child that admits work through its own pools and middleware, then through every parent's
+   */
+  child: (options?: CreateSchedulerOptions) => Scheduler
+  /**
+   * Runs one unit of `context.scope` once it holds a slot in every pool on its path.
+   *
+   * Use when:
+   * - a project, task, or case execution must respect the configured concurrency and middleware
+   *
+   * Expects:
+   * - `context` carries the ids this scheduler does not bind already
+   *
+   * Returns:
+   * - the result of `execute`; slots are acquired from the narrowest pool to the broadest, and released when the
+   *   work and every `onRelease` hook settle
+   */
+  run: <T>(context: SchedulerRunContext, execute: () => Promise<T>) => Promise<T>
 }
 
 /**
- * Middleware hooks wrapped around scheduler execution.
+ * Ids a scheduler binds for every unit run through it.
+ */
+export type SchedulerBoundContext = Omit<SchedulerScopeContext, 'scope'>
+
+/**
+ * Pool sizes keyed by the unit each pool counts.
+ *
+ * The scheduler that declares a value decides which work shares it: a value on the run scheduler bounds the whole
+ * run, a value on a project scheduler bounds one project, and so on.
+ */
+export interface SchedulerConcurrencyConfig {
+  /**
+   * Most case executions running at once among the work sharing this pool.
+   *
+   * @default unlimited
+   */
+  case?: number
+  /**
+   * Most projects running at once among the work sharing this pool.
+   *
+   * @default unlimited
+   */
+  project?: number
+  /**
+   * Most scheduled tasks running at once among the work sharing this pool.
+   *
+   * @default unlimited
+   */
+  task?: number
+}
+
+/**
+ * Middleware hooks wrapped around one admitted unit of work.
  *
  * Use when:
- * - recording queue lifecycle telemetry
- * - attaching tracing or temporary resources around queued work
+ * - recording admission telemetry
+ * - holding or rejecting work dynamically, or attaching temporary resources around it
  *
  * Expects:
- * - implementations call `next()` exactly once to continue the pipeline
- *
- * Returns:
- * - optional async acquire and release hooks
+ * - implementations call `next()` exactly once to continue the pipeline; not calling it skips the work, and the
+ *   scheduler rejects the run with a short-circuit error
  */
 export interface SchedulerMiddleware {
+  /**
+   * Runs after every slot is held and before the work starts.
+   */
   onAcquire?: (
     context: SchedulerScopeContext,
     next: () => Promise<void>,
   ) => Promise<void> | void
+  /**
+   * Runs after the work settles, in reverse order of `onAcquire`, before the slots are released.
+   */
   onRelease?: (
     context: SchedulerScopeContext,
     next: () => Promise<void>,
@@ -61,61 +122,48 @@ export interface SchedulerMiddleware {
 }
 
 /**
- * Runtime API used to execute case-level work through scheduler policies.
- *
- * Use when:
- * - the runner needs to enqueue case execution under middleware and queue caps
- *
- * Expects:
- * - `runCase` receives a case context and a callback that performs the work
- *
- * Returns:
- * - a promise that resolves with the callback result once all guards release
+ * Context passed to {@link Scheduler.run}; ids the scheduler already binds can be omitted.
  */
-export interface SchedulerRuntime {
-  runCase: <T>(
-    context: SchedulerScopeContext,
-    execute: () => Promise<T>,
-  ) => Promise<T>
-}
+export type SchedulerRunContext = Pick<SchedulerScopeContext, 'scope'> & SchedulerBoundContext
 
 /**
- * Hierarchical scheduler scopes used by the queue runtime.
- *
- * Use when:
- * - selecting which concurrency cap applies to a unit of work
- * - ordering middleware acquisition and release hooks
- *
- * Expects:
- * - values move from broad to narrow scope in this order:
- *   `workspace -> project -> task -> attempt -> case`
- *
- * Returns:
- * - a string literal scope identifier
+ * Units of work the scheduler admits, from broad to narrow.
  */
-export type SchedulerScope = 'attempt' | 'case' | 'project' | 'task' | 'workspace'
+export type SchedulerScope = 'case' | 'project' | 'task'
 
 /**
- * Context carried through queue acquisition, execution, and release.
+ * Context carried through admission, execution, and release of one unit.
  *
- * Use when:
- * - middleware needs stable identifiers for logging or instrumentation
- * - runtime helpers need to know which hierarchical scope is being executed
- *
- * Expects:
- * - `workspaceId` is always present
- * - `experimentId` is metadata for middleware and logging, not queue partitioning
- * - narrower ids are only provided when the selected scope requires them
- *
- * Returns:
- * - a serializable scope context object
+ * Ids are present when the scheduler path knows them: `vieval run` binds the workspace, experiment, project, and
+ * task ids, and the DSL adds the case id and attempt index. Work run outside `vieval run` may have none.
  */
 export interface SchedulerScopeContext {
+  /**
+   * Auto attempt index of the case execution, starting at `0`.
+   */
   attemptIndex?: number
+  /**
+   * Case id within the task.
+   */
   caseId?: string
-  experimentId: string
+  /**
+   * Experiment id of the run. Metadata only; pools are never partitioned by it.
+   */
+  experimentId?: string
+  /**
+   * Project name.
+   */
   projectName?: string
+  /**
+   * Unit being admitted.
+   */
   scope: SchedulerScope
+  /**
+   * Scheduled task id.
+   */
   taskId?: string
-  workspaceId: string
+  /**
+   * Workspace id of the run.
+   */
+  workspaceId?: string
 }

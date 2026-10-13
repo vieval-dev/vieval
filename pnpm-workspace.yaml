@@ -44,7 +44,6 @@ catalog:
   '@unocss/eslint-plugin': ^66.7.4
   '@unocss/reset': ^66.7.4
   '@vitejs/plugin-vue': ^6.0.10
-  '@vitest/runner': ^4.1.11
   '@voidzero-dev/vitepress-theme': ^4.8.4
   '@vue/tsconfig': ^0.9.1
   '@vueuse/core': ^15.0.0

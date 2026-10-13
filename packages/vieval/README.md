@@ -211,7 +211,7 @@ Each scheduled task receives stable matrix metadata:
 - `attempt`: a full task rerun used to estimate reliability. With `autoAttempt`, each full attempt contributes evidence, so a fail-then-pass pair scores as a success rate rather than replacing the earlier failure.
 - `retry`: an in-case retry. With `autoRetry`, a case can recover inside one attempt; a retry pass still counts as that attempt passing.
 
-Config inheritance follows the same outside-in model: top-level defaults apply first, workspace/project entries refine them, and project-local plugins can append or override project-local models/reporters/concurrency without leaking to sibling projects.
+Config inheritance follows the same outside-in model: top-level defaults apply first, workspace/project entries refine them, and project-local plugins can append or override project-local models/reporters/concurrency without leaking to sibling projects. The scheduler is the exception to inheritance: top-level `scheduler` (concurrency pools and middleware) is not copied into projects; it configures the run, and each project's `scheduler` configures that project below it.
 
 ## Config Example
 
@@ -370,13 +370,13 @@ pnpm -F vieval exec tsx src/bin/vieval.ts report analyze .vieval/reports/my-run
 pnpm -F vieval eval:run -- --help
 ```
 
-Concurrency flags are available on `vieval run`:
+Concurrency flags are available on `vieval run`. Each one bounds the whole run, and it is combined with the same key of the top-level `scheduler.concurrency` config by taking the smaller value, so a flag never raises a configured value:
 
-- `--workspace-concurrency`
-- `--project-concurrency`
-- `--task-concurrency`
-- `--attempt-concurrency`: the most cases of one task that run at the same time within one attempt, across all case groups of the task. It overrides `concurrency.attempt` of the task, project, or config. Auto attempts of a task run one after another, and each attempt gets its own cap.
-- `--case-concurrency`
+- `--project-concurrency`: the most projects running at once (default `1`).
+- `--task-concurrency`: the most scheduled tasks running at once in the whole run. Without a run-wide `task` or `case` value and without a project `task` value, each project runs one task at a time.
+- `--case-concurrency`: the most cases running at once in the whole run.
+
+A concurrency value is shared by the work where it is declared: top-level `scheduler.concurrency` and CLI values bound the whole run, a project's `scheduler.concurrency` bounds that project, `describeTask(..., { concurrency: { case } })` bounds that task, and `casesFromInputs(..., { concurrency })` bounds that group. A case runs only after it holds a slot at every level, so `scheduler: { concurrency: { case: 7 } }` at the top level keeps the whole run at seven cases however many tasks run at once.
 
 ### Web viewer
 
@@ -421,7 +421,7 @@ await runVievalCli({
 - `vieval`: `defineConfig`, `loadEnv`, `requiredEnvFrom`, `describeTask`, `describeEval`, `caseOf`, `casesFromInputs`, and `expect`.
 - `vieval/config`: lower-level `defineEval`, `defineTask`, matrix types, task context types, model definitions, and plugin contracts.
 - `vieval/plugins/chat-models`: `ChatModels`, `ChatProviders`, `chatModelFrom`, `chatProviderFrom`, `chatModelMatrix`, runtime config helpers, and chat telemetry helpers.
-- `vieval/core/runner`: collection, scheduling, task context, cache runtime, scheduler runtime, execution, and aggregation utilities.
+- `vieval/core/runner`: collection, scheduling, task context, cache runtime, scheduler, execution, and aggregation utilities.
 - `vieval/core/assertions`: assertion primitives and pipeline helpers.
 - `vieval/events`: run event definitions, payload types, and `events.jsonl` schemas.
 - `vieval/core/inference-executors`: env helpers and remote provider executors.

@@ -1,9 +1,10 @@
-import type { TaskConcurrencyConfig, TaskRunStorage } from '../config'
+import type { TaskRunStorage } from '../config'
 import type { AggregatedRunResults, ScheduledTask, ScheduledTaskExecutor, TaskExecutionContext } from '../core/runner'
 import type { RunEventBus } from '../core/runner/event-bus'
+import type { Scheduler, SchedulerConcurrencyConfig } from '../core/scheduler/types'
 import type { TelemetryRuntime } from '../core/telemetry'
 import type { RunEventEmitter } from '../events'
-import type { CliProjectExecutorContext, LoadVievalCliConfigOptions, NormalizedCliProjectConfig } from './config'
+import type { CliProjectConcurrencyConfig, CliProjectExecutorContext, LoadVievalCliConfigOptions, NormalizedCliProjectConfig } from './config'
 import type { InterruptSignal } from './interrupt'
 import type { ReportEventLog } from './report-log'
 import type { CliReporter, SummaryReporter, SummaryReporterCaseStartPayload, SummaryReporterTaskQueuedPayload } from './reporters'
@@ -21,7 +22,7 @@ import c from 'tinyrainbow'
 
 import { errorMessageFrom } from '@moeru/std'
 
-import { collectEvalEntries, createFilesystemTaskCacheRuntime, createRunnerRuntimeContext, createRunnerSchedule, createSchedulerRuntime, createTaskExecutionContext, RunnerExecutionError, runScheduledTasks } from '../core/runner'
+import { collectEvalEntries, createFilesystemTaskCacheRuntime, createRunnerRuntimeContext, createRunnerSchedule, createScheduler, createTaskExecutionContext, RunnerExecutionError, runScheduledTasks } from '../core/runner'
 import { createProcessOutputInterceptor } from '../core/runner/case-output'
 import { createRunEventBus } from '../core/runner/event-bus'
 import { createNoopTelemetryRuntime, createOpenTelemetryRuntime } from '../core/telemetry'
@@ -110,15 +111,14 @@ export interface RunVievalCliOptions extends LoadVievalCliConfigOptions {
    */
   attempt?: string
   /**
-   * Optional attempt-level concurrency cap parsed by the CLI.
-   */
-  attemptConcurrency?: number
-  /**
    * Cache project identifier override used to share benchmark cache across multiple method runs.
    */
   cacheProjectName?: string
   /**
-   * Optional case-level concurrency cap parsed by the CLI.
+   * Most cases running at once in the whole run.
+   *
+   * Combined with the top-level `scheduler.concurrency.case` by taking the smaller value, so it never raises a configured
+   * value.
    */
   caseConcurrency?: number
   /**
@@ -139,7 +139,9 @@ export interface RunVievalCliOptions extends LoadVievalCliConfigOptions {
    */
   project?: string[]
   /**
-   * Optional project-level concurrency cap parsed by the CLI.
+   * Most projects running at once.
+   *
+   * Combined with the top-level `scheduler.concurrency.project` by taking the smaller value.
    */
   projectConcurrency?: number
   /**
@@ -161,17 +163,15 @@ export interface RunVievalCliOptions extends LoadVievalCliConfigOptions {
    */
   reportOut?: string
   /**
-   * Optional task-level concurrency cap parsed by the CLI.
+   * Most scheduled tasks running at once in the whole run.
+   *
+   * Combined with the top-level `scheduler.concurrency.task` by taking the smaller value.
    */
   taskConcurrency?: number
   /**
    * Workspace id attached to report artifacts.
    */
   workspace?: string
-  /**
-   * Optional workspace-level concurrency cap parsed by the CLI.
-   */
-  workspaceConcurrency?: number
 }
 
 /**
@@ -527,10 +527,14 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
       'vieval.run.id': identity.runId,
       'vieval.workspace.id': identity.workspaceId,
     }, async () => {
-      const workspaceScheduler = createSchedulerRuntime({
-        concurrency: {
-          workspace: resolveWorkspaceConcurrency(loadedConfig, options),
+      const runConcurrency = resolveRunConcurrency(loadedConfig.scheduler?.concurrency, options)
+      const runScheduler = createScheduler({
+        concurrency: runConcurrency,
+        context: {
+          experimentId: identity.experimentId,
+          workspaceId: identity.workspaceId,
         },
+        middleware: loadedConfig.scheduler?.middleware,
       })
       const executableProjects = preparedProjects
         .filter(project => project.kind === 'prepared')
@@ -581,20 +585,22 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
           summary: await telemetry.withSpan('vieval.project', {
             'vieval.project.name': preparedProject.prepared.name,
             'vieval.run.id': identity.runId,
-          }, async () => await workspaceScheduler.runCase({
-            experimentId: identity.experimentId,
+          }, async () => await runScheduler.run({
             projectName: preparedProject.prepared.name,
-            scope: 'workspace',
-            workspaceId: identity.workspaceId,
+            scope: 'project',
           }, async () => executePreparedProject(
             preparedProject.prepared,
+            runScheduler.child({
+              concurrency: resolveProjectConcurrency(preparedProject.prepared.project, runConcurrency),
+              context: { projectName: preparedProject.prepared.name },
+              middleware: preparedProject.prepared.project.scheduler?.middleware,
+            }),
             identity,
             options.cacheProjectName,
             telemetry,
             bus,
             runStorage,
             interruption.signal,
-            options,
           ))),
         }
       }))
@@ -759,6 +765,7 @@ function createAutoTaskExecutor(): ScheduledTaskExecutor {
       events: cliContext.events,
       models: context.models,
       runStorage: cliContext.runStorage,
+      scheduler: cliContext.scheduler,
       signal: cliContext.signal,
       task,
       telemetry: cliContext.telemetry,
@@ -784,7 +791,7 @@ function createCliTaskExecutionContext(
   events: RunEventEmitter,
   runStorage: TaskRunStorage,
   signal: AbortSignal,
-  runtimeConcurrency: TaskConcurrencyConfig | undefined,
+  scheduler: Scheduler,
 ): CliTaskExecutionContext {
   return {
     ...createTaskExecutionContext({
@@ -798,7 +805,7 @@ function createCliTaskExecutionContext(
     }),
     events,
     runStorage,
-    runtimeConcurrency,
+    scheduler,
     signal,
     telemetry,
   }
@@ -1020,57 +1027,32 @@ function createRunReporter(options: RunVievalCliReporterOptions | undefined): Cl
   }
 }
 
-function createScheduledTaskWithRuntimeConcurrency(
-  task: ScheduledTask,
-  project: NormalizedCliProjectConfig,
-  options: RunVievalCliOptions,
-): ScheduledTask {
-  const taskDefinition = task.entry.task
-  if (taskDefinition == null) {
-    return task
-  }
-
-  const concurrency = resolveRuntimeTaskConcurrency(taskDefinition.concurrency, project, options)
-
-  return {
-    ...task,
-    entry: {
-      ...task.entry,
-      task: {
-        ...taskDefinition,
-        concurrency,
-      },
-    },
-  }
-}
-
 async function executePreparedProject(
   prepared: PreparedCliProjectExecution,
+  scheduler: Scheduler,
   identity: CliRunIdentity,
   cacheProjectName: string | undefined,
   telemetry: TelemetryRuntime,
   bus: RunEventBus,
   runStorage: TaskRunStorage,
   signal: AbortSignal,
-  options: RunVievalCliOptions,
 ): Promise<CliProjectSummary> {
   const settledTaskIds = new Set<string>()
   const projectEvents = bus.scope({ projectId: prepared.name })
   const caseSummary = subscribeProjectCaseSummary(bus, prepared.name)
   const rawTaskExecutor = prepared.project.executor ?? createAutoTaskExecutor()
   const taskExecutor: ScheduledTaskExecutor = async (task, context) => {
-    const runtimeTask = createScheduledTaskWithRuntimeConcurrency(task, prepared.project, options)
     const result = await telemetry.withSpan('vieval.task', {
       'vieval.project.name': prepared.name,
       'vieval.run.id': identity.runId,
-      'vieval.task.entry.id': runtimeTask.entry.id,
-      'vieval.task.id': runtimeTask.id,
-      'vieval.task.name': runtimeTask.entry.name,
-    }, async () => await rawTaskExecutor(runtimeTask, context))
+      'vieval.task.entry.id': task.entry.id,
+      'vieval.task.id': task.id,
+      'vieval.task.name': task.entry.name,
+    }, async () => await rawTaskExecutor(task, context))
 
     return {
       ...result,
-      matrix: cloneScheduledTaskMatrix(runtimeTask),
+      matrix: cloneScheduledTaskMatrix(task),
     }
   }
 
@@ -1091,10 +1073,9 @@ async function executePreparedProject(
           projectEvents.scope({ taskId: task.id }),
           runStorage,
           signal,
-          resolveCliRuntimeConcurrency(options),
+          scheduler,
         )
       },
-      maxConcurrency: resolveScheduledTaskConcurrency(prepared.project, options),
       onTaskEnd(task, state): void {
         settledTaskIds.add(task.id)
         void projectEvents.scope({ taskId: task.id }).emit(taskEnded, { state })
@@ -1102,6 +1083,7 @@ async function executePreparedProject(
       onTaskStart(task): void {
         void projectEvents.scope({ taskId: task.id }).emit(taskStarted, {})
       },
+      scheduler,
       signal,
     })
 
@@ -1322,30 +1304,6 @@ async function prepareProject(project: NormalizedCliProjectConfig): Promise<Prep
   }
 }
 
-function resolveCappedConcurrency(
-  defaultConcurrency: number | undefined,
-  cliConcurrency: number | undefined,
-  fallback: number,
-): number {
-  const effectiveDefault = defaultConcurrency ?? fallback
-  if (cliConcurrency == null) {
-    return effectiveDefault
-  }
-
-  return Math.min(effectiveDefault, cliConcurrency)
-}
-
-function resolveCliRuntimeConcurrency(options: RunVievalCliOptions): TaskConcurrencyConfig | undefined {
-  if (options.attemptConcurrency == null && options.caseConcurrency == null) {
-    return undefined
-  }
-
-  return {
-    attempt: options.attemptConcurrency,
-    case: options.caseConcurrency,
-  }
-}
-
 function resolveExperimentId(
   options: RunVievalCliOptions,
   preparedProjects: readonly PreparedCliProjectResult[],
@@ -1366,66 +1324,43 @@ function resolveExperimentId(
   return sanitizeIdentitySegment(`matrix-${[...matrixRows].sort().join('--')}`)
 }
 
-function resolveOptionalRuntimeTaskConcurrency(
-  defaultConcurrency: number | undefined,
-  cliConcurrency: number | undefined,
-): number | undefined {
-  return cliConcurrency ?? defaultConcurrency
-}
-
+/**
+ * Resolves the pools of one project from its config.
+ *
+ * Before:
+ * - project `{ case: 2 }`, run-wide `{}`
+ * - project `{ case: 2 }`, run-wide `{ task: 4 }`
+ * - project `{}`, run-wide `{ case: 7 }`
+ *
+ * After:
+ * - `{ case: 2, task: 1 }`
+ * - `{ case: 2, task: undefined }`
+ * - `{ case: undefined, task: undefined }`
+ */
 function resolveProjectConcurrency(
   project: NormalizedCliProjectConfig,
-  options: RunVievalCliOptions,
-): number {
-  return resolveCappedConcurrency(project.concurrency?.project, options.projectConcurrency, Number.POSITIVE_INFINITY)
-}
-
-function resolveRuntimeTaskConcurrency(
-  taskConcurrency: TaskConcurrencyConfig | undefined,
-  project: NormalizedCliProjectConfig,
-  options: RunVievalCliOptions,
-): TaskConcurrencyConfig | undefined {
-  const attempt = resolveOptionalRuntimeTaskConcurrency(
-    taskConcurrency?.attempt ?? project.concurrency?.attempt,
-    options.attemptConcurrency,
-  )
-  const caseConcurrency = resolveOptionalRuntimeTaskConcurrency(
-    taskConcurrency?.case ?? project.concurrency?.case,
-    options.caseConcurrency,
-  )
-
-  if (attempt == null && caseConcurrency == null) {
-    return undefined
-  }
+  runConcurrency: SchedulerConcurrencyConfig,
+): CliProjectConcurrencyConfig {
+  // Without any declaration, tasks of one project run one after another. A run-wide task pool takes over that job,
+  // and so does a run-wide case pool: it already bounds the real work, and a one-task default would only make
+  // every task wait for the slowest case of the task before it.
+  const hasRunWidePool = runConcurrency.task != null || runConcurrency.case != null
 
   return {
-    attempt,
-    case: caseConcurrency,
+    case: project.scheduler?.concurrency?.case,
+    task: project.scheduler?.concurrency?.task ?? (hasRunWidePool ? undefined : 1),
   }
 }
 
-function resolveScheduledTaskConcurrency(
-  project: NormalizedCliProjectConfig,
+function resolveRunConcurrency(
+  config: SchedulerConcurrencyConfig | undefined,
   options: RunVievalCliOptions,
-): number {
-  return Math.min(
-    resolveProjectConcurrency(project, options),
-    resolveTaskConcurrency(project, options),
-  )
-}
-
-function resolveTaskConcurrency(
-  project: NormalizedCliProjectConfig,
-  options: RunVievalCliOptions,
-): number {
-  return resolveCappedConcurrency(project.concurrency?.task, options.taskConcurrency, 1)
-}
-
-function resolveWorkspaceConcurrency(
-  loadedConfig: Awaited<ReturnType<typeof loadVievalCliConfig>>,
-  options: RunVievalCliOptions,
-): number {
-  return resolveCappedConcurrency(loadedConfig.concurrency?.workspace, options.workspaceConcurrency, 1)
+): SchedulerConcurrencyConfig {
+  return {
+    case: smallestDeclared(config?.case, options.caseConcurrency),
+    project: smallestDeclared(config?.project, options.projectConcurrency) ?? 1,
+    task: smallestDeclared(config?.task, options.taskConcurrency),
+  }
 }
 
 function sanitizeIdentitySegment(value: string): string {
@@ -1448,6 +1383,14 @@ function shouldUseColor(): boolean {
   }
 
   return process.stdout.isTTY === true
+}
+
+function smallestDeclared(configured: number | undefined, cli: number | undefined): number | undefined {
+  if (configured == null || cli == null) {
+    return configured ?? cli
+  }
+
+  return Math.min(configured, cli)
 }
 
 /**

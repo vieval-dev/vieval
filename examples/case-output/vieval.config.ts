@@ -12,17 +12,19 @@ export default defineConfig({
   ],
   projects: [
     {
-      // All four cases of a matrix row run at the same time, so their logs interleave.
-      concurrency: {
-        case: 4,
-        task: 1,
-      },
       include: ['evals/**/*.eval.ts'],
       name: 'case-output',
       root: '.',
       runMatrix: {
         extend: {
           repeat: [1, 2],
+        },
+      },
+      // All four cases of a matrix row run at the same time, so their logs interleave.
+      scheduler: {
+        concurrency: {
+          case: 4,
+          task: 1,
         },
       },
     },

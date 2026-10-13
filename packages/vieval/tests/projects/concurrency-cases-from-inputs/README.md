@@ -5,5 +5,5 @@ This fixture demonstrates task-local bounded case execution with `casesFromInput
 ## What It Shows
 
 - one task generated from multiple inputs
-- per-group case concurrency set to `2`
+- a per-group case pool of `10`, shared only by the cases of that `casesFromInputs` call
 - a compact runnable example for `vieval run`

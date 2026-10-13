@@ -78,11 +78,6 @@ describe('loadVievalCliConfig', () => {
     await writeFile(
       configFilePath,
       JSON.stringify({
-        concurrency: {
-          case: 3,
-          task: 2,
-          workspace: 1,
-        },
         models: [
           {
             id: 'openai/gpt-5-mini',
@@ -120,20 +115,6 @@ describe('loadVievalCliConfig', () => {
     expect(loaded.projects.map(project => project.models.map(model => model.id))).toEqual([
       ['openai/gpt-5-mini'],
       ['openai/gpt-5-mini'],
-    ])
-    expect(loaded.projects.map(project => project.concurrency)).toEqual([
-      {
-        attempt: undefined,
-        case: 3,
-        project: undefined,
-        task: 2,
-      },
-      {
-        attempt: undefined,
-        case: 3,
-        project: undefined,
-        task: 2,
-      },
     ])
     expect(loaded.projects.map(project => project.reporters)).toEqual([
       ['./workspace-reporter.js'],
@@ -286,12 +267,12 @@ describe('loadVievalCliConfig', () => {
         '}',
         '',
         'export default {',
-        '  concurrency: { task: 4, workspace: 2 },',
+        '  scheduler: { concurrency: { task: 4 } },',
         '  models: [model("global:model")],',
         '  plugins: [topLevelModelPlugin],',
         '  projects: [',
         '    {',
-        '      concurrency: { case: 9 },',
+        '      scheduler: { concurrency: { case: 9 } },',
         '      name: "with-project-plugin",',
         '      plugins: [projectModelPlugin],',
         '    },',
@@ -326,11 +307,9 @@ describe('loadVievalCliConfig', () => {
       'explicit-project:model',
       'project-local:model',
     ])
-    expect(loaded.projects[0]?.concurrency).toEqual({
-      attempt: undefined,
+    expect(loaded.projects[0]?.scheduler?.concurrency).toEqual({
       case: 9,
-      project: undefined,
-      task: 4,
+      task: undefined,
     })
   })
 
@@ -418,7 +397,7 @@ describe('loadVievalCliConfig', () => {
     expect(loaded.projects[1]?.reporters).toEqual(['./custom-reporter.js'])
   })
 
-  it('merges project concurrency overrides with inherited top-level defaults field by field', async () => {
+  it('keeps top-level pools run-wide instead of copying them into projects', async () => {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-cli-config-'))
     temporaryDirectories.push(temporaryDirectory)
 
@@ -426,21 +405,26 @@ describe('loadVievalCliConfig', () => {
     await writeFile(
       configFilePath,
       JSON.stringify({
-        concurrency: {
-          attempt: 5,
-          case: 6,
-          project: 3,
-          task: 4,
-          workspace: 2,
-        },
         projects: [
           {
-            concurrency: {
-              case: 9,
-            },
             name: 'fixture-project',
+            scheduler: {
+              concurrency: {
+                case: 9,
+              },
+            },
+          },
+          {
+            name: 'plain-project',
           },
         ],
+        scheduler: {
+          concurrency: {
+            case: 6,
+            project: 3,
+            task: 4,
+          },
+        },
       }),
       'utf-8',
     )
@@ -449,19 +433,47 @@ describe('loadVievalCliConfig', () => {
       cwd: temporaryDirectory,
     })
 
-    expect(loaded.concurrency).toEqual({
-      attempt: 5,
+    expect(loaded.scheduler?.concurrency).toEqual({
       case: 6,
       project: 3,
       task: 4,
-      workspace: 2,
     })
-    expect(loaded.projects[0]?.concurrency).toEqual({
-      attempt: 5,
+    expect(loaded.projects[0]?.scheduler?.concurrency).toEqual({
       case: 9,
-      project: 3,
-      task: 4,
     })
+    expect(loaded.projects[1]?.scheduler).toBeUndefined()
+  })
+
+  it('loads scheduler middleware from the top-level config and projects', async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-cli-config-'))
+    temporaryDirectories.push(temporaryDirectory)
+
+    await writeFile(
+      join(temporaryDirectory, 'vieval.config.ts'),
+      [
+        'const rootMiddleware = { onAcquire: async (_context, next) => await next() }',
+        'const projectMiddleware = { onRelease: async (_context, next) => await next() }',
+        '',
+        'export default {',
+        '  scheduler: { middleware: [rootMiddleware] },',
+        '  projects: [',
+        '    { name: "with-middleware", scheduler: { middleware: [projectMiddleware] } },',
+        '    { name: "without-middleware" },',
+        '  ],',
+        '}',
+      ].join('\n'),
+      'utf-8',
+    )
+
+    const loaded = await loadVievalCliConfig({
+      cwd: temporaryDirectory,
+    })
+
+    expect(loaded.scheduler?.middleware).toHaveLength(1)
+    expect(loaded.scheduler?.middleware?.[0]?.onAcquire).toBeTypeOf('function')
+    expect(loaded.projects[0]?.scheduler?.middleware).toHaveLength(1)
+    expect(loaded.projects[0]?.scheduler?.middleware?.[0]?.onRelease).toBeTypeOf('function')
+    expect(loaded.projects[1]?.scheduler).toBeUndefined()
   })
 
   it('normalizes flat runMatrix shorthand to a layered extend object', async () => {
