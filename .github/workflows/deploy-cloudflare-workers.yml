@@ -24,6 +24,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          # The docs home page lists contributors from `git log`, which needs the full history.
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
 

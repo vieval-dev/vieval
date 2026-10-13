@@ -93,7 +93,8 @@ jobs:
         with:
           repository: ${{ steps.meta.outputs.REPO_FULL_NAME }}
           ref: ${{ steps.meta.outputs.HEAD_SHA }}
-          fetch-depth: 1
+          # The docs home page lists contributors from `git log`, which needs the full history.
+          fetch-depth: 0
           persist-credentials: false
 
       - uses: pnpm/action-setup@v4

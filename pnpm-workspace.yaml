@@ -2,6 +2,14 @@ catalogMode: prefer
 minimumReleaseAge: 0
 shellEmulator: true
 trustPolicy: no-downgrade
+# NOTICE:
+# `@nolebase/*@2.21.0` was published without a provenance attestation while `2.18.2` had one,
+# so `trustPolicy: no-downgrade` rejects it as a possible takeover (ERR_PNPM_TRUST_DOWNGRADE).
+# The maintainer confirmed the release; it was published outside the provenance-enabled release CI.
+# Removal condition: a `@nolebase/*` release with provenance is published and the catalog points to it.
+trustPolicyExclude:
+  - '@nolebase/ui@2.21.0'
+  - '@nolebase/vitepress-plugin-git-changelog@2.21.0'
 packages:
   - docs
   - packages/**
@@ -32,11 +40,12 @@ catalog:
   '@moeru/eventa': ^1.0.2
   '@moeru/std': 0.1.0-beta.17
   '@napi-rs/image': ^1.15.0
+  '@nolebase/vitepress-plugin-git-changelog': ^2.21.0
   '@opentelemetry/api': ^1.9.1
   '@pinia/colada': ^1.4.8
   '@pnpm/find-workspace-dir': ^1000.1.5
   '@proj-airi/unocss-preset-chromatic': ^1.1.5
-  '@shikijs/transformers': 3.23.0
+  '@shikijs/transformers': ^4.4.3
   '@tanstack/vue-virtual': ^3.13.41
   '@types/node': ^26.1.0
   '@unhead/vue': ^3.4.2
@@ -44,7 +53,7 @@ catalog:
   '@unocss/eslint-plugin': ^66.7.4
   '@unocss/reset': ^66.7.4
   '@vitejs/plugin-vue': ^6.0.10
-  '@voidzero-dev/vitepress-theme': ^4.8.4
+  '@voidzero-dev/vitepress-theme': ^5.0.7
   '@vue/tsconfig': ^0.9.1
   '@vueuse/core': ^15.0.0
   '@xsai-ext/providers': 0.5.0-beta.6
@@ -85,9 +94,9 @@ catalog:
   unplugin-raw: ^0.7.0
   unplugin-unused: ^0.5.7
   valibot: ^1.5.0
-  vite: ^8.1.3
+  vite: ^8.3.4
   vite-plugin-inspect: ^11.4.1
-  vitepress: 2.0.0-alpha.16
+  vitepress: 2.0.0-alpha.20
   vitest-browser-vue: ^3.1.0
   vue: ^3.5.43
   vue-tsc: ^3.3.13
