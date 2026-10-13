@@ -30,7 +30,7 @@ describe('progressPanel', () => {
    * expect(screen.getByTestId('progress-eta')).toHaveTextContent('5h 13m')
    */
   it('shows progress, ETA, and the current position of a running run', async () => {
-    const screen = await render(ProgressPanel, { props: { connection: 'open', eventCount: 3, receivedAt: Date.now(), snapshot } })
+    const screen = await render(ProgressPanel, { props: { connection: 'open', receivedAt: Date.now(), snapshot } })
     await expect.element(screen.getByTestId('progress-percent')).toHaveTextContent('16.8%')
     await expect.element(screen.getByTestId('progress-cases')).toHaveTextContent('58 / 345')
     await expect.element(screen.getByRole('progressbar', { name: 'Run progress' })).toHaveAttribute('aria-valuenow', '17')
@@ -44,7 +44,7 @@ describe('progressPanel', () => {
    * expect(screen.getByTestId('progress-eta')).toHaveTextContent('≥')
    */
   it('marks the ETA as a lower bound once auto attempts were seen', async () => {
-    const screen = await render(ProgressPanel, { props: { connection: 'open', eventCount: 0, receivedAt: Date.now(), snapshot: { ...snapshot, progress: { ...snapshot.progress, lowerBound: true } } } })
+    const screen = await render(ProgressPanel, { props: { connection: 'open', receivedAt: Date.now(), snapshot: { ...snapshot, progress: { ...snapshot.progress, lowerBound: true } } } })
     await expect.element(screen.getByTestId('progress-eta')).toHaveTextContent('≥ 5h 13m')
   })
 })
