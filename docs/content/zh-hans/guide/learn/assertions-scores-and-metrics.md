@@ -75,6 +75,39 @@ describeTask('retrieval', ({ caseOf }) => {
 
 指标用于筛选、分组和诊断报告。单独记录指标不会让用例通过或失败，也不会提高任务汇总分数。
 
+## 给指标起一个易读的名字
+
+viewer 会按原样显示 `osworld.model.usage.output_tokens` 这类指标名。用 `defineMetric` 定义一次指标，就可以给它加上名称（label）、说明（description）、单位（unit）和方向（better）。名称和说明可以是一个字符串，也可以按 BCP 47 语言标签各写一份；viewer 会按读者的语言选择，找不到时依次回退到 `en` 和第一项。
+
+::: code-group
+```ts [evals/agent.eval.ts]
+import { defineMetric, describeTask } from 'vieval'
+
+const steps = defineMetric('agent.steps', {
+  better: 'lower',
+  description: {
+    'en': 'Tool calls the agent made before it stopped.',
+    'zh-Hans': 'agent 停下之前调用工具的次数。',
+  },
+  label: { 'en': 'Agent steps', 'zh-Hans': 'Agent 步数' },
+  unit: 'steps',
+})
+
+describeTask('agent', ({ caseOf }) => {
+  caseOf('opens settings', async ({ recordMetric }) => {
+    const result = await runAgent()
+    recordMetric(steps, result.steps.length)
+    // 也可以在记录时直接传元数据，它会逐个字段覆盖定义里的值。
+    recordMetric('agent.retries', result.retries, { better: 'lower', label: '重试次数' })
+  })
+})
+```
+:::
+
+第一个带有元数据的值会为当前任务发出一个 `metric.defined` 事件。相同的元数据不会重复发出，元数据变化时会再发一次。每个指标名最好只保留一套元数据，因为 viewer 只显示最新的一套。在 viewer 里，鼠标悬停在指标上，可以看到它的名称、原始指标名、说明、单位、方向，以及它在这个任务所有用例中的取值分布。
+
+`recordArtifact` 也接受同样格式的 `label` 和 `description`，例如 `recordArtifact('final.webp', { contentType: 'image/webp', path, label: { 'en': 'Final screen', 'zh-Hans': '最终画面' } })`。
+
 ## 使用评分标准断言
 
 `vieval/core/assertions` 提供 `expectRubric` 和 `evaluateAssertions`。`expectRubric` 用来创建断言；当 `evaluateAssertions` 执行该断言时，它会调用 `judge`，将返回的分数限制在 `0..1` 之间，再用 `minScore` 判断是否通过，最后返回结构化的 `AssertionOutcome`：

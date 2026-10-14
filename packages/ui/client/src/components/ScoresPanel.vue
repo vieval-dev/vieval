@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { RunSnapshot } from '../../../src/shared/contract'
+import type { MetricDefinition, RunSnapshot } from '../../../src/shared/contract'
 import type { BarDatum } from './BarChart.vue'
 import type { LinePoint } from './LineChart.vue'
 
@@ -9,11 +9,13 @@ import { computed, reactive, watch } from 'vue'
 import BarChart from './BarChart.vue'
 import CountsBar from './CountsBar.vue'
 import LineChart from './LineChart.vue'
+import MetricInfo from './MetricInfo.vue'
 import StateView from './StateView.vue'
 
 import { api } from '../api'
 import { formatScore, previewValue } from '../format'
 import { levelIcons } from '../hierarchy'
+import { localize } from '../localize'
 import { href } from '../router'
 
 /**
@@ -53,6 +55,8 @@ function toggleMetric(name: string): void {
   if (!expanded.delete(name))
     expanded.add(name)
 }
+const definitions = computed(() => new Map<string, MetricDefinition>((metrics.data.value?.definitions ?? []).map(definition => [definition.name, definition])))
+const labelOf = (name: string) => localize(definitions.value.get(name)?.label) ?? name
 const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric => ({
   ...metric,
   points: metric.points.map<LinePoint>((point, index) => ({ label: `#${index + 1} ${point.caseId ?? ''}`, x: index, y: point.value as number })),
@@ -161,7 +165,13 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
         </h2>
         <div :class="['grid gap-4 p-3']" style="grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr))">
           <div v-for="metric in numeric" :key="metric.name">
-            <LineChart :name="metric.name" :points="metric.points" />
+            <LineChart :name="metric.name" :points="metric.points">
+              <template #caption>
+                <MetricInfo :name="metric.name" :definition="definitions.get(metric.name)" :values="metric.points.map(point => point.y)">
+                  <span :class="['cursor-help underline decoration-dotted decoration-neutral-400/60 underline-offset-2']">{{ labelOf(metric.name) }}</span>
+                </MetricInfo>
+              </template>
+            </LineChart>
             <div class="text-xs muted tabular-nums">
               n={{ metric.summary.count }} · min {{ metric.summary.min }} · avg {{ Math.round(metric.summary.avg * 1000) / 1000 }} · max {{ metric.summary.max }}
             </div>
@@ -182,7 +192,9 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
               @click="toggleMetric(metric.name)"
             >
               <span :class="['i-mingcute-right-line shrink-0 muted transition-transform', expanded.has(metric.name) && 'rotate-90']" aria-hidden="true" />
-              <span :class="['mono whitespace-nowrap']">{{ metric.name }}</span>
+              <MetricInfo :name="metric.name" :definition="definitions.get(metric.name)" :values="metric.values.map(entry => entry.value)">
+                <span :class="['whitespace-nowrap cursor-help', definitions.get(metric.name)?.label == null && 'mono']">{{ labelOf(metric.name) }}</span>
+              </MetricInfo>
               <span :class="['mono muted shrink-0']">{{ metric.values.length }}×</span>
               <span v-if="!expanded.has(metric.name)" :class="['mono truncate min-w-0 muted']">{{ distinctPreview(metric.values) }}</span>
             </button>

@@ -4,6 +4,7 @@ import type { Scheduler } from '../core/scheduler/types'
 import type { TelemetryAttributeValue } from '../core/telemetry'
 import type { RunEventDefinition, RunEventEmitter } from '../events'
 import type { RecordArtifactOptions } from './case-artifacts'
+import type { MetricAnnouncements, MetricDefinition, MetricMetadata } from './metrics'
 
 import { errorMessageFrom, sleep } from '@moeru/std'
 
@@ -11,8 +12,9 @@ import { defineEval, defineTask } from '../config'
 import { runWithCaseOutput } from '../core/runner/case-output'
 import { createScheduler } from '../core/scheduler/runtime'
 import { createNoopTelemetryRuntime } from '../core/telemetry'
-import { artifactRecorded, caseEnded, caseOutput, caseStarted, metricRecorded, scoreRecorded } from '../events'
+import { artifactRecorded, caseEnded, caseOutput, caseStarted, metricDefined, metricRecorded, scoreRecorded } from '../events'
 import { createCaseArtifacts } from './case-artifacts'
+import { createMetricAnnouncements } from './metrics'
 import { registerEvalDefinition } from './registry'
 
 /**
@@ -68,10 +70,16 @@ export interface CaseRunContext<TInput> extends TaskRunContext {
    * - tasks need structured benchmark metadata beyond exact/judge score families
    *
    * Expects:
-   * - `name` to be a stable metric identifier
+   * - `metric` to be a stable metric name, or a definition from `defineMetric`
    * - `value` to be JSON-serializable
+   * - `metadata` (optional) to label, describe, or give a unit to the metric; it overrides the fields of a
+   *   definition one by one. Keep one set of metadata per metric name: viewers show the latest announced one.
+   *
+   * Returns:
+   * - nothing; emits `metric.defined` first when the metadata is new or changed for this task, then
+   *   `metric.recorded`
    */
-  recordMetric: (name: string, value: TelemetryAttributeValue) => void
+  recordMetric: (metric: MetricDefinition | string, value: TelemetryAttributeValue, metadata?: MetricMetadata) => void
   /**
    * Records a custom normalized value for one case score family, replacing an earlier value of the same kind.
    *
@@ -467,6 +475,24 @@ function resolveCaseExecutionPolicy(
   }
 }
 
+/**
+ * Metric announcements of each running task, keyed by the task's run context.
+ *
+ * NOTICE:
+ * Every case of one task run receives the same `TaskRunContext` object, so it identifies the task run without
+ * threading a tracker through the attempt, retry, and case helpers. A `WeakMap` drops the tracker with the context.
+ */
+const metricAnnouncementsByTask = new WeakMap<TaskRunContext, MetricAnnouncements>()
+
+function metricAnnouncementsOf(context: TaskRunContext): MetricAnnouncements {
+  let announcements = metricAnnouncementsByTask.get(context)
+  if (announcements == null) {
+    announcements = createMetricAnnouncements()
+    metricAnnouncementsByTask.set(context, announcements)
+  }
+  return announcements
+}
+
 async function runCaseOnce(
   context: TaskRunContext,
   taskCase: RegisteredCase<unknown>,
@@ -530,11 +556,15 @@ async function runCaseOnce(
 
           emitSafely(events, artifactRecorded, await artifacts.record(name, options))
         },
-        recordMetric(name, value) {
+        recordMetric(metric, value, metadata) {
           if (abortController.signal.aborted || settled) {
             return
           }
 
+          const { defined, name } = metricAnnouncementsOf(context).resolve(metric, metadata)
+          // Metadata belongs to the task, not to this case, so it is announced without the case id.
+          if (defined != null)
+            emitSafely(context.events, metricDefined, defined)
           emitSafely(events, metricRecorded, { name, value })
           telemetry.addEvent('vieval.case.metric', { name, value })
           if (canAttachMetricAsAttribute(value)) {

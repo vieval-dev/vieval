@@ -61,10 +61,10 @@ dropped (duplicates); missing numbers are counted in `seqGaps`; invalid lines in
 | `GET /api/runs/:runKey/events?after=<seq>&limit=<1..5000>` | `{ events, nextAfter, seq }` | Raw envelopes after `after` (default 0, limit default 1000). |
 | `GET /api/runs/:runKey/stream?after=<seq>` | `text/event-stream` | See "Live updates". `Last-Event-ID` is honored. |
 | `GET /api/runs/:runKey/task?taskId=` | `TaskNode` | |
-| `GET /api/runs/:runKey/case?taskId=&caseId=` | `CaseDetail` | Node + `input`, `output`, `metrics`, `artifacts`, `evidence`, `inference` (inference and tool-call events), `taskDisplayName`. |
+| `GET /api/runs/:runKey/case?taskId=&caseId=` | `CaseDetail` | Node + `input`, `output`, `metrics`, `metricDefinitions` (latest `metric.defined` of each metric), `artifacts` (with `label` / `description` when recorded), `evidence`, `inference` (inference and tool-call events), `taskDisplayName`. |
 | `GET /api/runs/:runKey/timeline?taskId=&caseId=` | `TimelineResponse` | Every try with round, retry index, times, state; per task a summary per round (passed/failed/running, start/end). |
 | `GET /api/runs/:runKey/logs?taskId=&caseId=&stream=stdout\|stderr&round=&offset=&limit=<1..5000>` | `LogsResponse` | Console output of cases (`case.output`), split into lines. Output outside cases is not recorded by vieval. |
-| `GET /api/runs/:runKey/metrics?taskId=&caseId=` | `MetricsResponse` | Numeric metrics as series with `min/max/avg/sum/count`; other values listed; inference totals. |
+| `GET /api/runs/:runKey/metrics?taskId=&caseId=` | `MetricsResponse` | Numeric metrics as series with `min/max/avg/sum/count`; other values listed; `definitions`: the latest `metric.defined` (label, description, unit, better) of each listed metric; inference totals. |
 | `GET /api/runs/:runKey/scores` | `ScoresResponse` | `overall`, `byTask`, `byRound`, `cases`, `summary` (from `run-summary.json`). |
 
 **Score rule** (same as `describeTask`): every settled round of every case contributes; a case that did not pass

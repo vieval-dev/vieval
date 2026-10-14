@@ -39,6 +39,7 @@ export async function buildCaseDetail(handle: RunHandle, evidence: EvidenceServi
     evidence: links,
     inference: reduced.inference.map(entry => ({ ...entry })),
     input: reduced.input,
+    metricDefinitions: definitionsOf(reducer, reduced.metrics.map(metric => metric.name)),
     metrics: [...reduced.metrics],
     output: lastRound?.output,
     taskDisplayName: reducer.tasks.get(taskId)?.displayName ?? taskId,
@@ -78,6 +79,7 @@ export function buildMetrics(handle: RunHandle, filter: { caseId?: string, taskI
   const cases = [...reducer.cases.values()].filter(reduced => (filter.taskId == null || reduced.taskId === filter.taskId) && (filter.caseId == null || reduced.caseId === filter.caseId))
   const inference = sumInference(cases.flatMap(reduced => reduced.inference))
   return {
+    definitions: definitionsOf(reducer, [...numeric.keys(), ...nonNumeric.keys()]),
     inference,
     nonNumeric: [...nonNumeric].map(([name, values]) => ({ name, values })).sort((left, right) => left.name.localeCompare(right.name)),
     numeric: [...numeric].map(([name, points]) => {
@@ -279,6 +281,8 @@ export async function listArtifacts(handle: RunHandle, filter: { caseId?: string
       descriptors.push({
         caseId: artifact.caseId,
         contentType: artifact.contentType,
+        description: artifact.description,
+        label: artifact.label,
         name: artifact.name,
         path: artifact.path,
         previewKind: classifyPreview(artifact.contentType, artifact.path),
@@ -315,4 +319,12 @@ export async function listArtifacts(handle: RunHandle, filter: { caseId?: string
 export function normalizePathSegment(value: string): string {
   const segment = value.replace(/[^\w.-]+/g, '-')
   return /^\.*$/.test(segment) ? '-' : segment
+}
+
+/** Latest `metric.defined` of each named metric that has one, in name order. */
+function definitionsOf(reducer: ReturnType<RunHandle['reducer']>, names: Iterable<string>): MetricsResponse['definitions'] {
+  return [...new Set(names)].sort().flatMap((name) => {
+    const definition = reducer.metricDefinitions.get(name)
+    return definition == null ? [] : [{ ...definition }]
+  })
 }

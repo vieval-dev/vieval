@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { RunListItem } from '../../../src/shared/contract'
+import type { MetricDefinition, RunListItem } from '../../../src/shared/contract'
 import type { ViewTab } from '../components/ViewTabs.vue'
 import type { Route } from '../router'
 
@@ -11,6 +11,7 @@ import CaseTimeline from '../components/CaseTimeline.vue'
 import EvidencePanel from '../components/EvidencePanel.vue'
 import InferencePanel from '../components/InferencePanel.vue'
 import LogView from '../components/LogView.vue'
+import MetricInfo from '../components/MetricInfo.vue'
 import ObjectTree from '../components/ObjectTree.vue'
 import PageHeader from '../components/PageHeader.vue'
 import StateBadge from '../components/StateBadge.vue'
@@ -21,6 +22,7 @@ import { api } from '../api'
 import { useRunLive } from '../composables/useRunLive'
 import { useStatusFavicon } from '../composables/useStatusFavicon'
 import { formatDateTime, formatDuration, formatScore, formatTime, previewValue } from '../format'
+import { localize } from '../localize'
 import { href, navigate } from '../router'
 import { runSwitcherOptions } from '../switcher'
 
@@ -36,6 +38,17 @@ const detail = useQuery({
   key: () => ['runs', props.route.runKey, 'case', props.route.taskId, props.route.caseId],
   query: () => api.case(props.route.runKey, ref.value),
 })
+// Every case's metrics of this task, for the distribution behind each metric of this case (shared with the task page).
+const taskMetrics = useQuery({
+  key: () => ['runs', props.route.runKey, 'task', props.route.taskId, 'metrics'],
+  query: () => api.metrics(props.route.runKey, { taskId: props.route.taskId }),
+})
+const definitions = computed(() => new Map<string, MetricDefinition>((detail.data.value?.metricDefinitions ?? []).map(definition => [definition.name, definition])))
+const labelOf = (name: string) => localize(definitions.value.get(name)?.label) ?? name
+function taskValuesOf(name: string): unknown[] {
+  const data = taskMetrics.data.value
+  return [...(data?.numeric.find(series => series.name === name)?.points ?? []), ...(data?.nonNumeric.find(series => series.name === name)?.values ?? [])].map(entry => entry.value)
+}
 const timeline = useQuery({
   key: () => ['runs', props.route.runKey, 'case', props.route.taskId, props.route.caseId, 'timeline'],
   query: () => api.timeline(props.route.runKey, ref.value),
@@ -152,8 +165,10 @@ const running = computed(() => detail.data.value?.state === 'running')
                       <td :class="['td mono text-xs muted whitespace-nowrap max-md:hidden']">
                         {{ formatTime(metric.time) }}
                       </td>
-                      <td :class="['td mono text-xs whitespace-nowrap', 'max-md:(flex-1 min-w-0 truncate py-0.5 font-medium)']">
-                        {{ metric.name }}
+                      <td :class="['td text-xs whitespace-nowrap', definitions.get(metric.name)?.label == null && 'mono', 'max-md:(flex-1 min-w-0 truncate py-0.5 font-medium)']">
+                        <MetricInfo :name="metric.name" :definition="definitions.get(metric.name)" :values="taskValuesOf(metric.name)" :current="typeof metric.value === 'number' || typeof metric.value === 'string' ? metric.value : typeof metric.value === 'boolean' ? String(metric.value) : undefined">
+                          <span :class="['cursor-help']">{{ labelOf(metric.name) }}</span>
+                        </MetricInfo>
                       </td>
                       <td :class="['td mono text-xs break-all', 'max-md:(order-last basis-full py-0.5)']">
                         {{ previewValue(metric.value, 200) }}

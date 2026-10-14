@@ -11,6 +11,7 @@ import * as v from 'valibot'
 import { createRunEventBus } from '../core/runner/event-bus'
 import { createScheduler } from '../core/scheduler/runtime'
 import { caseEnded, caseEndedDataSchema, caseStarted, caseStartedDataSchema, metricRecorded, scoreRecorded } from '../events'
+import { defineMetric } from './metrics'
 import { caseOf, casesFromInputs, describeEval, describeTask } from './task'
 
 function createDeferredPromise() {
@@ -430,6 +431,47 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
         event: 'metric.recorded',
       },
     ])
+  })
+
+  /**
+   * @example
+   * expect(events.filter(event => event.event === 'metric.defined')).toEqual([...])
+   */
+  it('announces metric metadata once per task, again when it changes, before the values', async () => {
+    const events: Array<{ caseId?: string, data: unknown, event: string }> = []
+    const steps = defineMetric('agent.steps', { label: { 'en': 'Agent steps', 'zh-Hans': 'Agent 步数' }, unit: 'steps' })
+
+    const taskDefinition = describeTask('dsl-case-metric-definitions', () => {
+      caseOf('case-1', (context) => {
+        context.recordMetric(steps, 3)
+        context.recordMetric('plain', 1)
+      }, { input: {} })
+      caseOf('case-2', (context) => {
+        context.recordMetric(steps, 5)
+        // Inline metadata overrides the definition field by field, so the metric is announced again.
+        context.recordMetric(steps, 6, { better: 'lower' })
+      }, { input: {} })
+    }, { concurrency: { case: 1 } })
+
+    await taskDefinition.task?.run({
+      cache: createTestTaskCacheRuntime(),
+      events: createTestRunEvents({
+        onAny: envelope => events.push(toEmitted(envelope)),
+      }),
+      models: createTestModels(),
+      task: {
+        entry: { description: 'd', directory: 'x', filePath: '/tmp/x.eval.ts', id: 'x', name: 'x' },
+        id: 'x',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: { eval: {}, meta: { evalRowId: 'default', runRowId: 'default' }, run: {} },
+      },
+    })
+
+    const metricEvents = events.filter(event => event.event.startsWith('metric.'))
+    expect(metricEvents.map(event => event.event)).toEqual(['metric.defined', 'metric.recorded', 'metric.recorded', 'metric.recorded', 'metric.defined', 'metric.recorded'])
+    expect(metricEvents[0]).toEqual({ data: { label: { 'en': 'Agent steps', 'zh-Hans': 'Agent 步数' }, name: 'agent.steps', unit: 'steps' }, event: 'metric.defined' })
+    expect(metricEvents[4]!.data).toEqual({ better: 'lower', label: { 'en': 'Agent steps', 'zh-Hans': 'Agent 步数' }, name: 'agent.steps', unit: 'steps' })
+    expect(metricEvents[5]).toEqual({ caseId: '1:case-2', data: { name: 'agent.steps', value: 6 }, event: 'metric.recorded' })
   })
 
   it('isolates throwing run event subscribers from case score and metric calls', async () => {

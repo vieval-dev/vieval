@@ -1,4 +1,4 @@
-import type { ArtifactRecordedData } from '../events'
+import type { ArtifactRecordedData, LocalizedText } from '../events'
 
 import { mkdirSync, mkdtempSync } from 'node:fs'
 import { copyFile, stat, writeFile } from 'node:fs/promises'
@@ -33,6 +33,14 @@ export interface RecordArtifactOptions {
    * MIME type of the artifact, for example `image/webp` or `application/json`.
    */
   contentType: string
+  /**
+   * What the file shows, for people browsing the case: one string, or one per BCP 47 locale.
+   */
+  description?: LocalizedText
+  /**
+   * Human-readable name shown instead of `name`: one string, or one per BCP 47 locale.
+   */
+  label?: LocalizedText
   /**
    * Existing file to record. A file inside the case artifacts directory is recorded by reference;
    * a file outside it is copied in as `<name>`, so the report directory stays self-contained.
@@ -103,6 +111,8 @@ export function createCaseArtifacts(artifactsRoot: string | undefined, taskId: s
 
       return {
         contentType: options.contentType,
+        ...(options.description == null ? {} : { description: options.description }),
+        ...(options.label == null ? {} : { label: options.label }),
         name,
         path: relative(root(), filePath).split('\\').join('/'),
         ...(options.purpose == null ? {} : { purpose: options.purpose }),

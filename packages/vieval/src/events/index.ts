@@ -24,7 +24,8 @@ export { defineEventa } from '@moeru/eventa'
  *   keep accepting newer logs (payload schemas ignore unknown keys, and readers skip unknown events)
  * - renaming, removing, or retyping an envelope or payload field bumps the version
  *
- * Optional fields added within version 2: `case.started` / `case.ended` `attemptIndex` and `autoAttempt`.
+ * Optional fields added within version 2: `case.started` / `case.ended` `attemptIndex` and `autoAttempt`;
+ * `artifact.recorded` `label` and `description`. Events added within version 2: `metric.defined`.
  */
 export const RUN_EVENT_SCHEMA_VERSION = 2
 
@@ -208,6 +209,26 @@ export const caseOutputDataSchema = v.object({
   stream: v.picklist(['stderr', 'stdout']),
 })
 
+/**
+ * Text shown to people: one string, or one string per BCP 47 locale (`{ en: 'Steps', 'zh-Hans': '步数' }`).
+ * Viewers pick the locale closest to the reader's language and fall back to `en`, then to the first entry.
+ */
+export const localizedTextSchema = v.union([v.string(), v.record(v.string(), v.string())])
+
+/** Payload of {@link metricDefined}. */
+export const metricDefinedDataSchema = v.object({
+  /** Whether a larger value is the better outcome (`higher`), or a smaller one (`lower`). */
+  better: v.optional(v.picklist(['higher', 'lower'])),
+  /** What the metric measures and how to read it. */
+  description: v.optional(localizedTextSchema),
+  /** Human-readable name shown instead of `name`. */
+  label: v.optional(localizedTextSchema),
+  /** Metric name, the same as in `metric.recorded`. */
+  name: v.string(),
+  /** Unit of numeric values, for example `s`, `tokens`, or `%`. */
+  unit: v.optional(v.string()),
+})
+
 /** Payload of {@link metricRecorded}. */
 export const metricRecordedDataSchema = v.object({
   name: v.string(),
@@ -223,6 +244,10 @@ export const scoreRecordedDataSchema = v.object({
 /** Payload of {@link artifactRecorded}. */
 export const artifactRecordedDataSchema = v.object({
   contentType: v.string(),
+  /** What the file shows, for people browsing the case. */
+  description: v.optional(localizedTextSchema),
+  /** Human-readable name shown instead of `name`. */
+  label: v.optional(localizedTextSchema),
   name: v.string(),
   /** Path relative to the run's artifacts root (`<reportDirectory>/artifacts`), with `/` separators. */
   path: v.string(),
@@ -270,6 +295,8 @@ export type CaseStartedData = v.InferOutput<typeof caseStartedDataSchema>
 export type InferenceFailedData = v.InferOutput<typeof inferenceFailedDataSchema>
 export type InferenceRequestedData = v.InferOutput<typeof inferenceRequestedDataSchema>
 export type InferenceRespondedData = v.InferOutput<typeof inferenceRespondedDataSchema>
+export type LocalizedText = v.InferOutput<typeof localizedTextSchema>
+export type MetricDefinedData = v.InferOutput<typeof metricDefinedDataSchema>
 export type MetricRecordedData = v.InferOutput<typeof metricRecordedDataSchema>
 export type ProjectEndedData = v.InferOutput<typeof projectEndedDataSchema>
 export type ProjectStartedData = v.InferOutput<typeof projectStartedDataSchema>
@@ -307,6 +334,11 @@ export const caseStarted = defineEventa<CaseStartedData>('case.started')
 export const caseEnded = defineEventa<CaseEndedData>('case.ended')
 /** One chunk written to `process.stdout` / `process.stderr` while the case ran. */
 export const caseOutput = defineEventa<CaseOutputData>('case.output')
+/**
+ * Labels, description, unit, and direction of one metric; emitted by its task before the first value that carries
+ * them, and again when they change. Viewers keep the latest per metric name.
+ */
+export const metricDefined = defineEventa<MetricDefinedData>('metric.defined')
 /** Case code recorded one metric. */
 export const metricRecorded = defineEventa<MetricRecordedData>('metric.recorded')
 /** Case code recorded one score. */

@@ -74,7 +74,10 @@ function onMove(event: MouseEvent): void {
 <template>
   <figure ref="root" :class="['relative w-full']" data-testid="line-chart">
     <figcaption :class="['text-xs font-medium mb-0.5']">
-      {{ props.name }}
+      <!-- Callers may replace the caption, for example with a metric's label and hover card. -->
+      <slot name="caption">
+        {{ props.name }}
+      </slot>
     </figcaption>
     <svg :viewBox="`0 0 ${width} ${props.height}`" :class="['w-full h-auto']" role="img" :aria-label="`Line chart of ${props.name}`" @mousemove="onMove" @mouseleave="hover = undefined">
       <line v-for="fraction in [0, 0.5, 1]" :key="fraction" :x1="pad.left" :x2="width - pad.right" :y1="sy(bounds.minY + (bounds.maxY - bounds.minY) * fraction)" :y2="sy(bounds.minY + (bounds.maxY - bounds.minY) * fraction)" stroke="var(--chart-grid)" />

@@ -69,6 +69,37 @@ Task-result aggregation and persisted report records have different timing. If a
 
 Metrics are evidence for filtering, grouping, and diagnosing reports. A metric alone never makes a case pass, fail, or receive a higher aggregate score.
 
+## Give metrics a readable name
+
+The viewer shows metric names such as `osworld.model.usage.output_tokens` as they are. Declare the metric once with `defineMetric` to give it a label, a description, a unit, and a direction. Label and description take one string, or one string per BCP 47 locale; the viewer picks the reader's language and falls back to `en`, then to the first entry.
+
+```ts [evals/agent.eval.ts]
+import { defineMetric, describeTask } from 'vieval'
+
+const steps = defineMetric('agent.steps', {
+  better: 'lower',
+  description: {
+    'en': 'Tool calls the agent made before it stopped.',
+    'zh-Hans': 'agent 停下之前调用工具的次数。',
+  },
+  label: { 'en': 'Agent steps', 'zh-Hans': 'Agent 步数' },
+  unit: 'steps',
+})
+
+describeTask('agent', ({ caseOf }) => {
+  caseOf('opens settings', async ({ recordMetric }) => {
+    const result = await runAgent()
+    recordMetric(steps, result.steps.length)
+    // Metadata can also be passed inline; it overrides the definition field by field.
+    recordMetric('agent.retries', result.retries, { better: 'lower', label: 'Retries' })
+  })
+})
+```
+
+The first value that carries metadata emits a `metric.defined` event for the task; the same metadata is not emitted again, and changed metadata is emitted again. Keep one set of metadata per metric name: the viewer shows the latest one. In the viewer, hovering a metric shows its label, name, description, unit, direction, and the distribution of its values across the task's cases.
+
+`recordArtifact` takes `label` and `description` in the same shape, for example `recordArtifact('final.webp', { contentType: 'image/webp', path, label: { 'en': 'Final screen', 'zh-Hans': '最终画面' } })`.
+
 ## Use rubric assertions deliberately
 
 The public `vieval/core/assertions` entrypoint includes `expectRubric` and `evaluateAssertions`. `expectRubric` creates an assertion. When evaluated, for example by `evaluateAssertions`, that assertion calls the `judge` function you provide, clamps its returned score to `0..1`, applies `minScore`, and produces a structured `AssertionOutcome`:
