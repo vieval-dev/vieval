@@ -91,6 +91,12 @@ Concise but detailed reference for contributors working in the `vieval-dev/vieva
 - **When adding or updating components in `packages/ui`**, update [`docs/ai/context/ui-components.md`](docs/ai/context/ui-components.md) to reflect the change (props, slots, emits, description).
 - Use Iconify icon sets; avoid bespoke SVGs.
 - Animations: keep intuitive, lively, and readable.
+- Viewer UI (`packages/ui/client`) floating surfaces reuse the existing wrappers, never a bare reka-ui content or a new look:
+  - Menus, popovers, and hover cards: reka-ui `DropdownMenuContent` / `PopoverContent` / `HoverCardContent` with `as-child`, wrapping `AnimatedContent` (`components/AnimatedContent.vue`, the open/close motion ported from airi), styled with the `floating` / `floating-arrow` shortcuts. Follow `CompareMenu.vue` and `HuePicker.vue`. When the content scrolls, scroll an inner element: `AnimatedContent` clips its own root.
+  - One-line hints: reka-ui `Tooltip` with the `tooltip` / `tooltip-arrow` shortcuts (animated in `styles.css`).
+  - Phones: bottom sheets use vaul-vue `Drawer` (as in airi's Live2D report modal) on the same `floating` surface; share the body component between the desktop popover and the phone drawer.
+  - In-page choices use reka-ui (`DropdownMenuRadioGroup` for one of many), not native `<select>`.
+- Before adding a UnoCSS shortcut or keyframes, search `packages/ui/uno.config.ts` and `client/src/styles.css` for one with the same role and reuse it; do not add near-duplicates (a second "floating card" shortcut, a second fade).
 - `useDark` (VueUse): set `disableTransition: false` or use existing composables in `packages/ui`.
 
 ## Testing Practices

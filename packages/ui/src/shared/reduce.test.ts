@@ -32,6 +32,21 @@ describe('createRunReducer', () => {
     expect([...reducer.projects.keys()]).toEqual(['demo'])
   })
 
+  /**
+   * @example
+   * expect(reducer.metricDefinitions.get('agent.steps')).toEqual({ better: 'lower', label: { en: 'Agent steps' }, name: 'agent.steps', unit: 'steps' })
+   */
+  it('keeps the latest metric definition per name and drops malformed text', () => {
+    const envelope = createEnvelopeFactory()
+    const reducer = createRunReducer()
+    reducer.apply(envelope('metric.defined', { label: 'Steps', name: 'agent.steps' }, scope()))
+    reducer.apply(envelope('metric.defined', { better: 'lower', description: 42, label: { en: 'Agent steps', zh: 7 }, name: 'agent.steps', unit: 'steps' }, scope()))
+    reducer.apply(envelope('artifact.recorded', { contentType: 'image/webp', label: { 'zh-Hans': '最终画面' }, name: 'final.webp', path: 'a/final.webp', size: 1 }, scope('0:chrome%2Fa')))
+
+    expect(reducer.metricDefinitions.get('agent.steps')).toEqual({ better: 'lower', label: { en: 'Agent steps' }, name: 'agent.steps', unit: 'steps' })
+    expect(reducer.cases.get(`${TASK}\u00000:chrome%2Fa`)?.artifacts[0]?.label).toEqual({ 'zh-Hans': '最终画面' })
+  })
+
   // Event order observed in a real run with autoAttempt and autoRetry (design doc 1.5, `/tmp/vv-attempt-probe`):
   // the log carries no attemptIndex, so rounds are inferred from repeated `case.started` with retryIndex 0.
   it('infers auto attempt rounds and marks failed retries as retried', () => {

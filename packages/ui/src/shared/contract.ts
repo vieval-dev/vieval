@@ -13,6 +13,8 @@
  * - `retryIndex` is an immediate retry of one case inside one round (`autoRetry`).
  */
 
+import { localizedTextSchema, metricDefinedDataSchema } from 'vieval/events'
+
 import * as v from 'valibot'
 
 /** Version of this contract, reported by `GET /api/health`. */
@@ -331,6 +333,10 @@ export const metricEntrySchema = v.object({
 export const artifactDescriptorSchema = v.object({
   caseId: v.optional(v.string()),
   contentType: v.string(),
+  /** What the file shows, from `recordArtifact(…, { description })`. */
+  description: v.optional(localizedTextSchema),
+  /** Human-readable name shown instead of `name`, from `recordArtifact(…, { label })`. */
+  label: v.optional(localizedTextSchema),
   name: v.string(),
   /** Path relative to the run's artifacts root; pass it to `/artifacts/raw?path=`. */
   path: v.string(),
@@ -374,6 +380,8 @@ export const caseDetailSchema = v.object({
     time: v.string(),
   })),
   input: v.optional(v.unknown()),
+  /** Latest `metric.defined` of each metric this case recorded (label, description, unit, direction). */
+  metricDefinitions: v.array(metricDefinedDataSchema),
   metrics: v.array(metricEntrySchema),
   output: v.optional(v.unknown()),
   taskDisplayName: v.string(),
@@ -427,6 +435,8 @@ export const logsResponseSchema = v.object({
 })
 
 export const metricsResponseSchema = v.object({
+  /** Latest `metric.defined` of each metric in this response (label, description, unit, direction). */
+  definitions: v.array(metricDefinedDataSchema),
   inference: v.object({
     failed: v.number(),
     requests: v.number(),
@@ -719,6 +729,7 @@ export type LogLine = v.InferOutput<typeof logLineSchema>
 export type LogsResponse = v.InferOutput<typeof logsResponseSchema>
 export type MatrixCell = v.InferOutput<typeof matrixCellSchema>
 export type MatrixResponse = v.InferOutput<typeof matrixResponseSchema>
+export type MetricDefinition = v.InferOutput<typeof metricDefinedDataSchema>
 export type MetricEntry = v.InferOutput<typeof metricEntrySchema>
 export type MetricsResponse = v.InferOutput<typeof metricsResponseSchema>
 export type OtelLogsResponse = v.InferOutput<typeof otelLogsResponseSchema>

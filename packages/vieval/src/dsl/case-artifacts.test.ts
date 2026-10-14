@@ -79,6 +79,25 @@ describe('createCaseArtifacts', () => {
 
   /**
    * @example
+   * expect(recorded.label).toEqual({ 'en': 'Final screen', 'zh-Hans': '最终画面' })
+   */
+  it('carries the label and description viewers show for the file', async () => {
+    const root = await createRoot()
+    const artifacts = createCaseArtifacts(root, 'task', 'case')
+
+    const recorded = await artifacts.record('final.webp', {
+      body: 'pixels',
+      contentType: 'image/webp',
+      description: 'Screen after the agent said it was done.',
+      label: { 'en': 'Final screen', 'zh-Hans': '最终画面' },
+    })
+
+    expect(recorded.label).toEqual({ 'en': 'Final screen', 'zh-Hans': '最终画面' })
+    expect(recorded.description).toBe('Screen after the agent said it was done.')
+  })
+
+  /**
+   * @example
    * it('copies a file from outside the case directory in as <name>', async () => {})
    */
   it('copies a file from outside the case directory in as <name>', async () => {

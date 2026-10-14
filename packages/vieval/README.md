@@ -170,6 +170,7 @@ describeTask('desktop-agent', () => {
 ```
 
 - `artifactsDirectory` is `<report directory>/artifacts/<task>/<case>/`, created when read.
+- `recordArtifact` also takes `label` and `description` (one string, or one per locale) that the viewer shows instead of the file name.
 - `recordArtifact` records a `path` inside that directory by reference, copies a `path` outside it in as `<name>`, and writes a `body` as `<name>`. It emits an `artifact.recorded` event whose `path` is relative to `<report directory>/artifacts`.
 - With `--no-report`, `artifactsDirectory` is a temporary directory removed when the run ends, so eval code does not need to check whether reports are on.
 - Outside `vieval run` (for example a test that calls `task.run` directly), `runId` and `attemptId` are `local` and artifacts go to a temporary directory.
@@ -512,7 +513,7 @@ See [`examples/case-output`](../../examples/case-output) for a runnable demo.
 
 Every activity of a run is one typed event on an in-process bus (`@moeru/eventa`). The terminal reporter, the report writer (`events.jsonl`), and the Vitest compat bridge are subscribers of that bus.
 
-- Event names are `<entity>.<past-tense verb>`: `run.started`, `project.started`, `task.queued`, `task.started`, `case.started`, `case.output`, `metric.recorded`, `score.recorded`, `case.ended`, `task.ended`, `project.ended`, `run.ended`, plus `inference.*` and `tool-call.*` from `vieval/plugins/chat-models`.
+- Event names are `<entity>.<past-tense verb>`: `run.started`, `project.started`, `task.queued`, `task.started`, `case.started`, `case.output`, `metric.defined`, `metric.recorded`, `score.recorded`, `case.ended`, `task.ended`, `project.ended`, `run.ended`, plus `inference.*` and `tool-call.*` from `vieval/plugins/chat-models`.
 - Definitions, payload types, and Valibot schemas are exported from `vieval/events`. Every line of `events.jsonl` is an envelope with `schemaVersion: 2`, a per-run `seq`, run identity, and `projectId` / `taskId` / `caseId` when they apply.
 - When a task runs auto attempts (a case has `autoAttempt > 0`), `case.started` and `case.ended` of every case of the task have `attemptIndex` (0 for the first attempt) and `autoAttempt` (the attempts that the case allows). Events of other tasks do not have these fields. `retryIndex` stays the retry within one attempt.
 - Schema version policy: a new optional payload field or a new event name does not change `schemaVersion`. Readers of version 2 ignore unknown payload fields and skip unknown events, so they can read newer logs. A renamed, removed, or retyped field increments the version. `attemptIndex` and `autoAttempt` are optional fields of version 2.

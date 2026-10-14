@@ -1,3 +1,5 @@
+import type { LocalizedText } from 'vieval/events'
+
 import type {
   CaseCounts,
   CaseNode,
@@ -5,6 +7,7 @@ import type {
   CaseState,
   CurrentPosition,
   LogLine,
+  MetricDefinition,
   MetricEntry,
   ProjectNode,
   RunEvent,
@@ -30,6 +33,8 @@ export type ApplyResult = 'applied' | 'duplicate' | 'foreign'
 export interface ReducedArtifact {
   caseId?: string
   contentType: string
+  description?: LocalizedText
+  label?: LocalizedText
   name: string
   path: string
   purpose?: string
@@ -97,6 +102,8 @@ export interface RunReducer {
   readonly events: readonly RunEvent[]
   identity: () => RunIdentity | undefined
   readonly logs: readonly LogLine[]
+  /** Latest `metric.defined` per metric name. */
+  readonly metricDefinitions: ReadonlyMap<string, MetricDefinition>
   readonly metrics: readonly MetricEntry[]
   readonly projects: ReadonlyMap<string, ReducedProject>
   run: () => {
@@ -299,6 +306,7 @@ export function createRunReducer(): RunReducer {
   const cases = new Map<string, ReducedCase>()
   const logs: LogLine[] = []
   const metrics: MetricEntry[] = []
+  const metricDefinitions = new Map<string, MetricDefinition>()
   let identity: RunIdentity | undefined
   let lastSeq = 0
   let seqGaps = 0
@@ -521,6 +529,8 @@ export function createRunReducer(): RunReducer {
         const artifact: ReducedArtifact = {
           caseId: envelope.caseId,
           contentType: asString(data.contentType) ?? 'application/octet-stream',
+          description: asLocalizedText(data.description),
+          label: asLocalizedText(data.label),
           name: asString(data.name) ?? path,
           path,
           purpose: asString(data.purpose),
@@ -574,6 +584,27 @@ export function createRunReducer(): RunReducer {
           time: envelope.time,
         })
         break
+      case 'metric.defined': {
+        const name = asString(data.name)
+        if (name == null) {
+          break
+        }
+        const better = data.better === 'higher' || data.better === 'lower' ? data.better : undefined
+        const definition: MetricDefinition = { name }
+        const label = asLocalizedText(data.label)
+        const description = asLocalizedText(data.description)
+        const unit = asString(data.unit)
+        if (better != null)
+          definition.better = better
+        if (description != null)
+          definition.description = description
+        if (label != null)
+          definition.label = label
+        if (unit != null)
+          definition.unit = unit
+        metricDefinitions.set(name, definition)
+        break
+      }
       case 'metric.recorded': {
         const name = asString(data.name)
         if (name == null) {
@@ -675,6 +706,7 @@ export function createRunReducer(): RunReducer {
     events,
     identity: () => identity,
     logs,
+    metricDefinitions,
     metrics,
     projects,
     run: () => ({ endedAt, interruptSignal, lastEvent, startedAt, terminated, totalTasks }),
@@ -895,6 +927,22 @@ export function toCaseNode(reduced: ReducedCase, options: { evidenceLinkCount: n
 
 function asCaseState(value: unknown): CaseState {
   return value === 'passed' || value === 'failed' || value === 'skipped' || value === 'timeout' ? value : 'failed'
+}
+
+/**
+ * Normalizes a label or description: a string, or an object of string translations; anything else is dropped.
+ *
+ * Before:
+ * - { en: 'Steps', 'zh-Hans': '步数', bad: 1 }
+ *
+ * After:
+ * - { en: 'Steps', 'zh-Hans': '步数' }
+ */
+function asLocalizedText(value: unknown): LocalizedText | undefined {
+  if (typeof value === 'string')
+    return value
+  const entries = Object.entries(asRecord(value)).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+  return entries.length === 0 ? undefined : Object.fromEntries(entries)
 }
 
 function asNumber(value: unknown): number | undefined {
