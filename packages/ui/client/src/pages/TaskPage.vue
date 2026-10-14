@@ -9,6 +9,7 @@ import { useIntervalFn, useMediaQuery, useTimestamp } from '@vueuse/core'
 import { computed, shallowRef, toRef, useTemplateRef, watch } from 'vue'
 
 import BarChart from '../components/BarChart.vue'
+import CaseMetricsPanel from '../components/CaseMetricsPanel.vue'
 import CountsBar from '../components/CountsBar.vue'
 import PageHeader from '../components/PageHeader.vue'
 import StateBadge from '../components/StateBadge.vue'
@@ -41,7 +42,9 @@ const rounds = computed(() => timeline.data.value?.rounds.find(item => item.task
 const roundChart = computed<BarDatum[]>(() => rounds.value.map(round => ({ label: `round ${round.roundIndex}`, values: [round.passed / Math.max(1, round.passed + round.failed + round.running)] })))
 
 const filter = shallowRef('')
-const cases = computed(() => (task.value?.cases ?? []).filter(node => node.name.toLowerCase().includes(filter.value.toLowerCase())))
+/** Cases picked in the case metrics charts; `undefined` while nothing is picked there. */
+const picked = shallowRef<ReadonlySet<string>>()
+const cases = computed(() => (task.value?.cases ?? []).filter(node => (picked.value == null || picked.value.has(node.key)) && node.name.toLowerCase().includes(filter.value.toLowerCase())))
 // Once per second: running cases show how long they have run, in whole seconds.
 const now = useTimestamp({ scheduler: callback => useIntervalFn(callback, 1000) })
 
@@ -133,9 +136,11 @@ const position = computed(() => ({
         </div>
       </section>
 
+      <CaseMetricsPanel v-model:selection="picked" :cases="task.cases" :refresh-key="live.refreshKey.value" :run-key="props.route.runKey" :task-id="props.route.taskId" />
+
       <section :class="['card']">
         <h2 :class="['card-title flex-wrap']">
-          <span :class="levelIcons.case" aria-hidden="true" />Cases <span class="text-xs muted font-normal">{{ cases.length }}</span>
+          <span :class="levelIcons.case" aria-hidden="true" />Cases <span class="text-xs muted font-normal">{{ cases.length }}<template v-if="picked"> picked in the charts</template></span>
           <input v-model="filter" type="search" placeholder="Filter cases…" :class="['ml-auto rounded border border-neutral-300/60 dark:border-neutral-700/40 bg-transparent px-2 py-0.5 text-xs font-normal w-56', 'max-md:(w-full ml-0 py-1)']">
         </h2>
         <StateView :empty="cases.length === 0" empty-text="No cases">

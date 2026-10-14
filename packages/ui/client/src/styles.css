@@ -4,6 +4,24 @@
   --series-1: oklch(54% calc(var(--chromatic-chroma-600) * var(--chromatic-sat)) var(--chromatic-hue));
   --series-2: #eb6834;
   --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+  /* Case states as chart marks (lines, dots); the same hues as the `state-*` badges. */
+  --mark-passed: #2f9e44;
+  --mark-failed: #e03131;
+  --mark-timeout: #e8590c;
+  --mark-running: #1c7ed6;
+  --mark-skipped: #868e96;
+  --mark-unfinished: #868e96;
+  /* Five-step sequential ramp (dataviz reference blue) for coloring by a metric, low to high. */
+  --seq-1: #b7d3f6;
+  --seq-2: #6da7ec;
+  --seq-3: #2a78d6;
+  --seq-4: #1c5cab;
+  --seq-5: #0d366b;
   --chart-grid: #e5e5e5;
   --chart-text: #52514e;
   color-scheme: light;
@@ -25,6 +43,23 @@
   --series-1: oklch(74% calc(var(--chromatic-chroma-400) * var(--chromatic-sat)) var(--chromatic-hue));
   --series-2: #d95926;
   --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+  --mark-passed: #51cf66;
+  --mark-failed: #ff6b6b;
+  --mark-timeout: #ff922b;
+  --mark-running: #4dabf7;
+  --mark-skipped: #868e96;
+  --mark-unfinished: #868e96;
+  /* Dark pages run the ramp the other way: low values sink toward the ground, high values stand out. */
+  --seq-1: #184f95;
+  --seq-2: #2a78d6;
+  --seq-3: #5598e7;
+  --seq-4: #86b6ef;
+  --seq-5: #cde2fb;
   --chart-grid: #333332;
   --chart-text: #c3c2b7;
   color-scheme: dark;

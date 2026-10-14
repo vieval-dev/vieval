@@ -47,6 +47,7 @@ catalog:
   '@proj-airi/unocss-preset-chromatic': ^1.1.5
   '@shikijs/transformers': ^4.4.3
   '@tanstack/vue-virtual': ^3.13.41
+  '@types/d3': ^7.4.3
   '@types/node': ^26.1.0
   '@unhead/vue': ^3.4.2
   '@unlazy/vue': ^2.0.1
@@ -63,6 +64,7 @@ catalog:
   anser: ^2.3.5
   bumpp: ^11.1.0
   c12: ^4.0.0-beta.5
+  d3: ^7.9.0
   date-fns: ^4.4.0
   es-toolkit: 1.43.0
   eslint: ^10.6.0
@@ -94,6 +96,7 @@ catalog:
   unplugin-raw: ^0.7.0
   unplugin-unused: ^0.5.7
   valibot: ^1.5.0
+  vaul-vue: ^0.4.1
   vite: ^8.3.4
   vite-plugin-inspect: ^11.4.1
   vitepress: 2.0.0-alpha.20

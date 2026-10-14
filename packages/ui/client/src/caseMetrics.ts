@@ -1,0 +1,351 @@
+import type { ScaleContinuousNumeric } from 'd3'
+
+import type { CaseNode, CaseState, MetricsResponse } from '../../src/shared/contract'
+
+import { scaleLinear, scaleSymlog } from 'd3'
+
+/** One case of a task, flattened for the case charts (dots on a strip or a plane, parallel coordinates). */
+export interface CaseRow {
+  caseId: string
+  /** Category values by axis name; always has `state`. */
+  categories: Record<string, string>
+  /** `CaseNode.key`, unique within a run. */
+  key: string
+  name: string
+  /** Numeric values by metric name; a metric the case did not record is absent. */
+  numbers: Record<string, number>
+  state: CaseState
+}
+
+/** Cases of one task with the metric axes the charts can draw. */
+export interface CaseTable {
+  /**
+   * Category axes: `state` first, then the case group (name prefix), low-cardinality string metrics, and numeric
+   * metrics with exactly two values.
+   */
+  categories: string[]
+  /** Numeric metrics with one value across every case; not worth an axis. */
+  constants: { name: string, value: number }[]
+  /** Categories (two-valued metrics included) that split the cases exactly like an earlier category; hidden. */
+  duplicates: { name: string, of: string }[]
+  /** Every non-constant numeric metric, grouped by correlation; the representatives are the default axes. */
+  groups: MetricGroup[]
+  /** Numeric metrics whose largest value is far above the median; charts draw them on a symlog scale. */
+  heavyTailed: Set<string>
+  rows: CaseRow[]
+}
+
+/** Metrics folded into one representative because they carry the same signal. */
+export interface MetricGroup {
+  /** Folded metrics with their correlation to the representative (in `log1p` space). */
+  members: { name: string, r: number }[]
+  /** The metric drawn for the whole group. */
+  representative: string
+}
+
+/** Correlation above which two metrics count as the same signal (token totals that grow with every step, …). */
+const SAME_SIGNAL_R = 0.95
+/** Categories with more values than this are identifiers (hashes, paths), not a breakdown worth an axis. */
+const MAX_CATEGORY_VALUES = 24
+/** A metric whose max is this many times its median gets a symlog scale, so the bulk of cases is not squashed. */
+const HEAVY_TAIL_RATIO = 12
+
+/** Brushed ranges and picked categories that together select cases. */
+export interface CaseFilters {
+  /** Picked values per category axis; an empty or missing set does not filter. */
+  categories: Record<string, Set<string>>
+  /** Inclusive `[low, high]` per numeric axis. */
+  ranges: Record<string, [number, number]>
+}
+
+/** How well one metric tells failed cases from passed ones. */
+export interface MetricSeparation {
+  /**
+   * Area under the ROC curve, folded to `0.5..1`: the chance that a random failed and a random passed case are told
+   * apart by this metric alone (`0.5`: no better than a coin, `1`: every failed case lies on one side).
+   */
+  auc: number
+  /** Which outcome has the larger values. */
+  higherIn: 'failed' | 'passed'
+}
+
+/**
+ * Joins the cases of a task with their recorded metrics, and groups the metrics so the charts start from the
+ * independent signals.
+ *
+ * Use when:
+ * - a task view draws every case against several metrics at once
+ *
+ * Expects:
+ * - `metrics` scoped to the same task (`GET /api/runs/:runKey/metrics?taskId=…`)
+ *
+ * Returns:
+ * - one row per case with the value of its last round for every metric; built-in axes `duration_s`, `exact`,
+ *   `judge` (when recorded), `state`, and `group` (the name prefix before `/`, when names share that shape)
+ * - constant metrics split out, and correlated metrics (|r| ≥ 0.95 on `log1p` values) folded into the first of
+ *   them in recording order, built-ins first
+ */
+export function buildCaseTable(cases: readonly CaseNode[], metrics: MetricsResponse | undefined): CaseTable {
+  const byCase = new Map<string, { numbers: Record<string, number>, rounds: Record<string, number>, strings: Record<string, string> }>()
+  const entryOf = (caseId: string) => {
+    let entry = byCase.get(caseId)
+    if (entry == null) {
+      entry = { numbers: {}, rounds: {}, strings: {} }
+      byCase.set(caseId, entry)
+    }
+    return entry
+  }
+  // A case retried by auto attempts records a metric once per round; the last round is the one its state reports.
+  for (const series of metrics?.numeric ?? []) {
+    for (const point of series.points) {
+      if (point.caseId == null)
+        continue
+      const entry = entryOf(point.caseId)
+      const round = point.roundIndex ?? 0
+      if ((entry.rounds[series.name] ?? -1) <= round) {
+        entry.rounds[series.name] = round
+        entry.numbers[series.name] = point.value as number
+      }
+    }
+  }
+  for (const series of metrics?.nonNumeric ?? []) {
+    for (const point of series.values) {
+      // Flags (`gui_only: true`) split cases like any other category.
+      if (point.caseId != null && (typeof point.value === 'string' || typeof point.value === 'boolean'))
+        entryOf(point.caseId).strings[series.name] = String(point.value)
+    }
+  }
+
+  const grouped = cases.length > 0 && cases.every(node => node.name.includes('/'))
+  const rows: CaseRow[] = cases.map((node) => {
+    const recorded = byCase.get(node.caseId)
+    const numbers: Record<string, number> = { ...recorded?.numbers }
+    if (node.durationMs != null)
+      numbers.duration_s = node.durationMs / 1000
+    if (node.scores.exact != null)
+      numbers.exact = node.scores.exact
+    if (node.scores.judge != null)
+      numbers.judge = node.scores.judge
+    // Built-ins first (key order is the default axis order), and they win over a recorded metric of the same name.
+    const builtIn: Record<string, string> = { state: node.state }
+    if (grouped)
+      builtIn.group = node.name.slice(0, node.name.indexOf('/'))
+    const categories: Record<string, string> = { ...builtIn, ...recorded?.strings, ...builtIn }
+    return { caseId: node.caseId, categories, key: node.key, name: node.name, numbers, state: node.state }
+  })
+
+  const builtIns = ['duration_s', 'exact', 'judge']
+  const recordedNames = (metrics?.numeric ?? []).map(series => series.name)
+  const numericNames = [...builtIns, ...recordedNames].filter((name, index, all) => all.indexOf(name) === index && rows.some(row => row.numbers[name] != null))
+
+  const constants: CaseTable['constants'] = []
+  const groups: MetricGroup[] = []
+  const heavyTailed = new Set<string>()
+  for (const name of numericNames) {
+    const values = rows.map(row => row.numbers[name]).filter((value): value is number => value != null)
+    const distinct = new Set(values).size
+    if (distinct <= 1) {
+      constants.push({ name, value: values[0]! })
+      continue
+    }
+    // Two values (a 0/1 score, a flag) split cases like a category; drawn as one, it can also be seen to repeat one.
+    if (distinct === 2) {
+      for (const row of rows) {
+        if (row.numbers[name] != null)
+          row.categories[name] = String(row.numbers[name])
+      }
+      continue
+    }
+    const sorted = values.toSorted((a, b) => a - b)
+    const median = sorted[Math.floor(sorted.length / 2)]!
+    if (sorted.at(-1)! / Math.max(1, median) > HEAVY_TAIL_RATIO && sorted[0]! >= 0)
+      heavyTailed.add(name)
+    let folded = false
+    for (const group of groups) {
+      const r = correlation(rows, group.representative, name)
+      if (Math.abs(r) >= SAME_SIGNAL_R) {
+        group.members.push({ name, r })
+        folded = true
+        break
+      }
+    }
+    if (!folded)
+      groups.push({ members: [], representative: name })
+  }
+
+  const categories: string[] = []
+  const duplicates: CaseTable['duplicates'] = []
+  for (const name of new Set(rows.flatMap(row => Object.keys(row.categories)))) {
+    const distinct = new Set(rows.map(row => row.categories[name]).filter(value => value != null)).size
+    if (name !== 'state' && (distinct < 2 || distinct > MAX_CATEGORY_VALUES))
+      continue
+    const same = categories.find(other => sameSplit(rows, other, name))
+    if (same == null)
+      categories.push(name)
+    else
+      duplicates.push({ name, of: same })
+  }
+  return { categories, constants, duplicates, groups, heavyTailed, rows }
+}
+
+/**
+ * Whether a case passes every filter; a case without a value on a filtered numeric axis does not.
+ *
+ * Use when:
+ * - the charts, the case list, and the selection summary decide which cases are selected
+ */
+export function matchesFilters(row: CaseRow, filters: CaseFilters): boolean {
+  for (const [name, [low, high]] of Object.entries(filters.ranges)) {
+    const value = row.numbers[name]
+    if (value == null || value < low || value > high)
+      return false
+  }
+  for (const [name, picked] of Object.entries(filters.categories)) {
+    if (picked.size > 0 && !picked.has(row.categories[name] ?? ''))
+      return false
+  }
+  return true
+}
+
+/**
+ * Scale of one numeric metric over every case, shared by the charts so a brush means the same range in each.
+ *
+ * Use when:
+ * - drawing an axis of a {@link CaseTable} metric; callers set the range (`scale.copy().range(…)`)
+ *
+ * Returns:
+ * - a symlog scale for heavy-tailed metrics (zero stays drawable, unlike a log scale), else a linear one
+ */
+export function metricScale(table: CaseTable, name: string): ScaleContinuousNumeric<number, number> {
+  let min = Infinity
+  let max = -Infinity
+  for (const row of table.rows) {
+    const value = row.numbers[name]
+    if (value == null)
+      continue
+    min = Math.min(min, value)
+    max = Math.max(max, value)
+  }
+  if (!Number.isFinite(min))
+    [min, max] = [0, 1]
+  return table.heavyTailed.has(name) ? scaleSymlog().domain([min, max]) : scaleLinear().domain([min, max]).nice()
+}
+
+/**
+ * Short label of a metric for a chart axis: the last dot segment, or more segments while two picked metrics would
+ * share a label.
+ *
+ * Before:
+ * - "osworld.model.usage.output_tokens_details.reasoning_tokens"
+ *
+ * After:
+ * - "reasoning_tokens"
+ */
+export function shortMetricName(name: string, all: readonly string[]): string {
+  const parts = name.split('.')
+  for (let take = 1; take < parts.length; take++) {
+    const label = parts.slice(-take).join('.')
+    if (all.every(other => other === name || (!other.endsWith(`.${label}`) && other !== label)))
+      return label
+  }
+  return name
+}
+
+/**
+ * Pearson correlation of two metrics over the cases that recorded both, on `log1p` values so token counts that span
+ * several orders of magnitude are compared by shape, not by their few largest cases. `0` when either is flat.
+ */
+function correlation(rows: readonly CaseRow[], left: string, right: string): number {
+  const pairs: [number, number][] = []
+  for (const row of rows) {
+    const a = row.numbers[left]
+    const b = row.numbers[right]
+    if (a != null && b != null)
+      pairs.push([Math.sign(a) * Math.log1p(Math.abs(a)), Math.sign(b) * Math.log1p(Math.abs(b))])
+  }
+  if (pairs.length < 3)
+    return 0
+  let meanA = 0
+  let meanB = 0
+  for (const [a, b] of pairs) {
+    meanA += a / pairs.length
+    meanB += b / pairs.length
+  }
+  let covariance = 0
+  let varianceA = 0
+  let varianceB = 0
+  for (const [a, b] of pairs) {
+    covariance += (a - meanA) * (b - meanB)
+    varianceA += (a - meanA) ** 2
+    varianceB += (b - meanB) ** 2
+  }
+  return varianceA === 0 || varianceB === 0 ? 0 : covariance / Math.sqrt(varianceA * varianceB)
+}
+
+/** Whether two categories split the cases the same way, value for value (`exact` 1/0 against `state` passed/failed). */
+function sameSplit(rows: readonly CaseRow[], left: string, right: string): boolean {
+  const forward = new Map<string, string>()
+  const backward = new Map<string, string>()
+  for (const row of rows) {
+    const a = row.categories[left] ?? ''
+    const b = row.categories[right] ?? ''
+    if ((forward.get(a) ?? b) !== b || (backward.get(b) ?? a) !== a)
+      return false
+    forward.set(a, b)
+    backward.set(b, a)
+  }
+  return true
+}
+
+/** Scores are the outcome itself, so ranking them by how they separate the outcome would explain nothing. */
+const OUTCOME_METRICS = new Set(['exact', 'judge'])
+
+/**
+ * Ranks numeric metrics by how well they separate failed from passed cases.
+ *
+ * Use when:
+ * - choosing which axes to show first, so the chart opens on the metrics most likely to explain failures
+ *
+ * Expects:
+ * - finished cases (`passed`, `failed`, `timeout`); running and skipped cases are left out
+ *
+ * Returns:
+ * - one entry per non-constant metric with at least one passed and one failed value, except the score metrics;
+ *   ties count half (Mann–Whitney U), so a metric that is mostly 0 in both outcomes stays near `0.5`
+ */
+export function separationOf(table: CaseTable): Map<string, MetricSeparation> {
+  const result = new Map<string, MetricSeparation>()
+  const finished = table.rows.filter(row => row.state === 'passed' || row.state === 'failed' || row.state === 'timeout')
+  for (const name of table.groups.flatMap(group => [group.representative, ...group.members.map(member => member.name)])) {
+    if (OUTCOME_METRICS.has(name))
+      continue
+    const failed: number[] = []
+    const passed: number[] = []
+    for (const row of finished) {
+      const value = row.numbers[name]
+      if (value != null)
+        (row.state === 'passed' ? passed : failed).push(value)
+    }
+    if (failed.length === 0 || passed.length === 0)
+      continue
+    // U statistic by sorting both samples together: each failed value counts the passed values below it, ties half.
+    const sortedPassed = passed.toSorted((a, b) => a - b)
+    let wins = 0
+    for (const value of failed) {
+      let below = 0
+      let tied = 0
+      for (const other of sortedPassed) {
+        if (other < value)
+          below++
+        else if (other === value)
+          tied++
+        else
+          break
+      }
+      wins += below + tied / 2
+    }
+    const auc = wins / (failed.length * passed.length)
+    result.set(name, { auc: Math.max(auc, 1 - auc), higherIn: auc >= 0.5 ? 'failed' : 'passed' })
+  }
+  return result
+}
