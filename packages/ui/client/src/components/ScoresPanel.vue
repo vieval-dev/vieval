@@ -1,22 +1,28 @@
 <script setup lang="ts">
 import type { MetricDefinition, RunSnapshot } from '../../../src/shared/contract'
+import type { CaseFilters, CaseRow } from '../caseMetrics'
 import type { BarDatum } from './BarChart.vue'
 import type { LinePoint } from './LineChart.vue'
 
 import { useQuery } from '@pinia/colada'
-import { computed, reactive, watch } from 'vue'
+import { computed, reactive, shallowRef, watch } from 'vue'
 
 import BarChart from './BarChart.vue'
+import CaseCartesian from './CaseCartesian.vue'
 import CountsBar from './CountsBar.vue'
 import LineChart from './LineChart.vue'
 import MetricInfo from './MetricInfo.vue'
+import PairsHeatmap from './PairsHeatmap.vue'
+import ScatterMatrix from './ScatterMatrix.vue'
+import SegmentedControl from './SegmentedControl.vue'
 import StateView from './StateView.vue'
 
 import { api } from '../api'
+import { buildCaseTable, metricScale, separationOf } from '../caseMetrics'
 import { formatScore, previewValue } from '../format'
 import { levelIcons } from '../hierarchy'
 import { localize } from '../localize'
-import { href } from '../router'
+import { href, navigate } from '../router'
 
 /**
  * Scores and metrics of a run: overall scores, scores per matrix row (task) and per auto-attempt round, numeric
@@ -57,6 +63,39 @@ function toggleMetric(name: string): void {
 }
 const definitions = computed(() => new Map<string, MetricDefinition>((metrics.data.value?.definitions ?? []).map(definition => [definition.name, definition])))
 const labelOf = (name: string) => localize(definitions.value.get(name)?.label) ?? name
+
+/**
+ * The numeric metrics of the whole run, three ways: each metric over the recording order, every pair of metrics as
+ * small scatterplots (matrix), or every pair as one cell colored by correlation with a picked pair's scatterplot
+ * (pairs). The matrix and pairs views use one row per case of every task (metrics joined by task and case), the
+ * metrics that carry their own signal (repeats folded, constants dropped), most telling of failure first.
+ */
+type NumericView = 'matrix' | 'pairs' | 'time'
+const numericView = shallowRef<NumericView>('time')
+const numericViews = [
+  { icon: 'i-mingcute-chart-line-line', label: 'Over time', value: 'time' as const },
+  { icon: 'i-mingcute-grid-line', label: 'Matrix', value: 'matrix' as const },
+  { icon: 'i-mingcute-layout-grid-line', label: 'Pairs', value: 'pairs' as const },
+]
+/** A matrix of scatterplots stays legible up to five metrics; the pairs heatmap up to a dozen. */
+const RUN_MATRIX_METRICS = 5
+const RUN_PAIRS_METRICS = 12
+const runTable = computed(() => buildCaseTable(props.snapshot.tasks.flatMap(task => task.cases), metrics.data.value))
+const runSeparation = computed(() => separationOf(runTable.value))
+const runMetrics = computed(() => runTable.value.groups.map(group => group.representative)
+  .toSorted((a, b) => (runSeparation.value.get(b)?.auc ?? 0) - (runSeparation.value.get(a)?.auc ?? 0)))
+const runScales = computed(() => Object.fromEntries(runMetrics.value.map(name => [name, metricScale(runTable.value, name)])))
+// Nothing is filtered on this page: every case is selected and colored by how it ended.
+const everyCase = computed(() => new Set(runTable.value.rows.map(row => row.key)))
+const noFilters: CaseFilters = { box: null, categories: {}, ranges: {} }
+const byState = (row: CaseRow) => `var(--mark-${row.state})`
+const runPair = shallowRef<[string, string]>()
+// A dot opens its case, the way a case row of the tables does.
+function openCase(row: CaseRow | null): void {
+  if (row != null)
+    navigate({ caseId: row.caseId, name: 'case', runKey: runKey.value, taskId: row.taskId })
+}
+
 const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric => ({
   ...metric,
   points: metric.points.map<LinePoint>((point, index) => ({ label: `#${index + 1} ${point.caseId ?? ''}`, x: index, y: point.value as number })),
@@ -160,10 +199,12 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
 
     <StateView :error="metrics.error.value" :loading="metrics.isPending.value" :empty="metrics.data.value?.numeric.length === 0 && metrics.data.value?.nonNumeric.length === 0" empty-text="No metrics recorded" empty-hint="Cases record metrics with context.recordMetric(name, value)." skeleton="panel" @retry="metrics.refetch()">
       <section v-if="numeric.length > 0" :class="['card']" data-testid="metric-charts">
-        <h2 class="card-title">
-          <span class="i-mingcute-chart-line-line" aria-hidden="true" />Numeric metrics <span class="text-xs muted font-normal">in recording order</span>
+        <h2 class="card-title flex-wrap">
+          <span class="i-mingcute-chart-line-line" aria-hidden="true" />Numeric metrics
+          <span class="text-xs muted font-normal">{{ numericView === 'time' ? 'in recording order' : `${runTable.rows.length} cases of every task` }}</span>
+          <span :class="['ml-auto font-normal']"><SegmentedControl v-model="numericView" :items="numericViews" label="Numeric metrics view" /></span>
         </h2>
-        <div :class="['grid gap-4 p-3']" style="grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr))">
+        <div v-if="numericView === 'time'" :class="['grid gap-4 p-3']" style="grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr))">
           <div v-for="metric in numeric" :key="metric.name">
             <LineChart :name="metric.name" :points="metric.points">
               <template #caption>
@@ -176,6 +217,23 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
               n={{ metric.summary.count }} · min {{ metric.summary.min }} · avg {{ Math.round(metric.summary.avg * 1000) / 1000 }} · max {{ metric.summary.max }}
             </div>
           </div>
+        </div>
+        <div v-else-if="runMetrics.length < 2" :class="['p-3 text-sm muted']">
+          Pairs need two numeric metrics that vary across cases.
+        </div>
+        <div v-else-if="numericView === 'matrix'" :class="['grid gap-1 p-3']">
+          <div :class="['text-xs muted']">
+            Every pair of the {{ Math.min(RUN_MATRIX_METRICS, runMetrics.length) }} metrics that best tell failed from passed cases · click a dot to open its case
+          </div>
+          <ScatterMatrix :color-of="byState" :filters="noFilters" :label-of="labelOf" :metrics="runMetrics.slice(0, RUN_MATRIX_METRICS)" :rows="runTable.rows" :scales="runScales" :selected="everyCase" @pin="openCase" />
+        </div>
+        <div v-else :class="['grid gap-3 p-3']">
+          <PairsHeatmap :label-of="labelOf" :metrics="runMetrics.slice(0, RUN_PAIRS_METRICS)" :rows="runTable.rows" :selected-pair="runPair" :separation="runSeparation" @select="pair => runPair = pair" />
+          <CaseCartesian
+            v-if="runPair"
+            :axes="runPair.map(name => ({ kind: 'numeric' as const, name }))" :category-values="{}" :color-of="byState" :filters="noFilters" :label-of="labelOf" :rows="runTable.rows" :scales="runScales" :selected="everyCase"
+            @pin="openCase"
+          />
         </div>
       </section>
       <section v-if="(metrics.data.value?.nonNumeric.length ?? 0) > 0" :class="['card']">

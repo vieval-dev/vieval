@@ -49,7 +49,7 @@ export default defineConfig({
   shortcuts: {
     'badge': 'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium leading-none whitespace-nowrap',
     // Ghost buttons: no border or fill until hovered, so toolbars read as text and icons, not as boxes.
-    'btn': 'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-sm text-neutral-700 dark:text-neutral-300 bg-transparent transition-colors hover:bg-primary-500/10 active:bg-primary-500/20 focus-visible:(outline-2 outline-offset-1 outline-primary-500) disabled:(opacity-40 pointer-events-none)',
+    'btn': 'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-sm text-neutral-700 dark:text-neutral-300 bg-transparent select-none transition-colors hover:bg-primary-500/10 active:bg-primary-500/20 focus-visible:(outline-2 outline-offset-1 outline-primary-500) disabled:(opacity-40 pointer-events-none)',
     // `!`: wins over the transparent `btn` background and its hover.
     'btn-active': 'bg-primary-500/15! text-primary-800! dark:text-primary-200! font-medium',
     'card': 'rounded-lg border border-neutral-200/50 dark:border-neutral-800/50 bg-white dark:bg-neutral-900',
@@ -64,9 +64,13 @@ export default defineConfig({
     // Font only: list-like views (tables, timelines, events, logs) and raw content pick their own size.
     'mono': 'font-mono tabular-nums',
     'muted': 'text-neutral-500 dark:text-neutral-400',
+    'option-trigger': 'inline-flex items-center gap-1.5 rounded-lg bg-neutral-500/10 px-3 py-1.5 text-sm text-neutral-700 dark:text-neutral-200 select-none transition-colors hover:bg-neutral-500/16 data-[state=open]:bg-neutral-500/22 focus-visible:(outline-2 outline-offset-1 outline-primary-500)',
     // Segmented control (`SegmentedControl.vue`, reka-ui ToggleGroup): a tinted track with the chosen item raised.
-    'segmented': 'inline-flex items-center gap-0.5 rounded-lg bg-neutral-500/10 p-0.5',
-    'segmented-item': 'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs text-neutral-600 dark:text-neutral-300 transition-colors hover:text-neutral-900 dark:hover:text-neutral-100 focus-visible:(outline-2 outline-offset-1 outline-primary-500) data-[state=on]:(bg-white text-primary-700 shadow-sm font-medium) dark:data-[state=on]:(bg-neutral-700 text-primary-200)',
+    // A gray track says "pick one of these"; the raised block (`segmented-indicator`, slid by `SegmentedControl.vue`)
+    // marks the picked choice. `option-trigger` is the same gray for a control that opens a list of choices.
+    'segmented': 'inline-flex items-center gap-0.5 rounded-lg bg-neutral-500/10 p-0.5 select-none',
+    'segmented-indicator': 'absolute top-0.5 bottom-0.5 left-0 rounded-md bg-white shadow-sm dark:bg-neutral-700 pointer-events-none',
+    'segmented-item': 'relative z-1 inline-flex items-center gap-1 rounded-md text-neutral-600 dark:text-neutral-300 transition-colors hover:text-neutral-900 dark:hover:text-neutral-100 focus-visible:(outline-2 outline-offset-1 outline-primary-500) data-[state=on]:(text-primary-700 font-medium) dark:data-[state=on]:text-primary-200',
     // Selected row of a list (sidebar, file lists, JSONL rows).
     'selected': 'bg-primary-500/15 text-primary-900 dark:text-primary-100',
     // Placeholder block of `LoadingSkeleton.vue`; `.skeleton` in styles.css sweeps a highlight across it.

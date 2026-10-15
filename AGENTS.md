@@ -96,6 +96,7 @@ Concise but detailed reference for contributors working in the `vieval-dev/vieva
   - One-line hints: reka-ui `Tooltip` with the `tooltip` / `tooltip-arrow` shortcuts (animated in `styles.css`).
   - Phones: bottom sheets use vaul-vue `Drawer` (as in airi's Live2D report modal) on the same `floating` surface; share the body component between the desktop popover and the phone drawer.
   - In-page choices use reka-ui (`DropdownMenuRadioGroup` for one of many), not native `<select>`.
+  - Choice controls share one look, a gray track meaning "pick from these": `SegmentedControl` (`segmented`, with a raised block that slides to the picked choice) for a few visible choices, `option-trigger` for a control that opens a list (menu, popover). Controls are not text-selectable (`select-none`, already in `btn` / `segmented` / `option-trigger`).
 - Before adding a UnoCSS shortcut or keyframes, search `packages/ui/uno.config.ts` and `client/src/styles.css` for one with the same role and reuse it; do not add near-duplicates (a second "floating card" shortcut, a second fade).
 - `useDark` (VueUse): set `disableTransition: false` or use existing composables in `packages/ui`.
 
