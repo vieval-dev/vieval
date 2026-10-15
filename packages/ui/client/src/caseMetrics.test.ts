@@ -97,6 +97,22 @@ describe('buildCaseTable', () => {
   })
 })
 
+describe('buildCaseTable across tasks', () => {
+  /**
+   * @example
+   * expect(table.rows.map(row => row.numbers.steps)).toEqual([3, 9])
+   */
+  it('keeps the metrics of one case id apart per task', () => {
+    // One OSWorld question runs under every matrix combination: same case id, different tasks.
+    const inTask = (taskId: string): CaseNode => ({ ...caseNode(0, 'chrome/a', 'passed'), key: `${taskId}\u0000${caseNode(0, 'chrome/a', 'passed').caseId}`, taskId })
+    const response = metrics({ steps: [[cases[0]!.caseId, 3]] })
+    response.numeric[0]!.points.push({ ...response.numeric[0]!.points[0]!, seq: 9, taskId: 'other', value: 9 })
+    const table = buildCaseTable([inTask('task'), inTask('other')], response)
+
+    expect(table.rows.map(row => row.numbers.steps)).toEqual([3, 9])
+  })
+})
+
 describe('buildCaseTable categories', () => {
   /**
    * @example
@@ -119,11 +135,12 @@ describe('matchesFilters', () => {
    * @example
    * expect(selected.map(row => row.name)).toEqual(['gimp/c'])
    */
-  it('combines brushed ranges and picked categories', () => {
+  it('combines brushed ranges, picked categories, and the scatterplot box', () => {
     const table = buildCaseTable(cases, metrics({
       steps: cases.map((node, index) => [node.caseId, [2, 8, 30, 64][index]!]),
     }))
     const selected = table.rows.filter(row => matchesFilters(row, {
+      box: { x: 'duration_s', x0: 2, x1: 4, y: 'steps', y0: 0, y1: 100 },
       categories: { state: new Set(['passed']) },
       ranges: { steps: [5, 40] },
     }))

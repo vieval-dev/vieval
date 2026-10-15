@@ -11,14 +11,17 @@ import { animate } from 'animejs'
 import { format } from 'd3'
 import { DropdownMenuContent, DropdownMenuItemIndicator, DropdownMenuPortal, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuRoot, DropdownMenuTrigger, PopoverAnchor, PopoverArrow, PopoverContent, PopoverPortal, PopoverRoot } from 'reka-ui'
 import { DrawerContent, DrawerDescription, DrawerHandle, DrawerOverlay, DrawerPortal, DrawerRoot, DrawerTitle } from 'vaul-vue'
-import { computed, shallowRef, watch } from 'vue'
+import { computed, nextTick, shallowRef, useTemplateRef, watch } from 'vue'
 
 import AnimatedContent from './AnimatedContent.vue'
 import AxisPicker from './AxisPicker.vue'
 import CaseCard from './CaseCard.vue'
 import CaseCartesian from './CaseCartesian.vue'
 import MetricSummary from './MetricSummary.vue'
+import PairsHeatmap from './PairsHeatmap.vue'
 import ParallelCoordinates from './ParallelCoordinates.vue'
+import ScatterMatrix from './ScatterMatrix.vue'
+import SegmentedControl from './SegmentedControl.vue'
 import StateView from './StateView.vue'
 
 import { api } from '../api'
@@ -27,9 +30,8 @@ import { localize } from '../localize'
 import { href, navigate } from '../router'
 
 /**
- * Cases of one task against their metrics: an axis picker, a color-by choice, and a chart chosen by the number of
- * dimensions (dots on a strip or a plane, parallel coordinates from three) that holds one selection. The selection is
- * handed to the parent, which filters its case list.
+ * Cases of one task against their metrics: a metric picker, a color-by choice, parallel coordinates, and a
+ * scatterplot matrix that share one selection. The selection is handed to the parent, which filters its case list.
  */
 const props = defineProps<{
   cases: readonly CaseNode[]
@@ -64,8 +66,12 @@ const scales = computed(() => {
   return result
 })
 
-/** The chart opens on the metrics that best tell failed from passed cases, so few that every line stays readable. */
+/**
+ * The chart opens on the metrics that best tell failed from passed cases (so few that every line stays readable);
+ * the scatterplot matrix shows at most five metrics.
+ */
 const DEFAULT_METRIC_AXES = 5
+const MAX_MATRIX_METRICS = 5
 
 const separation = computed(() => separationOf(table.value))
 // `undefined` until the viewer changes the pick: the defaults follow the table while the run is live.
@@ -112,17 +118,53 @@ const axes = computed<ParallelAxis[]>(() => {
  */
 const PARALLEL_FROM_DIMENSIONS = 3
 /**
- * Fade of a chart swap (animejs): the old chart fades out and sinks 4 px, then the new one fades in and settles, so
- * the jump from parallel coordinates to a plane reads as a change of view, not a glitch. Leaving is quicker than
- * entering; with reduced motion the swap is instant.
+ * Motion of a swap (animejs). Switching views (Chart, Matrix, Pairs) slides sideways, toward the side of the tab that
+ * was picked, like turning pages; a swap of chart type inside the Chart view (strip or plane to parallel coordinates)
+ * fades and settles 4 px vertically instead. Leaving is quicker than entering; with reduced motion the swap is instant.
+ * Meanwhile the stage holds the old height while the old view leaves, then eases to the new view's height, so the
+ * case list below glides instead of jumping when a 600 px matrix gives way to a 200 px strip.
  */
 const reducedMotion = usePreferredReducedMotion()
-const CHART_FADE = { enterMs: 260, leaveMs: 140, shiftPx: 4 }
+const SWAP = { enterMs: 260, leaveMs: 140, resizeMs: 320, shiftPx: 4, slidePx: 28 }
+const stage = useTemplateRef<HTMLElement>('stage')
+let resize: ReturnType<typeof animate> | undefined
+/** Pins the stage at its current height (mid-resize too), clipping whatever the views inside do meanwhile. */
+function holdStageHeight(): void {
+  if (stage.value == null)
+    return
+  resize?.pause()
+  stage.value.style.height = `${stage.value.offsetHeight}px`
+  stage.value.style.overflow = 'clip'
+}
+/** Eases the held stage to the height of what it now holds, then lets it size itself again. */
+async function releaseStageHeight(): Promise<void> {
+  // Vue calls the enter hook before the entering chart's `onMounted`, where it draws its SVG; measured right away, the
+  // stage would ease to an empty chart's height and then jump to the drawn one. After this tick the chart is drawn.
+  await nextTick()
+  const element = stage.value
+  if (element == null || element.style.height === '')
+    return
+  const from = element.offsetHeight
+  element.style.height = ''
+  const to = element.offsetHeight
+  const settle = () => {
+    element.style.removeProperty('height')
+    element.style.removeProperty('overflow')
+  }
+  if (from === to)
+    return settle()
+  element.style.height = `${from}px`
+  resize = animate(element, { duration: SWAP.resizeMs, ease: 'outCubic', height: [from, to], onComplete: settle })
+}
+// -1 / 1 while a view swap to an earlier / later tab is running; 0 for a chart-type swap.
+let slide = 0
 function fadeIn(element: Element, done: () => void): void {
   if (reducedMotion.value === 'reduce')
     return done()
+  void releaseStageHeight()
+  const { offset, property } = swapMotion()
   animate(element, {
-    duration: CHART_FADE.enterMs,
+    duration: SWAP.enterMs,
     ease: 'outCubic',
     // The settled chart keeps no inline transform: one would become the containing block of fixed descendants.
     onComplete: () => {
@@ -130,21 +172,63 @@ function fadeIn(element: Element, done: () => void): void {
         element.style.removeProperty('transform')
         element.style.removeProperty('opacity')
       }
+      slide = 0
       done()
     },
     opacity: [0, 1],
-    translateY: [CHART_FADE.shiftPx, 0],
+    // A sideways swap enters from the side opposite to where the old view left; a vertical one settles from below.
+    [property]: [slide === 0 ? offset : -offset, 0],
   })
 }
 function fadeOut(element: Element, done: () => void): void {
   if (reducedMotion.value === 'reduce')
     return done()
-  animate(element, { duration: CHART_FADE.leaveMs, ease: 'inQuad', onComplete: () => done(), opacity: [1, 0], translateY: [0, CHART_FADE.shiftPx] })
+  holdStageHeight()
+  const { offset, property } = swapMotion()
+  animate(element, { duration: SWAP.leaveMs, ease: 'inQuad', onComplete: () => done(), opacity: [1, 0], [property]: [0, offset] })
+}
+/** Which way a swap moves, and how far the leaving element goes (the entering one comes from the other side). */
+function swapMotion() {
+  return slide === 0
+    ? { offset: SWAP.shiftPx, property: 'translateY' }
+    : { offset: -slide * SWAP.slidePx, property: 'translateX' }
 }
 const dimensions = computed(() => axes.value.filter(axis => axis.name !== 'state'))
 const parallel = computed(() => dimensions.value.length >= PARALLEL_FROM_DIMENSIONS)
 // On a plane a metric runs across and a category stacks its bands down the side, where its value labels fit.
 const planeAxes = computed(() => dimensions.value.toSorted((a, b) => Number(a.kind === 'category') - Number(b.kind === 'category')))
+const matrixMetrics = computed(() => numericAxes.value.slice(0, MAX_MATRIX_METRICS))
+
+/**
+ * How the picked axes are drawn: the chart for their count of dimensions, every pair of metrics as small
+ * scatterplots (matrix), or every pair as one cell colored by correlation with the picked pair's scatterplot under it
+ * (pairs). Matrix and pairs need two metrics; with fewer the chart is the only view.
+ */
+type CaseView = 'chart' | 'matrix' | 'pairs'
+const view = shallowRef<CaseView>('chart')
+const VIEW_ORDER: CaseView[] = ['chart', 'matrix', 'pairs']
+// Sync, so the direction is set before the transition hooks of this same update run.
+watch(view, (next, previous) => {
+  slide = Math.sign(VIEW_ORDER.indexOf(next) - VIEW_ORDER.indexOf(previous))
+}, { flush: 'sync' })
+const views = computed(() => numericAxes.value.length < 2
+  ? []
+  : [
+      { icon: 'i-mingcute-chart-line-line', label: 'Chart', value: 'chart' as const },
+      { icon: 'i-mingcute-grid-line', label: 'Matrix', value: 'matrix' as const },
+      { icon: 'i-mingcute-layout-grid-line', label: 'Pairs', value: 'pairs' as const },
+    ])
+watch(views, (items) => {
+  if (items.length === 0)
+    view.value = 'chart'
+})
+// The pair picked in the heatmap; it is dropped when one of its metrics leaves the axes.
+const pickedPair = shallowRef<[string, string]>()
+watch(numericAxes, (names) => {
+  if (pickedPair.value != null && !pickedPair.value.every(name => names.includes(name)))
+    pickedPair.value = undefined
+})
+const pairAxes = computed<ParallelAxis[]>(() => (pickedPair.value ?? []).map(name => ({ kind: 'numeric' as const, name })))
 
 /** Values of each category, most frequent first (`state` in its usual order). */
 const categoryValues = computed(() => {
@@ -162,14 +246,15 @@ const categoryValues = computed(() => {
   return result
 })
 
-const filters = shallowRef<CaseFilters>({ categories: {}, ranges: {} })
+const filters = shallowRef<CaseFilters>({ box: null, categories: {}, ranges: {} })
 function clearFilters(): void {
-  filters.value = { categories: {}, ranges: {} }
+  filters.value = { box: null, categories: {}, ranges: {} }
 }
 function dropFiltersOutside(): void {
-  const { categories, ranges } = filters.value
+  const { box, categories, ranges } = filters.value
   const numeric = new Set(numericAxes.value)
   filters.value = {
+    box: box != null && matrixMetrics.value.includes(box.x) && matrixMetrics.value.includes(box.y) ? box : null,
     categories: Object.fromEntries(Object.entries(categories).filter(([name]) => categoryAxes.value.includes(name))),
     ranges: Object.fromEntries(Object.entries(ranges).filter(([name]) => numeric.has(name))),
   }
@@ -190,7 +275,7 @@ function onPick(name: string, value: string): void {
     picked.add(value)
   filters.value = { ...filters.value, categories: { ...filters.value.categories, [name]: picked } }
 }
-const filtering = computed(() => Object.keys(filters.value.ranges).length > 0 || Object.values(filters.value.categories).some(set => set.size > 0))
+const filtering = computed(() => filters.value.box != null || Object.keys(filters.value.ranges).length > 0 || Object.values(filters.value.categories).some(set => set.size > 0))
 const selected = computed(() => new Set(table.value.rows.filter(row => matchesFilters(row, filters.value)).map(row => row.key)))
 watch([selected, filtering], () => {
   selection.value = filtering.value ? selected.value : undefined
@@ -328,10 +413,11 @@ const unitOf = (name: string) => definitions.value.get(name)?.unit
     <StateView :error="metrics.error.value" :loading="metrics.isPending.value" :empty="table.rows.length === 0" empty-text="No cases yet" @retry="metrics.refetch()">
       <div :class="['grid gap-3 p-3']">
         <!-- One toolbar row: the axes behind a button, the color, and what the selection holds. -->
-        <div :class="['flex flex-wrap items-center gap-x-3 gap-y-2 text-xs']">
+        <div :class="['flex flex-wrap items-center gap-x-2 gap-y-2 text-xs select-none']">
+          <SegmentedControl v-if="views.length > 0" v-model="view" :items="views" label="View" size="md" />
           <AxisPicker v-model:metrics="numericAxes" v-model:categories="categoryAxes" :label-of="labelOf" :separation="separation" :table="table" />
           <DropdownMenuRoot>
-            <DropdownMenuTrigger :class="['btn border border-neutral-300/70 dark:border-neutral-700/60 max-w-60']" data-testid="color-by">
+            <DropdownMenuTrigger :class="['option-trigger max-w-60']" data-testid="color-by">
               <span class="muted">Color by</span><span :class="['truncate']">{{ labelOf(colorBy) }}</span><span class="i-mingcute-down-line muted" aria-hidden="true" />
             </DropdownMenuTrigger>
             <DropdownMenuPortal>
@@ -350,7 +436,7 @@ const unitOf = (name: string) => definitions.value.get(name)?.unit
               </DropdownMenuContent>
             </DropdownMenuPortal>
           </DropdownMenuRoot>
-          <span :class="['inline-flex flex-wrap items-center gap-x-2.5 gap-y-1']">
+          <span :class="['inline-flex flex-wrap items-center gap-x-2.5 gap-y-1 ml-1']">
             <span v-for="item in legend" :key="item.label" :class="['inline-flex items-center gap-1']">
               <span :class="['inline-block w-3 h-1.5 rounded-sm']" :style="{ background: item.color }" />{{ item.label }}
             </span>
@@ -363,25 +449,46 @@ const unitOf = (name: string) => definitions.value.get(name)?.unit
           </button>
         </div>
 
-        <!-- Switching between the strip/plane and the parallel coordinates fades one out and the other in. -->
-        <Transition mode="out-in" :css="false" @enter="fadeIn" @leave="fadeOut">
-          <p v-if="dimensions.length === 0" key="empty" :class="['text-sm muted py-6 text-center']">
-            Pick a metric or a category in <b>Axes</b> to draw the cases.
-          </p>
-          <CaseCartesian
-            v-else-if="!parallel" key="plane"
-            :axes="planeAxes" :category-values="categoryValues" :color-of="colorOf" :filters="filters" :label-of="labelOf" :rows="table.rows" :scales="scales" :selected="selected"
-            :pinned-key="pinned?.key"
-            @brush="onBrush" @pick="onPick" @hover="onHover" @pin="onPin"
-          />
-          <ParallelCoordinates
-            v-else key="parallel"
-            :axes="axes" :category-values="categoryValues" :color-of="colorOf" :filters="filters" :label-of="labelOf" :rows="table.rows" :scales="scales" :selected="selected"
-            :pinned-key="pinned?.key"
-            @brush="onBrush" @pick="onPick" @hover="onHover" @pin="onPin" @reorder="names => axisOrder = names"
-            @inspect="(name, box) => inspected = name == null || box == null ? undefined : { left: box.left, name, top: box.bottom + 6 }"
-          />
-        </Transition>
+        <!-- Switching views, or the chart between strip/plane and parallel coordinates, fades one out and the other in. -->
+        <!-- The stage carries the height between the two: it grows or shrinks to the new view instead of jumping. -->
+        <div ref="stage">
+          <Transition mode="out-in" :css="false" @enter="fadeIn" @leave="fadeOut">
+            <div v-if="view === 'matrix'" key="matrix" :class="['grid gap-1']">
+              <div :class="['text-xs muted']">
+                Every pair of {{ matrixMetrics.map(labelOf).join(', ') }}<template v-if="numericAxes.length > MAX_MATRIX_METRICS">
+                  (the first {{ MAX_MATRIX_METRICS }} picked metrics)
+                </template>
+                · drag in a cell to select
+              </div>
+              <ScatterMatrix :color-of="colorOf" :filters="filters" :metrics="matrixMetrics" :label-of="labelOf" :rows="table.rows" :scales="scales" :selected="selected" :pinned-key="pinned?.key" @box="box => filters = { ...filters, box }" @hover="onHover" @pin="onPin" />
+            </div>
+            <div v-else-if="view === 'pairs'" key="pairs" :class="['grid gap-3']">
+              <PairsHeatmap :label-of="labelOf" :metrics="numericAxes" :rows="table.rows" :selected-pair="pickedPair" :separation="separation" @select="pair => pickedPair = pair" />
+              <CaseCartesian
+                v-if="pickedPair"
+                :axes="pairAxes" :category-values="categoryValues" :color-of="colorOf" :filters="filters" :label-of="labelOf" :rows="table.rows" :scales="scales" :selected="selected"
+                :pinned-key="pinned?.key"
+                @brush="onBrush" @pick="onPick" @hover="onHover" @pin="onPin"
+              />
+            </div>
+            <p v-else-if="dimensions.length === 0" key="empty" :class="['text-sm muted py-6 text-center']">
+              Pick a metric or a category in <b>Axes</b> to draw the cases.
+            </p>
+            <CaseCartesian
+              v-else-if="!parallel" key="plane"
+              :axes="planeAxes" :category-values="categoryValues" :color-of="colorOf" :filters="filters" :label-of="labelOf" :rows="table.rows" :scales="scales" :selected="selected"
+              :pinned-key="pinned?.key"
+              @brush="onBrush" @pick="onPick" @hover="onHover" @pin="onPin"
+            />
+            <ParallelCoordinates
+              v-else key="parallel"
+              :axes="axes" :category-values="categoryValues" :color-of="colorOf" :filters="filters" :label-of="labelOf" :rows="table.rows" :scales="scales" :selected="selected"
+              :pinned-key="pinned?.key"
+              @brush="onBrush" @pick="onPick" @hover="onHover" @pin="onPin" @reorder="names => axisOrder = names"
+              @inspect="(name, box) => inspected = name == null || box == null ? undefined : { left: box.left, name, top: box.bottom + 6 }"
+            />
+          </Transition>
+        </div>
         <!-- SVG axis titles cannot host a hover card, so the chart reports the hovered title and the card floats here. -->
         <div v-if="inspected" :class="['floating fixed p-2.5 text-xs pointer-events-none']" :style="{ left: `${inspected.left}px`, top: `${inspected.top}px` }">
           <MetricSummary :name="inspected.name" :definition="definitions.get(inspected.name)" :values="valuesOf(inspected.name)" />

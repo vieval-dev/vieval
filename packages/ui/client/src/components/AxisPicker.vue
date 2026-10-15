@@ -28,13 +28,13 @@ const categories = defineModel<string[]>('categories', { required: true })
 
 const isDesktop = useMediaQuery('(min-width: 768px)')
 const open = shallowRef(false)
-const trigger = 'btn border border-neutral-300/70 dark:border-neutral-700/60'
+const trigger = 'option-trigger'
 </script>
 
 <template>
   <PopoverRoot v-if="isDesktop" v-model:open="open">
     <PopoverTrigger :class="[trigger]" data-testid="axis-picker">
-      <span class="i-mingcute-settings-6-line" aria-hidden="true" />Axes <span :class="['mono muted']">{{ metrics.length + categories.length }}</span><span class="i-mingcute-down-line muted" aria-hidden="true" />
+      <span class="muted">Axes</span><span :class="['tabular-nums']">{{ metrics.length + categories.length }}</span><span class="i-mingcute-down-line muted" aria-hidden="true" />
     </PopoverTrigger>
     <PopoverPortal>
       <PopoverContent as-child align="start" :side-offset="6" :collision-padding="12" :class="['floating w-[26rem] max-w-[calc(100vw-1.5rem)] text-sm outline-none']">
@@ -47,7 +47,7 @@ const trigger = 'btn border border-neutral-300/70 dark:border-neutral-700/60'
   </PopoverRoot>
   <DrawerRoot v-else v-model:open="open">
     <button type="button" :class="[trigger]" data-testid="axis-picker" @click="open = true">
-      <span class="i-mingcute-settings-6-line" aria-hidden="true" />Axes <span :class="['mono muted']">{{ metrics.length + categories.length }}</span><span class="i-mingcute-down-line muted" aria-hidden="true" />
+      <span class="muted">Axes</span><span :class="['tabular-nums']">{{ metrics.length + categories.length }}</span><span class="i-mingcute-down-line muted" aria-hidden="true" />
     </button>
     <DrawerPortal>
       <DrawerOverlay :class="['fixed inset-0 z-50 bg-black/40']" />

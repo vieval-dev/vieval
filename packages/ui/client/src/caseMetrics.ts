@@ -4,7 +4,7 @@ import type { CaseNode, CaseState, MetricsResponse } from '../../src/shared/cont
 
 import { scaleLinear, scaleSymlog } from 'd3'
 
-/** One case of a task, flattened for the case charts (dots on a strip or a plane, parallel coordinates). */
+/** One case of a task, flattened for the multi-metric charts (parallel coordinates, scatterplot matrix). */
 export interface CaseRow {
   caseId: string
   /** Category values by axis name; always has `state`. */
@@ -15,6 +15,8 @@ export interface CaseRow {
   /** Numeric values by metric name; a metric the case did not record is absent. */
   numbers: Record<string, number>
   state: CaseState
+  /** Task the case belongs to; a run-wide table mixes the cases of every task. */
+  taskId: string
 }
 
 /** Cases of one task with the metric axes the charts can draw. */
@@ -50,8 +52,10 @@ const MAX_CATEGORY_VALUES = 24
 /** A metric whose max is this many times its median gets a symlog scale, so the bulk of cases is not squashed. */
 const HEAVY_TAIL_RATIO = 12
 
-/** Brushed ranges and picked categories that together select cases. */
+/** Brushed ranges, picked categories, and the scatterplot box that together select cases. */
 export interface CaseFilters {
+  /** One rectangle drawn in a scatterplot cell. */
+  box: null | { x: string, x0: number, x1: number, y: string, y0: number, y1: number }
   /** Picked values per category axis; an empty or missing set does not filter. */
   categories: Record<string, Set<string>>
   /** Inclusive `[low, high]` per numeric axis. */
@@ -74,10 +78,11 @@ export interface MetricSeparation {
  * independent signals.
  *
  * Use when:
- * - a task view draws every case against several metrics at once
+ * - a task or run view draws every case against several metrics at once
  *
  * Expects:
- * - `metrics` scoped to the same task (`GET /api/runs/:runKey/metrics?taskId=…`)
+ * - `metrics` scoped to the same cases (`GET /api/runs/:runKey/metrics`, with `?taskId=` for one task); points are
+ *   matched to cases by task id and case id
  *
  * Returns:
  * - one row per case with the value of its last round for every metric; built-in axes `duration_s`, `exact`,
@@ -86,12 +91,15 @@ export interface MetricSeparation {
  *   them in recording order, built-ins first
  */
 export function buildCaseTable(cases: readonly CaseNode[], metrics: MetricsResponse | undefined): CaseTable {
+  // Keyed like `CaseNode.key` (task id, NUL, case id): one case id repeats in every task of a run (an OSWorld question
+  // under each matrix combination), so the case id alone would mix the tasks' metrics on a run-wide table.
   const byCase = new Map<string, { numbers: Record<string, number>, rounds: Record<string, number>, strings: Record<string, string> }>()
-  const entryOf = (caseId: string) => {
-    let entry = byCase.get(caseId)
+  const entryOf = (taskId: string | undefined, caseId: string) => {
+    const key = `${taskId ?? ''}\u0000${caseId}`
+    let entry = byCase.get(key)
     if (entry == null) {
       entry = { numbers: {}, rounds: {}, strings: {} }
-      byCase.set(caseId, entry)
+      byCase.set(key, entry)
     }
     return entry
   }
@@ -100,7 +108,7 @@ export function buildCaseTable(cases: readonly CaseNode[], metrics: MetricsRespo
     for (const point of series.points) {
       if (point.caseId == null)
         continue
-      const entry = entryOf(point.caseId)
+      const entry = entryOf(point.taskId, point.caseId)
       const round = point.roundIndex ?? 0
       if ((entry.rounds[series.name] ?? -1) <= round) {
         entry.rounds[series.name] = round
@@ -112,13 +120,13 @@ export function buildCaseTable(cases: readonly CaseNode[], metrics: MetricsRespo
     for (const point of series.values) {
       // Flags (`gui_only: true`) split cases like any other category.
       if (point.caseId != null && (typeof point.value === 'string' || typeof point.value === 'boolean'))
-        entryOf(point.caseId).strings[series.name] = String(point.value)
+        entryOf(point.taskId, point.caseId).strings[series.name] = String(point.value)
     }
   }
 
   const grouped = cases.length > 0 && cases.every(node => node.name.includes('/'))
   const rows: CaseRow[] = cases.map((node) => {
-    const recorded = byCase.get(node.caseId)
+    const recorded = byCase.get(node.key)
     const numbers: Record<string, number> = { ...recorded?.numbers }
     if (node.durationMs != null)
       numbers.duration_s = node.durationMs / 1000
@@ -131,7 +139,7 @@ export function buildCaseTable(cases: readonly CaseNode[], metrics: MetricsRespo
     if (grouped)
       builtIn.group = node.name.slice(0, node.name.indexOf('/'))
     const categories: Record<string, string> = { ...builtIn, ...recorded?.strings, ...builtIn }
-    return { caseId: node.caseId, categories, key: node.key, name: node.name, numbers, state: node.state }
+    return { caseId: node.caseId, categories, key: node.key, name: node.name, numbers, state: node.state, taskId: node.taskId }
   })
 
   const builtIns = ['duration_s', 'exact', 'judge']
@@ -162,7 +170,7 @@ export function buildCaseTable(cases: readonly CaseNode[], metrics: MetricsRespo
       heavyTailed.add(name)
     let folded = false
     for (const group of groups) {
-      const r = correlation(rows, group.representative, name)
+      const r = correlationOf(rows, group.representative, name)
       if (Math.abs(r) >= SAME_SIGNAL_R) {
         group.members.push({ name, r })
         folded = true
@@ -189,6 +197,40 @@ export function buildCaseTable(cases: readonly CaseNode[], metrics: MetricsRespo
 }
 
 /**
+ * Pearson correlation of two metrics over the cases that recorded both, on `log1p` values so token counts that span
+ * several orders of magnitude are compared by shape, not by their few largest cases. `0` when either is flat.
+ *
+ * Use when:
+ * - folding metrics that carry the same signal, or showing how every pair of metrics moves together (pairs view)
+ */
+export function correlationOf(rows: readonly CaseRow[], left: string, right: string): number {
+  const pairs: [number, number][] = []
+  for (const row of rows) {
+    const a = row.numbers[left]
+    const b = row.numbers[right]
+    if (a != null && b != null)
+      pairs.push([Math.sign(a) * Math.log1p(Math.abs(a)), Math.sign(b) * Math.log1p(Math.abs(b))])
+  }
+  if (pairs.length < 3)
+    return 0
+  let meanA = 0
+  let meanB = 0
+  for (const [a, b] of pairs) {
+    meanA += a / pairs.length
+    meanB += b / pairs.length
+  }
+  let covariance = 0
+  let varianceA = 0
+  let varianceB = 0
+  for (const [a, b] of pairs) {
+    covariance += (a - meanA) * (b - meanB)
+    varianceA += (a - meanA) ** 2
+    varianceB += (b - meanB) ** 2
+  }
+  return varianceA === 0 || varianceB === 0 ? 0 : covariance / Math.sqrt(varianceA * varianceB)
+}
+
+/**
  * Whether a case passes every filter; a case without a value on a filtered numeric axis does not.
  *
  * Use when:
@@ -202,6 +244,13 @@ export function matchesFilters(row: CaseRow, filters: CaseFilters): boolean {
   }
   for (const [name, picked] of Object.entries(filters.categories)) {
     if (picked.size > 0 && !picked.has(row.categories[name] ?? ''))
+      return false
+  }
+  const box = filters.box
+  if (box != null) {
+    const x = row.numbers[box.x]
+    const y = row.numbers[box.y]
+    if (x == null || y == null || x < box.x0 || x > box.x1 || y < box.y0 || y > box.y1)
       return false
   }
   return true
@@ -249,37 +298,6 @@ export function shortMetricName(name: string, all: readonly string[]): string {
       return label
   }
   return name
-}
-
-/**
- * Pearson correlation of two metrics over the cases that recorded both, on `log1p` values so token counts that span
- * several orders of magnitude are compared by shape, not by their few largest cases. `0` when either is flat.
- */
-function correlation(rows: readonly CaseRow[], left: string, right: string): number {
-  const pairs: [number, number][] = []
-  for (const row of rows) {
-    const a = row.numbers[left]
-    const b = row.numbers[right]
-    if (a != null && b != null)
-      pairs.push([Math.sign(a) * Math.log1p(Math.abs(a)), Math.sign(b) * Math.log1p(Math.abs(b))])
-  }
-  if (pairs.length < 3)
-    return 0
-  let meanA = 0
-  let meanB = 0
-  for (const [a, b] of pairs) {
-    meanA += a / pairs.length
-    meanB += b / pairs.length
-  }
-  let covariance = 0
-  let varianceA = 0
-  let varianceB = 0
-  for (const [a, b] of pairs) {
-    covariance += (a - meanA) * (b - meanB)
-    varianceA += (a - meanA) ** 2
-    varianceB += (b - meanB) ** 2
-  }
-  return varianceA === 0 || varianceB === 0 ? 0 : covariance / Math.sqrt(varianceA * varianceB)
 }
 
 /** Whether two categories split the cases the same way, value for value (`exact` 1/0 against `state` passed/failed). */
