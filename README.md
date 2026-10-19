@@ -1,11 +1,10 @@
 # Vieval
 
-[![npm version][npm-version-src]][npm-version-href]
-[![npm downloads][npm-downloads-src]][npm-downloads-href]
+[![npm version][npmx-version-src]][npmx-version-href]
+[![npm downloads][npmx-downloads-src]][npmx-downloads-href]
 [![bundle][bundle-src]][bundle-href]
-[![JSDocs][jsdocs-src]][jsdocs-href]
 [![License][license-src]][license-href]
-[![Ask DeepWiki][deepwiki-src]][deepwiki-href]
+[![JSDocs][jsdocs-src]][jsdocs-href]
 
 Vitest-style evaluation framework for agents, models, and task pipelines.
 
@@ -539,15 +538,13 @@ Do not use `vieval` when:
 
 MIT
 
-[npm-version-src]: https://img.shields.io/npm/v/vieval?style=flat&colorA=080f12&colorB=1fa669
-[npm-version-href]: https://npmjs.com/package/vieval
-[npm-downloads-src]: https://img.shields.io/npm/dm/vieval?style=flat&colorA=080f12&colorB=1fa669
-[npm-downloads-href]: https://npmjs.com/package/vieval
-[bundle-src]: https://img.shields.io/bundlephobia/minzip/vieval?style=flat&colorA=080f12&colorB=1fa669&label=minzip
+[npmx-version-src]: https://npmx.dev/api/registry/badge/version/vieval
+[npmx-version-href]: https://npmx.dev/vieval
+[npmx-downloads-src]: https://npmx.dev/api/registry/badge/downloads-month/vieval
+[npmx-downloads-href]: https://npmx.dev/vieval
+[bundle-src]: https://npmx.dev/api/registry/badge/size/vieval
 [bundle-href]: https://bundlephobia.com/result?p=vieval
-[license-src]: https://img.shields.io/github/license/vieval-dev/vieval.svg?style=flat&colorA=080f12&colorB=1fa669
+[license-src]: https://npmx.dev/api/registry/badge/license/vieval
 [license-href]: https://github.com/vieval-dev/vieval/blob/main/LICENSE
 [jsdocs-src]: https://img.shields.io/badge/jsdocs-reference-080f12?style=flat&colorA=080f12&colorB=1fa669
 [jsdocs-href]: https://www.jsdocs.io/package/vieval
-[deepwiki-src]: https://deepwiki.com/badge.svg
-[deepwiki-href]: https://deepwiki.com/vieval-dev/vieval
