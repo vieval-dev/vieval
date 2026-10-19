@@ -568,6 +568,7 @@ function normalizeExecutionPolicy(
     autoAttempt: policy.autoAttempt,
     autoRetry: policy.autoRetry,
     autoRetryDelay: policy.autoRetryDelay,
+    autoRetryIf: policy.autoRetryIf,
     timeout: policy.timeout,
   }
 
@@ -626,6 +627,7 @@ function resolveModelExecutionPolicy(options: ChatModelFromOptions): TaskExecuti
     autoAttempt: options.autoAttempt ?? options.executionPolicy?.autoAttempt,
     autoRetry: options.autoRetry ?? options.executionPolicy?.autoRetry,
     autoRetryDelay: options.autoRetryDelay ?? options.executionPolicy?.autoRetryDelay,
+    autoRetryIf: options.executionPolicy?.autoRetryIf,
     timeout: options.timeout ?? options.executionPolicy?.timeout,
   })
 
