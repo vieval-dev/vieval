@@ -9,6 +9,7 @@ import type { InterruptSignal } from './interrupt'
 import type { ReportEventLog } from './report-log'
 import type { CliReporter, SummaryReporter, SummaryReporterCaseStartPayload, SummaryReporterTaskQueuedPayload } from './reporters'
 import type { WindowRendererTimer } from './reporters/renderers/windowed-renderer'
+import type { MeasuredCases } from './resume'
 import type { RunReadyContext, RunReadyDisposer, RunReadyHook } from './viewer-host'
 
 import process from 'node:process'
@@ -33,11 +34,12 @@ import { loadVievalCliConfig } from './config'
 import { discoverEvalFiles } from './discovery'
 import { exitCodeFromSignal, listenForInterrupt } from './interrupt'
 import { loadEvalModulesWithVitestRuntime } from './module-runtime'
-import { resolveRunReportDirectory, writeRunReportArtifacts } from './report-artifacts'
+import { resolveRunReportDirectory, sanitizeIdentitySegment, writeRunReportArtifacts } from './report-artifacts'
 import { createReportEventLog } from './report-log'
 import { createCliReporter } from './reporters'
 import { WindowRenderer } from './reporters/renderers/windowed-renderer'
 import { subscribeVitestCompatReporters } from './reporters/vitest-compat-reporter'
+import { readMeasuredCases, resolveResumedAttemptId } from './resume'
 
 /**
  * Captures one failed case with its message for CLI and JSON debugging output.
@@ -111,6 +113,8 @@ export interface CliRunOutput {
   invocationId?: string
   /** One summary per project; each project ran as its own run (`runId`, `reportDirectory`). */
   projects: CliProjectSummary[]
+  /** Attempt this invocation continued with `--resume`; its measured cases were not run again. */
+  resumedFrom?: string
   workspaceId?: string
 }
 
@@ -198,6 +202,12 @@ export interface RunVievalCliOptions extends LoadVievalCliConfigOptions {
    * @default `.vieval/reports` next to the config file, or under `cwd` without a config file
    */
   reportOut?: string
+  /**
+   * Attempt of the same experiment to continue, or `latest`: runs, as a new attempt, only the cases that have no
+   * result there (errored, timed out, or never run). Tasks whose cases all have a result are skipped.
+   * Needs reports, because the earlier attempt is read from the report root.
+   */
+  resume?: string
   /**
    * Lets project, task, and case selectors match nothing here instead of failing.
    *
@@ -708,15 +718,18 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
       assertSelectorsMatch(preparedProjects, options.task ?? [], options.case ?? [])
     }
     const caseSelectors = options.case ?? []
-    const selectsCase = caseSelectors.length === 0 ? undefined : (caseName: string) => caseSelectors.some(selector => matchesSelector(caseName, selector))
     const invocation = createInvocationIdentity(options, preparedProjects, loadedConfig.configFilePath)
     // The report directories are fixed before execution so events and artifacts reach disk while the runs are in progress.
     const reportRoot = options.report === false
       ? undefined
       : resolve(options.reportOut ?? join(loadedConfig.configFilePath == null ? (options.cwd ?? process.cwd()) : dirname(loadedConfig.configFilePath), '.vieval', 'reports'))
+    const resumed = options.resume == null
+      ? undefined
+      : await prepareResume(options.resume, preparedProjects, invocation, reportRoot)
+    const selectsCaseOf = createCaseSelection(caseSelectors, resumed?.measured)
     // One run per project: its own bus, `events.jsonl`, and report directory, so the report layout keeps the
     // project level. Runs of one invocation share the invocation identity.
-    for (const preparedProject of preparedProjects) {
+    for (const preparedProject of resumed?.projects ?? preparedProjects) {
       projectRuns.push(await createProjectRun(preparedProject, invocation, reportRoot))
     }
     const runReporter = createRunReporter(options.reporter)
@@ -791,7 +804,7 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
           for (const task of run.prepared.prepared.tasks) {
             await run.bus.scope({ projectId: run.name, taskId: task.id }).emit(taskQueued, {
               displayName: formatTaskDisplayName(task),
-              totalCases: task.entry.task?.caseNames?.filter(name => selectsCase?.(name) ?? true).length,
+              totalCases: task.entry.task?.caseNames?.filter(name => selectsCaseOf(run.name, task.id)?.(name) ?? true).length,
             })
           }
         }
@@ -802,7 +815,7 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
           interruptSignal: interruption.signal,
           runConcurrency,
           runScheduler,
-          selectsCase,
+          selectsCaseOf: taskId => selectsCaseOf(run.name, taskId),
           sharedCache: options.sharedCache,
           telemetry,
         })
@@ -825,6 +838,7 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
             ...(invocation.comparisonId == null ? {} : { comparisonId: invocation.comparisonId }),
             ...(interruptSignal == null ? {} : { interruptSignal }),
             projects: [projectSummary],
+            ...(resumed == null ? {} : { resumedFrom: resumed.attemptId }),
             workspaceId: invocation.workspaceId,
           }, run.identity, run.reportDirectory)
         }
@@ -846,6 +860,7 @@ export async function runVievalCli(options: RunVievalCliOptions = {}): Promise<C
         invocationId: invocation.invocationId,
         projects: projectSummaries,
         ...(interruptSignal == null ? {} : { interruptSignal }),
+        ...(resumed == null ? {} : { resumedFrom: resumed.attemptId }),
         workspaceId: invocation.workspaceId,
       }
     })
@@ -1022,6 +1037,29 @@ function createAutoTaskExecutor(): ScheduledTaskExecutor {
       matrix: task.matrix,
       scores: [...output.scores],
     }
+  }
+}
+
+/**
+ * Builds the case filter of each task: the `--case` selectors, then, when resuming, the cases without a result.
+ *
+ * Returns:
+ * - a function from project and task to that task's filter, or `undefined` when every case runs
+ */
+function createCaseSelection(
+  caseSelectors: readonly string[],
+  measured: ReadonlyMap<string, MeasuredCases> | undefined,
+): (projectName: string, taskId: string) => ((caseName: string) => boolean) | undefined {
+  const selectedByName = caseSelectors.length === 0
+    ? undefined
+    : (caseName: string) => caseSelectors.some(selector => matchesSelector(caseName, selector))
+
+  return (projectName, taskId) => {
+    const measuredNames = measured?.get(projectName)?.byTask.get(taskId)
+    if (measuredNames == null || measuredNames.size === 0) {
+      return selectedByName
+    }
+    return caseName => !measuredNames.has(caseName) && (selectedByName?.(caseName) ?? true)
   }
 }
 
@@ -1234,7 +1272,7 @@ async function executePreparedProject(
   bus: RunEventBus,
   runStorage: TaskRunStorage,
   signal: AbortSignal,
-  selectsCase: ((caseName: string) => boolean) | undefined,
+  selectsCaseOf: (taskId: string) => ((caseName: string) => boolean) | undefined,
 ): Promise<CliProjectSummary> {
   const settledTaskIds = new Set<string>()
   const projectEvents = bus.scope({ projectId: prepared.name })
@@ -1273,7 +1311,7 @@ async function executePreparedProject(
           runStorage,
           signal,
           scheduler,
-          selectsCase,
+          selectsCaseOf(task.id),
         )
       },
       onTaskEnd(task, state): void {
@@ -1348,7 +1386,8 @@ async function executeProjectRun(
     interruptSignal: AbortSignal
     runConcurrency: SchedulerConcurrencyConfig
     runScheduler: Scheduler
-    selectsCase: ((caseName: string) => boolean) | undefined
+    /** Case filter of one task; `undefined` runs every case. */
+    selectsCaseOf: (taskId: string) => ((caseName: string) => boolean) | undefined
     sharedCache: RunVievalCliOptions['sharedCache']
     telemetry: TelemetryRuntime
   },
@@ -1380,7 +1419,7 @@ async function executeProjectRun(
     run.bus,
     run.storage,
     options.interruptSignal,
-    options.selectsCase,
+    options.selectsCaseOf,
   )))
 }
 
@@ -1556,6 +1595,70 @@ async function prepareProject(project: NormalizedCliProjectConfig, taskSelectors
   }
 }
 
+/**
+ * Reads the attempt being resumed and drops the tasks that have nothing left to run.
+ *
+ * Call stack:
+ *
+ * {@link runVievalCli}
+ *   -> {@link prepareResume}
+ *     -> {@link resolveResumedAttemptId} (`latest` → the attempt that changed last)
+ *     -> {@link readMeasuredCases} (per project)
+ *
+ * Expects:
+ * - reports enabled (`reportRoot`), because the earlier attempt is read from there
+ *
+ * Returns:
+ * - the continued attempt id, measured case names per project, and the projects with only the tasks that still
+ *   have a case without a result. A task of a custom executor (no registered case names) always stays.
+ *
+ * Throws:
+ * - without a report root, when it would resume this same attempt, or when the attempt does not exist
+ */
+async function prepareResume(
+  requested: string,
+  preparedProjects: readonly PreparedCliProjectResult[],
+  invocation: CliInvocationIdentity,
+  reportRoot: string | undefined,
+): Promise<{ attemptId: string, measured: Map<string, MeasuredCases>, projects: PreparedCliProjectResult[] }> {
+  if (reportRoot == null) {
+    throw new Error('--resume reads the earlier attempt from the reports, so it cannot run with --no-report.')
+  }
+
+  const attemptId = await resolveResumedAttemptId({
+    experimentId: invocation.experimentId,
+    reportRoot,
+    requested,
+    workspaceIds: [invocation.workspaceId],
+  })
+  if (attemptId === invocation.attemptId) {
+    throw new Error(`--resume continues attempt "${attemptId}" as a new attempt; pass another --attempt id.`)
+  }
+
+  const measured = new Map<string, MeasuredCases>()
+  const projects = await Promise.all(preparedProjects.map(async (project): Promise<PreparedCliProjectResult> => {
+    if (project.kind !== 'prepared') {
+      return project
+    }
+    const projectMeasured = await readMeasuredCases({
+      attemptId,
+      experimentId: invocation.experimentId,
+      projectName: project.prepared.name,
+      reportRoot,
+      workspaceId: invocation.workspaceId,
+    })
+    measured.set(project.prepared.name, projectMeasured)
+    const tasks = project.prepared.tasks.filter((task) => {
+      const caseNames = task.entry.task?.caseNames
+      const measuredNames = projectMeasured.byTask.get(task.id)
+      return caseNames == null || measuredNames == null || caseNames.some(name => !measuredNames.has(name))
+    })
+    return { ...project, prepared: { ...project.prepared, tasks } }
+  }))
+
+  return { attemptId, measured, projects }
+}
+
 function resolveExperimentId(
   options: RunVievalCliOptions,
   preparedProjects: readonly PreparedCliProjectResult[],
@@ -1620,15 +1723,6 @@ function resolveRunConcurrency(
     project: smallestDeclared(config?.project, options.projectConcurrency) ?? projectDefault,
     task: taskConcurrency,
   }
-}
-
-function sanitizeIdentitySegment(value: string): string {
-  const normalized = value.trim()
-  if (normalized.length === 0) {
-    return 'default'
-  }
-
-  return normalized.replace(/[^\w.-]+/g, '-')
 }
 
 /**

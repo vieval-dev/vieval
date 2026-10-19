@@ -19,6 +19,7 @@ const concurrencyTaskProjectDirectory = join(packageDirectory, 'tests', 'project
 const executionPolicyAutoAttemptProjectDirectory = join(packageDirectory, 'tests', 'projects', 'execution-policy-auto-attempt')
 const executionPolicyAutoRetryProjectDirectory = join(packageDirectory, 'tests', 'projects', 'execution-policy-auto-retry')
 const executionPolicyTimeoutProjectDirectory = join(packageDirectory, 'tests', 'projects', 'execution-policy-timeout')
+const resumeProjectDirectory = join(packageDirectory, 'tests', 'projects', 'resume')
 const fixtureProjectDirectory = join(packageDirectory, 'tests', 'projects', 'example-pattern-byoa-bring-your-own-agent')
 const taskProjectDirectory = join(packageDirectory, 'tests', 'projects', 'example-api-defining-new-task')
 const temporaryDirectories: string[] = []
@@ -1803,6 +1804,59 @@ describeTask('cli-case-concurrency', (task) => {
 
     expect(output.experimentId).toBe('fixture-exp')
     expect(output.projects[0]?.executed).toBe(true)
+  })
+
+  /**
+   * @example
+   * an attempt with one errored case, then `--resume`: only that case runs, as a new attempt.
+   */
+  it('runs only the cases without a result of an earlier attempt with --resume', async () => {
+    const reportOut = await mkdtemp(join(tmpdir(), 'vieval-resume-'))
+    temporaryDirectories.push(reportOut)
+    const configFilePath = join(resumeProjectDirectory, 'vieval.config.ts')
+
+    const first = await runVievalCli({ attempt: 'attempt-first', configFilePath, cwd: resumeProjectDirectory, experiment: 'resume', reportOut })
+    expect(first.projects[0]?.caseSummary).toEqual({ errored: 1, failed: 1, passed: 3, skipped: 0, timeout: 0, total: 5 })
+
+    // The provider recovered: the errored case can produce a result now.
+    process.env.VIEVAL_TEST_PROVIDER_UP = '1'
+    try {
+      const resumed = await runVievalCli({ attempt: 'attempt-resumed', configFilePath, cwd: resumeProjectDirectory, experiment: 'resume', reportOut, resume: 'latest' })
+
+      expect(resumed.resumedFrom).toBe('attempt-first')
+      expect(resumed.attemptId).toBe('attempt-resumed')
+      // Only `flaky › provider` ran: the wrong answer is a result, and `stable` had nothing left, so it was skipped.
+      expect(resumed.projects[0]?.caseSummary).toEqual({ errored: 0, failed: 0, passed: 1, skipped: 0, timeout: 0, total: 1 })
+      expect(resumed.projects[0]?.taskCount).toBe(1)
+      expect(resumed.projects[0]?.result?.overall.exactAverage).toBe(1)
+
+      const summary = JSON.parse(await readFile(join(resumed.projects[0]!.reportDirectory!, 'run-summary.json'), 'utf-8')) as RunSummaryFile
+      expect(summary.resumedFrom).toBe('attempt-first')
+    }
+    finally {
+      delete process.env.VIEVAL_TEST_PROVIDER_UP
+    }
+  })
+
+  /**
+   * @example
+   * --resume with --no-report, of the running attempt, or of an attempt that does not exist -> an error.
+   */
+  it('rejects a resume it cannot read', async () => {
+    const reportOut = await mkdtemp(join(tmpdir(), 'vieval-resume-'))
+    temporaryDirectories.push(reportOut)
+    const configFilePath = join(resumeProjectDirectory, 'vieval.config.ts')
+    await runVievalCli({ attempt: 'attempt-first', configFilePath, cwd: resumeProjectDirectory, experiment: 'resume', reportOut })
+
+    await expect(runVievalCli({ configFilePath, cwd: resumeProjectDirectory, experiment: 'resume', report: false, resume: 'latest' }))
+      .rejects
+      .toThrow('cannot run with --no-report')
+    await expect(runVievalCli({ attempt: 'attempt-first', configFilePath, cwd: resumeProjectDirectory, experiment: 'resume', reportOut, resume: 'attempt-first' }))
+      .rejects
+      .toThrow('pass another --attempt id')
+    await expect(runVievalCli({ configFilePath, cwd: resumeProjectDirectory, experiment: 'resume', reportOut, resume: 'attempt-missing' }))
+      .rejects
+      .toThrow('has no attempt "attempt-missing"')
   })
 
   it('runs the execution-policy-timeout fixture and reports timeout cases distinctly', async () => {

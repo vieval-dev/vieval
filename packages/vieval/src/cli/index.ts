@@ -4,6 +4,7 @@ import meow from 'meow'
 
 import { runEvalRunCli } from './eval-run'
 import { runReportAnalyzeCli } from './report-analyze'
+import { runReportAttemptsCli } from './report-attempts'
 import { runReportCompareCli } from './report-case-compare'
 import { runReportCasesCli } from './report-cases'
 import { runReportIndexCli } from './report-index'
@@ -41,6 +42,7 @@ const topLevelHelpText = `
     $ vieval run --config vieval.config.ts --project chess --json --report-out .vieval/reports
     $ vieval run --config evals/agent-memory/vieval.config.ts --workspace mem9 --with-viewer --open
     $ vieval report analyze .vieval/reports/my-run
+    $ vieval report attempts --config vieval.config.ts
     $ vieval report index .vieval/reports --output .vieval/reports/index/runs.jsonl
     $ vieval viewer .vieval/reports
 `
@@ -122,6 +124,11 @@ export async function runTopLevelCli(argv: readonly string[]): Promise<void> {
       return
     }
 
+    if (reportSubcommand === 'attempts') {
+      await runReportAttemptsCli(parsed.commandArgv)
+      return
+    }
+
     if (reportSubcommand === 'index') {
       await runReportIndexCli(parsed.commandArgv)
       return
@@ -137,7 +144,7 @@ export async function runTopLevelCli(argv: readonly string[]): Promise<void> {
       return
     }
 
-    throw new Error(`Unsupported vieval report command "${reportSubcommand ?? '(none)'}". Expected "analyze", "index", "cases", or "compare".`)
+    throw new Error(`Unsupported vieval report command "${reportSubcommand ?? '(none)'}". Expected "analyze", "attempts", "index", "cases", or "compare".`)
   }
 
   if (parsed.command === 'viewer') {

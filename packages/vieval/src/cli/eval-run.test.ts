@@ -112,11 +112,23 @@ describe('parseCliArguments', () => {
       projectConcurrency: undefined,
       report: true,
       reportOut: undefined,
+      resume: undefined,
       task: [],
       taskConcurrency: undefined,
       workspace: [],
       workspaceConcurrency: undefined,
     })
+  })
+
+  /**
+   * @example
+   * expect(parseCliArguments(['run', '--resume'])).toMatchObject({ resume: 'latest' })
+   */
+  it('parses the attempt to resume, defaulting to the latest', () => {
+    expect(parseCliArguments(['run', '--resume'])).toMatchObject({ resume: 'latest' })
+    expect(parseCliArguments(['run', '--resume', '--json'])).toMatchObject({ json: true, resume: 'latest' })
+    expect(parseCliArguments(['run', '--resume', 'attempt-2026-10-19T06-36-24-868Z'])).toMatchObject({ resume: 'attempt-2026-10-19T06-36-24-868Z' })
+    expect(parseCliArguments(['run'])).toMatchObject({ resume: undefined })
   })
 
   it('supports equals form flags and ignores the run command token', () => {
