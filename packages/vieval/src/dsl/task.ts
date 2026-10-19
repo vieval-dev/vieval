@@ -188,6 +188,8 @@ interface CaseAutoAttempt {
 }
 
 interface CaseExecutionOutcome {
+  /** The thrown value of a failed or timed-out try, for `autoRetryIf` and `autoRetryDelay`. */
+  error?: unknown
   errorMessage?: string
   output?: unknown
   scoresByKind: Map<RunScoreKind, number>
@@ -378,7 +380,7 @@ async function executeRegisteredCase(
     }
 
     if (retryIndex > 0) {
-      const retryDelayMs = resolveAutoRetryDelay(resolvedPolicy, retryIndex)
+      const retryDelayMs = resolveAutoRetryDelay(resolvedPolicy, retryIndex, lastOutcome?.error)
       assertNonNegativeNumber(retryDelayMs, 'autoRetryDelay result')
 
       if (retryDelayMs > 0) {
@@ -401,6 +403,10 @@ async function executeRegisteredCase(
     })
     lastOutcome = await runCaseOnce(context, taskCase, index, resolvedPolicy.timeout, autoAttempt)
     if (lastOutcome.state === 'passed') {
+      return lastOutcome
+    }
+    // Asked only when a retry is left, so `retryIndex + 1` is always a retry that can start.
+    if (retryIndex < resolvedPolicy.autoRetry && resolvedPolicy.autoRetryIf?.(lastOutcome.error, retryIndex + 1) === false) {
       return lastOutcome
     }
   }
@@ -445,6 +451,7 @@ function normalizeExecutionPolicy(policy: TaskExecutionPolicy | undefined, label
     autoAttempt: policy.autoAttempt,
     autoRetry: policy.autoRetry,
     autoRetryDelay: policy.autoRetryDelay,
+    autoRetryIf: policy.autoRetryIf,
     timeout: policy.timeout,
   }
 
@@ -453,24 +460,25 @@ function normalizeExecutionPolicy(policy: TaskExecutionPolicy | undefined, label
     : undefined
 }
 
-function resolveAutoRetryDelay(policy: TaskExecutionPolicy, retryIndex: number): number {
+function resolveAutoRetryDelay(policy: TaskExecutionPolicy, retryIndex: number, error: unknown): number {
   const delay = policy.autoRetryDelay
 
   if (delay == null) {
     return autoRetryDelayMs(retryIndex)
   }
 
-  return typeof delay === 'number' ? delay : delay(retryIndex)
+  return typeof delay === 'number' ? delay : delay(retryIndex, error)
 }
 
 function resolveCaseExecutionPolicy(
   taskCase: RegisteredCase<unknown>,
   taskExecutionPolicy: TaskExecutionPolicy | undefined,
-): Pick<TaskExecutionPolicy, 'autoRetryDelay' | 'timeout'> & Required<Pick<TaskExecutionPolicy, 'autoAttempt' | 'autoRetry'>> {
+): Pick<TaskExecutionPolicy, 'autoRetryDelay' | 'autoRetryIf' | 'timeout'> & Required<Pick<TaskExecutionPolicy, 'autoAttempt' | 'autoRetry'>> {
   return {
     autoAttempt: taskCase.executionPolicy?.autoAttempt ?? taskExecutionPolicy?.autoAttempt ?? 0,
     autoRetry: taskCase.executionPolicy?.autoRetry ?? taskExecutionPolicy?.autoRetry ?? 0,
     autoRetryDelay: taskCase.executionPolicy?.autoRetryDelay ?? taskExecutionPolicy?.autoRetryDelay,
+    autoRetryIf: taskCase.executionPolicy?.autoRetryIf ?? taskExecutionPolicy?.autoRetryIf,
     timeout: taskCase.executionPolicy?.timeout ?? taskExecutionPolicy?.timeout,
   }
 }
@@ -615,6 +623,7 @@ async function runCaseOnce(
     // Abort errors raised by the interrupt carry generic messages ("The operation was aborted"); the run's reason is clearer.
     const interruptMessage = context.signal?.aborted === true ? errorMessageFrom(context.signal.reason) : undefined
     return {
+      error,
       errorMessage: interruptMessage ?? errorMessageFrom(error) ?? (timedOut && timeout != null ? `Case timed out after ${timeout}ms.` : 'Unknown case failure.'),
       scoresByKind: customScoresByKind,
       state: timedOut ? 'timeout' : 'failed',

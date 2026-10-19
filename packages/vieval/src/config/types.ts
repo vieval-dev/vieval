@@ -323,9 +323,18 @@ export interface ScopedMatrices {
 /**
  * Delay policy for retries within one task case attempt.
  *
- * @param retryIndex Retry number where `1` is the first retry after the initial failure.
+ * A function receives `retryIndex`, where `1` is the first retry after the initial failure, and the error of the
+ * failed try, for example to wait for a provider's `Retry-After` (`readRetryAfter` of `vieval/core/inference-executors`).
  */
-export type TaskAutoRetryDelay = ((retryIndex: number) => number) | number
+export type TaskAutoRetryDelay = ((retryIndex: number, error: unknown) => number) | number
+
+/**
+ * Decides whether a failed case try runs again within the current attempt.
+ *
+ * It receives the error of the failed try (a case timeout error when the try timed out) and `retryIndex`, the
+ * number of the retry that would start, where `1` is the first retry.
+ */
+export type TaskAutoRetryIf = (error: unknown, retryIndex: number) => boolean
 
 /**
  * Allowed terminal outcomes for one task case.
@@ -446,6 +455,13 @@ export interface TaskExecutionPolicy {
    * @default retryIndex => 500 * 2 ** (retryIndex - 1)
    */
   autoRetryDelay?: TaskAutoRetryDelay
+  /**
+   * Retries only the failures it accepts, for example `isRetriableProviderError` of
+   * `vieval/core/inference-executors`, so that a bug or a wrong assertion fails at once instead of running again.
+   *
+   * @default every failure and timeout is retried
+   */
+  autoRetryIf?: TaskAutoRetryIf
   /**
    * Timeout in milliseconds for one case execution.
    */

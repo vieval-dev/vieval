@@ -134,7 +134,21 @@ describeTask('provider health', () => {
 
 :::
 
-`autoRetry: 2` 表示首次运行失败后最多再执行两次。只要其中一次通过，就不会继续重试；这些运行都计入同一次尝试。默认等待时间按重试序号增加：第一次重试前等待 500 毫秒，第二次重试前等待 1,000 毫秒。也可以把 `autoRetryDelay` 设为固定的非负毫秒数，或传入一个根据重试序号返回等待时间的函数。
+`autoRetry: 2` 表示首次运行失败后最多再执行两次。只要其中一次通过，就不会继续重试；这些运行都计入同一次尝试。默认等待时间按重试序号增加：第一次重试前等待 500 毫秒，第二次重试前等待 1,000 毫秒。也可以把 `autoRetryDelay` 设为固定的非负毫秒数，或传入一个函数，根据重试序号和上一次运行抛出的错误返回等待时间。`autoRetryIf` 用来限定哪些失败可以重试，这样断言错误会立即失败，不会被反复执行：
+
+```ts
+import { isRetriableProviderError, readRetryAfter } from 'vieval/core/inference-executors'
+
+const providerRetry = {
+  autoRetry: 3,
+  // 服务返回了 `Retry-After` 时，按它的要求等待。
+  autoRetryDelay: (retryIndex: number, error: unknown) => readRetryAfter(error) ?? 10_000 * 2 ** (retryIndex - 1),
+  // 只重试限流、服务端错误和连接中断。
+  autoRetryIf: isRetriableProviderError,
+}
+```
+
+用例重试会重新执行整个用例。如果只想重试失败的那一次服务调用，可以用 `vieval/core/inference-executors` 的 `runWithRetry` 包住这次调用。它默认在服务的 `Retry-After` 和带随机抖动的指数退避之间取较长的一个作为等待时间；传入 `{ signal }` 后，运行被中断时会立即停止等待。
 
 `autoAttempt: 1` 表示首次尝试结束后，最多再运行一次完整用例集。只有某个用例在用完重试次数后仍然失败或超时，并且尚未达到自己的尝试上限，Vieval 才会开始下一次尝试。每次完成的尝试都会参与任务分数计算。例如，同一个用例第一次失败、第二次通过时，最终的 `exact` 平均分为 `0.5`，后一次通过不会覆盖前一次失败。
 

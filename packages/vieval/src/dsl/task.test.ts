@@ -1141,6 +1141,96 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
     }
   })
 
+  /**
+   * it('passes the failed try error to the auto retry delay') lets a delay follow a provider `Retry-After`.
+   *
+   * @example
+   * autoRetryDelay: (retryIndex, error) => error.waitMs.
+   */
+  it('passes the failed try error to the auto retry delay', async () => {
+    const delayErrors: unknown[] = []
+    const failure = Object.assign(new Error('rate limited'), { statusCode: 429 })
+    let runs = 0
+
+    const taskDefinition = describeTask('dsl-case-auto-retry-delay-error', () => {
+      caseOf('retry-case', async () => {
+        runs += 1
+        if (runs === 1) {
+          throw failure
+        }
+      }, {
+        autoRetry: 1,
+        autoRetryDelay: (_retryIndex, error) => {
+          delayErrors.push(error)
+          return 0
+        },
+        input: 'retry',
+      })
+    })
+
+    const runResult = await taskDefinition.task!.run({
+      cache: createTestTaskCacheRuntime(),
+      models: createTestModels(),
+      task: {
+        entry: { description: 'd', directory: 'x', filePath: '/tmp/x.eval.ts', id: 'x', name: 'x' },
+        id: 'task-auto-retry-delay-error',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: createScheduledTaskMatrix(),
+      },
+    })
+
+    expect(delayErrors).toEqual([failure])
+    expect(runs).toBe(2)
+    expect(runResult.scores[0]?.score).toBe(1)
+  })
+
+  /**
+   * it('stops auto retries for failures that autoRetryIf rejects') keeps a wrong assertion from running again.
+   *
+   * @example
+   * autoRetryIf: error => error.statusCode === 429.
+   */
+  it('stops auto retries for failures that autoRetryIf rejects', async () => {
+    const decisions: Array<{ message: string, retryIndex: number }> = []
+    let runs = 0
+
+    const taskDefinition = describeTask('dsl-case-auto-retry-if', () => {
+      caseOf('retry-case', async () => {
+        runs += 1
+        if (runs === 1) {
+          throw Object.assign(new Error('rate limited'), { statusCode: 429 })
+        }
+        throw new Error('wrong answer')
+      }, {
+        autoRetry: 3,
+        autoRetryDelay: 0,
+        autoRetryIf: (error, retryIndex) => {
+          decisions.push({ message: (error as Error).message, retryIndex })
+          return (error as { statusCode?: number }).statusCode === 429
+        },
+        input: 'retry',
+      })
+    })
+
+    const runResult = await taskDefinition.task!.run({
+      cache: createTestTaskCacheRuntime(),
+      models: createTestModels(),
+      task: {
+        entry: { description: 'd', directory: 'x', filePath: '/tmp/x.eval.ts', id: 'x', name: 'x' },
+        id: 'task-auto-retry-if',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: createScheduledTaskMatrix(),
+      },
+    })
+
+    expect(runs).toBe(2)
+    expect(decisions).toEqual([
+      { message: 'rate limited', retryIndex: 1 },
+      { message: 'wrong answer', retryIndex: 2 },
+    ])
+    expect(runResult.scores[0]?.score).toBe(0)
+  })
+
   it('starts the next auto attempt only after the current task attempt fully settles', async () => {
     const releasesByAttempt = new Map<string, ReturnType<typeof createDeferredPromise>>()
     const started: string[] = []

@@ -122,7 +122,21 @@ describeTask('provider health', () => {
 })
 ```
 
-`autoRetry: 2` permits two additional case tries after the initial failure. Retries stop at the first pass and remain part of the same attempt. The default delays are exponential: 500 ms before retry 1, then 1,000 ms before retry 2. `autoRetryDelay` can instead be a fixed non-negative number or a function of the retry index.
+`autoRetry: 2` permits two additional case tries after the initial failure. Retries stop at the first pass and remain part of the same attempt. The default delays are exponential: 500 ms before retry 1, then 1,000 ms before retry 2. `autoRetryDelay` can instead be a fixed non-negative number or a function of the retry index and the error of the failed try. `autoRetryIf` limits retries to the failures it accepts, so a wrong assertion fails at once instead of running again:
+
+```ts
+import { isRetriableProviderError, readRetryAfter } from 'vieval/core/inference-executors'
+
+const providerRetry = {
+  autoRetry: 3,
+  // Wait for the provider's `Retry-After` when it sent one.
+  autoRetryDelay: (retryIndex: number, error: unknown) => readRetryAfter(error) ?? 10_000 * 2 ** (retryIndex - 1),
+  // Retry rate limits, server errors, and dropped connections only.
+  autoRetryIf: isRetriableProviderError,
+}
+```
+
+A case retry replays the whole case. To retry only the failed provider call, wrap that call in `runWithRetry` from `vieval/core/inference-executors`. Its default delay waits for the provider's `Retry-After` or an exponential backoff with jitter, whichever is longer, and passing `{ signal }` stops the wait when the run is interrupted.
 
 `autoAttempt: 1` permits one additional full task attempt. It starts only when a case still fails after its retries and that case has remaining attempts. Because the full registered case set runs again, attempt evidence includes both the earlier and later outcomes. For example, one failed attempt followed by one passing attempt contributes `0.5`, not a replacement pass of `1`.
 
