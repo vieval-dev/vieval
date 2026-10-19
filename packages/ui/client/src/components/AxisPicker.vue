@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { MetricDefinition } from '../../../src/shared/contract'
 import type { CaseTable, MetricSeparation } from '../caseMetrics'
 
 import { useMediaQuery } from '@vueuse/core'
@@ -14,9 +15,13 @@ import AxisPickerList from './AxisPickerList.vue'
  * of chips. A popover on desktop, a bottom drawer on phones, both around {@link AxisPickerList}.
  */
 const props = defineProps<{
+  /** Definition of a metric (label, description, unit) for its details. */
+  definitionOf: (name: string) => MetricDefinition | undefined
   labelOf: (name: string) => string
   separation: ReadonlyMap<string, MetricSeparation>
   table: CaseTable
+  /** Every case's value of a metric or category, for the distribution in its details. */
+  valuesOf: (name: string) => readonly unknown[]
 }>()
 /** Numeric axes on the chart, in chart order. */
 const metrics = defineModel<string[]>('metrics', { required: true })
@@ -40,7 +45,7 @@ const trigger = 'option-trigger'
       <PopoverContent as-child align="start" :side-offset="6" :collision-padding="12" :class="['floating w-[26rem] max-w-[calc(100vw-1.5rem)] text-sm outline-none']">
         <AnimatedContent>
           <!-- reka sets the space left under the trigger on the content; the list scrolls inside it. -->
-          <AxisPickerList v-model:metrics="metrics" v-model:categories="categories" :class="['max-h-[min(32rem,var(--reka-popover-content-available-height))]']" :label-of="props.labelOf" :separation="props.separation" :table="props.table" />
+          <AxisPickerList v-model:metrics="metrics" v-model:categories="categories" :class="['max-h-[min(32rem,var(--reka-popover-content-available-height))]']" details="hover" :definition-of="props.definitionOf" :label-of="props.labelOf" :separation="props.separation" :table="props.table" :values-of="props.valuesOf" />
         </AnimatedContent>
       </PopoverContent>
     </PopoverPortal>
@@ -59,7 +64,7 @@ const trigger = 'option-trigger'
         <DrawerDescription :class="['sr-only']">
           Pick the metrics and categories drawn on the case charts.
         </DrawerDescription>
-        <AxisPickerList v-model:metrics="metrics" v-model:categories="categories" :class="['flex-1']" :label-of="props.labelOf" :separation="props.separation" :table="props.table" />
+        <AxisPickerList v-model:metrics="metrics" v-model:categories="categories" :class="['flex-1']" details="drawer" :definition-of="props.definitionOf" :label-of="props.labelOf" :separation="props.separation" :table="props.table" :values-of="props.valuesOf" />
       </DrawerContent>
     </DrawerPortal>
   </DrawerRoot>

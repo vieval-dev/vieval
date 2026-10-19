@@ -3,10 +3,11 @@ import type { BrushBehavior, ScaleContinuousNumeric, Selection } from 'd3'
 
 import type { CaseFilters, CaseRow } from '../caseMetrics'
 
-import { axisBottom, axisLeft, bin, brush, format, max, select } from 'd3'
+import { axisBottom, axisLeft, bin, brush, max, select } from 'd3'
 import { onMounted, useTemplateRef, watch } from 'vue'
 
 import { shortMetricName } from '../caseMetrics'
+import { formatTick } from '../format'
 
 /**
  * Scatterplot matrix of cases: every pair of the given metrics in the lower triangle, the distribution of each
@@ -41,7 +42,6 @@ const root = useTemplateRef<HTMLElement>('root')
 const cell = 128
 const pad = 14
 const gutter = 36
-const tick = format('~s')
 
 type Group = Selection<SVGGElement, unknown, null, undefined>
 let dots: Selection<SVGCircleElement, CaseRow, SVGGElement, unknown>[] = []
@@ -175,10 +175,10 @@ function render(): void {
       group.call(behavior.move, [[xs(box.x0), ys(box.y1)], [xs(box.x1), ys(box.y0)]])
     // Ticks only along the outer edge, so the cells stay readable.
     if (column === 0) {
-      g.append('g').attr('transform', `translate(${pad - 3},0)`).call(axisLeft(ys).ticks(3).tickFormat(value => tick(value as number)).tickSize(3)).call(axisGroup => axisGroup.select('.domain').remove()).call(axisGroup => axisGroup.selectAll('text').attr('fill', 'var(--chart-text)'))
+      g.append('g').attr('transform', `translate(${pad - 3},0)`).call(axisLeft(ys).ticks(3).tickFormat(value => formatTick(value as number)).tickSize(3)).call(axisGroup => axisGroup.select('.domain').remove()).call(axisGroup => axisGroup.selectAll('text').attr('fill', 'var(--chart-text)'))
     }
     if (row === count - 1) {
-      g.append('g').attr('transform', `translate(0,${cell - pad + 3})`).call(axisBottom(xs).ticks(3).tickFormat(value => tick(value as number)).tickSize(3)).call(axisGroup => axisGroup.select('.domain').remove()).call(axisGroup => axisGroup.selectAll('text').attr('fill', 'var(--chart-text)'))
+      g.append('g').attr('transform', `translate(0,${cell - pad + 3})`).call(axisBottom(xs).ticks(3).tickFormat(value => formatTick(value as number)).tickSize(3)).call(axisGroup => axisGroup.select('.domain').remove()).call(axisGroup => axisGroup.selectAll('text').attr('fill', 'var(--chart-text)'))
     }
   }))
   paint()

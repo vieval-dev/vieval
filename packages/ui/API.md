@@ -157,9 +157,13 @@ All return `ComparisonResponse`: `columns` (each with the runs it covers), `rows
 |---|---|---|
 | `GET /api/matrix?workspace=&project=&experiment=` | `MatrixResponse` | Every run in scope (filters as in `/api/runs`; none = all runs; an unknown value is an empty matrix). |
 
-A cell is one eval entry × run-matrix row × eval-matrix row (from the task id). `latest` is the task of the newest
-run (by start time) with that cell: run, experiment, attempt, task state, case counts, exact and judge score.
-`history` lists every run with that cell, oldest first (one point per run: exact, state, start time). Two tasks of one
+A cell is one eval entry × run-matrix row × eval-matrix row (from the task id). Every run of a cell has a `coverage`:
+`full` (every expected case settled and at least one has a result; errored cases count as settled), `partial` (some
+expected cases never ran or never settled), or `none` (no case has a result). `latest` is the task of the newest run
+(by start time) that covered the cell fully or is still running it, else of the newest run: run, experiment, attempt,
+task state, coverage, expected case total (`caseTotal`), case counts, exact and judge score. A partial re-run of a few
+cases therefore never replaces a full run as the cell's score. `history` lists every run with that cell, oldest first
+(one point per run: attempt, coverage, case counts, exact, state, start time). Two tasks of one
 run in the same cell (several inference executors) keep the last one in queue order. `axes` lists the run-matrix axes,
 then the eval-matrix axes, each with its values in natural order. Cells are ordered by entry, then run row and eval
 row in natural order. Tasks whose id has no matrix are left out. The route builds every run's task nodes once.

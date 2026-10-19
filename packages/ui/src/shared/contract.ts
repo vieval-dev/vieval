@@ -67,8 +67,16 @@ export const caseCountsSchema = v.object({
 
 export const runListItemSchema = v.object({
   ...runIdentitySchema.entries,
+  /**
+   * Cases the run is expected to settle: known task totals, with the tasks that did not start yet extrapolated (see
+   * `RunProgress.cases.estimatedTotal`). `undefined` until a case started. Larger than `counts.total` when the run was
+   * interrupted or re-ran only some cases.
+   */
+  caseTotal: v.optional(v.number()),
   counts: caseCountsSchema,
   endedAt: v.optional(v.string()),
+  /** Eval-matrix axes of the run's tasks and their distinct values, sorted, like `matrix` for the run matrix. */
+  evalMatrix: v.record(v.string(), v.array(v.string())),
   exactAverage: nullableNumber,
   hybridAverage: nullableNumber,
   judgeAverage: nullableNumber,
@@ -575,6 +583,17 @@ export const imagePreviewSchema = v.object({
 })
 
 /**
+ * How much of a matrix cell one run measured.
+ *
+ * - `full`: every expected case of the task settled and at least one has a result (cases without a result are counted
+ *   in `counts.errored`, they do not make the run partial)
+ * - `partial`: some expected cases never ran or never settled (an interrupted run, a re-run of a few cases, a running
+ *   task)
+ * - `none`: no case has a result (every case errored, or none ran)
+ */
+export const cellCoverageSchema = v.picklist(['full', 'partial', 'none'])
+
+/**
  * One cell of the matrix overview: one eval entry × run-matrix row × eval-matrix row, across the runs in scope.
  */
 export const matrixCellSchema = v.object({
@@ -584,15 +603,24 @@ export const matrixCellSchema = v.object({
   evalRowId: v.string(),
   /** Every run that executed this cell, oldest first (one point per run for the cell's sparkline). */
   history: v.array(v.object({
+    attemptId: v.string(),
+    counts: caseCountsSchema,
+    coverage: cellCoverageSchema,
     exact: nullableNumber,
     runKey: v.string(),
     startedAt: v.optional(v.string()),
     state: v.string(),
   })),
-  /** Result of the newest run that executed this cell. */
+  /**
+   * Result of the run the cell shows: the newest run that covered the cell fully or is still running it; the newest
+   * run when none did. A partial re-run of a few cases therefore never replaces a full run as the headline.
+   */
   latest: v.object({
     attemptId: v.string(),
+    /** Expected cases of the task (`case.started.total`); `undefined` until its first case started. */
+    caseTotal: v.optional(v.number()),
     counts: caseCountsSchema,
+    coverage: cellCoverageSchema,
     exact: nullableNumber,
     experimentId: v.string(),
     judge: nullableNumber,
@@ -752,6 +780,7 @@ export type CaseDetail = v.InferOutput<typeof caseDetailSchema>
 export type CaseNode = v.InferOutput<typeof caseNodeSchema>
 export type CaseRound = v.InferOutput<typeof caseRoundSchema>
 export type CaseState = v.InferOutput<typeof caseStateSchema>
+export type CellCoverage = v.InferOutput<typeof cellCoverageSchema>
 export type ComparedRun = v.InferOutput<typeof comparedRunSchema>
 export type ComparisonCell = v.InferOutput<typeof comparisonCellSchema>
 export type ComparisonResponse = v.InferOutput<typeof comparisonResponseSchema>

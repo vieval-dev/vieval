@@ -874,11 +874,7 @@ export function estimateProgress(reducer: RunReducer, now: number): RunProgress 
   const elapsedMs = startedAtMs == null ? 0 : Math.max(0, endMs - startedAtMs)
   const history = progressHistory(reducer.settlements, startedAtMs, elapsedMs, completed)
 
-  const knownTasks = taskList.filter(task => task.caseTotal != null)
-  // Skipped tasks never start cases; they count as known with zero cases.
-  const skippedWithoutCases = taskList.filter(task => task.caseTotal == null && task.state === 'skipped').length
-  const knownTotal = knownTasks.reduce((sum, task) => sum + task.caseTotal!, 0)
-  const unknownTasks = Math.max(0, totalTasks - knownTasks.length - skippedWithoutCases)
+  const { knownTasks, knownTotal, unknownTasks } = taskTotals(reducer)
 
   if (run.terminated) {
     return {
@@ -892,7 +888,7 @@ export function estimateProgress(reducer: RunReducer, now: number): RunProgress 
     }
   }
 
-  if (knownTasks.length === 0 || completed === 0) {
+  if (knownTasks === 0 || completed === 0) {
     return {
       basis: 'unknown',
       cases: { completed, knownTotal, running, waiting },
@@ -903,8 +899,7 @@ export function estimateProgress(reducer: RunReducer, now: number): RunProgress 
     }
   }
 
-  const meanTotal = knownTotal / knownTasks.length
-  const estimatedTotal = Math.round(knownTotal + unknownTasks * meanTotal) + extraRounds
+  const estimatedTotal = expectedCases(reducer)! + extraRounds
   const throughputEtaMs = Math.max(0, Math.round(elapsedMs / completed * estimatedTotal) - elapsedMs)
   const etaMs = running > 0 ? Math.max(throughputEtaMs, longestRunningMs) : throughputEtaMs
   return {
@@ -918,6 +913,23 @@ export function estimateProgress(reducer: RunReducer, now: number): RunProgress 
     ratio: estimatedTotal === 0 ? 0 : Math.min(1, completed / estimatedTotal),
     tasks: { completed: completedTasks, total: totalTasks },
   }
+}
+
+/**
+ * Cases a run is expected to settle once: the case totals of its started tasks, plus the tasks that did not start
+ * yet at the mean of the known totals (rounds of auto attempts are not counted).
+ *
+ * Use when:
+ * - telling a finished run that covered every case from one that was interrupted or ran only some tasks
+ *
+ * Returns:
+ * - `undefined` until a task announced its case total
+ */
+export function expectedCases(reducer: RunReducer): number | undefined {
+  const { knownTasks, knownTotal, unknownTasks } = taskTotals(reducer)
+  if (knownTasks === 0)
+    return undefined
+  return Math.round(knownTotal + unknownTasks * (knownTotal / knownTasks))
 }
 
 /**
@@ -1090,6 +1102,20 @@ function splitOutputLines(content: string): string[] {
     lines.pop()
   }
   return lines
+}
+
+/** Case totals of a run's tasks: how many tasks announced one, their sum, and how many tasks are still unknown. */
+function taskTotals(reducer: RunReducer): { knownTasks: number, knownTotal: number, unknownTasks: number } {
+  const taskList = [...reducer.tasks.values()]
+  const totalTasks = reducer.run().totalTasks ?? taskList.length
+  const known = taskList.filter(task => task.caseTotal != null)
+  // Skipped tasks never start cases; they count as known with zero cases.
+  const skippedWithoutCases = taskList.filter(task => task.caseTotal == null && task.state === 'skipped').length
+  return {
+    knownTasks: known.length,
+    knownTotal: known.reduce((sum, task) => sum + task.caseTotal!, 0),
+    unknownTasks: Math.max(0, totalTasks - known.length - skippedWithoutCases),
+  }
 }
 
 /** A round the run ended while it ran (`unfinished`) produced no result, like an errored one. */

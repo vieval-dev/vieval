@@ -81,7 +81,9 @@ export default defineConfig({
     // No result and execution trouble: `errored`, `timeout`, interrupted runs, retries, stale runs, warnings.
     'state-interrupted': '[background-color:color-mix(in_oklab,var(--mark-errored)_16%,transparent)] [color:var(--ink-errored)]',
     'state-neutral': 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300',
-    'state-passed': '[background-color:color-mix(in_oklab,var(--mark-passed)_16%,transparent)] [color:var(--ink-passed)]',
+    // The expected outcome stays quiet (green icon and text, no tint), so the tinted states that need a look stand out
+    // in lists where nearly every row passed.
+    'state-passed': '[color:var(--ink-passed)]',
     'state-running': '[background-color:color-mix(in_oklab,var(--mark-running)_16%,transparent)] [color:var(--ink-running)]',
     // The link covers its nearest positioned ancestor (a card); controls inside the card need `relative z-1`.
     'stretched-link': 'after:(content-[""] absolute inset-0)',

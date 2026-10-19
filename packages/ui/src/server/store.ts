@@ -14,7 +14,7 @@ import { hybridAverage } from 'vieval/core/scoring'
 
 import * as v from 'valibot'
 
-import { average, axisValues, buildTaskNodes, countCases, createRunReducer } from '../shared/reduce'
+import { average, axisValues, buildTaskNodes, countCases, createRunReducer, expectedCases } from '../shared/reduce'
 import { createEventTail } from './event-tail'
 import { parseJsonText } from './files'
 
@@ -351,8 +351,10 @@ export function toRunListItem(handle: RunHandle, now: number, tasks: readonly Ta
   const run = reducer.run()
   return {
     ...identity,
+    caseTotal: expectedCases(reducer),
     counts,
     endedAt: run.endedAt,
+    evalMatrix: axisValues(tasks.flatMap(task => task.matrix == null ? [] : [task.matrix.eval])),
     exactAverage,
     hybridAverage: hybridAverage(exactAverage, judgeAverage),
     judgeAverage,

@@ -1,3 +1,8 @@
+import { format } from 'd3'
+
+const compactNumber = format('~s')
+const plainNumber = format('~r')
+
 /**
  * Formats a byte count.
  *
@@ -18,6 +23,20 @@ export function formatBytes(bytes: number): string {
     unit += 1
   }
   return `${value.toFixed(1)} ${units[unit]}`
+}
+
+/**
+ * Formats a number for a chart tick or a band edge: SI suffixes from 1 000 on, at most three significant digits below,
+ * so a 0–1 score reads `0.8`, not `800m`.
+ *
+ * Before:
+ * - 0.8, 0.6666666, 12, 48213
+ *
+ * After:
+ * - "0.8", "0.667", "12", "48.2k"
+ */
+export function formatTick(value: number): string {
+  return Math.abs(value) >= 1000 ? compactNumber(Number(value.toPrecision(3))) : plainNumber(Number(value.toPrecision(3)))
 }
 
 /** Compact notation for large counts; one formatter, because creating `Intl.NumberFormat` is not free. */

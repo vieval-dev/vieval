@@ -10,14 +10,14 @@ import StateView from './StateView.vue'
 
 import { api } from '../api'
 import { useCatalog } from '../composables/useCatalog'
-import { countOf, shortTaskId } from '../format'
-import { attemptLabel } from '../labels'
+import { countOf, formatScore, shortTaskId } from '../format'
+import { attemptLabel, formatShortDateTime } from '../labels'
 import { href } from '../router'
 
 /**
  * Matrix of a project or experiment (`GET /api/matrix`): one grid per eval entry, rows along the run axis with the
  * most values (for example `model`), columns for the combinations of the other axes (for example `repeat`). A cell
- * is the newest run of that combination, with the trend of every run before it.
+ * is the newest run that covered that combination fully (see `MatrixCell.latest`), with the trend of every run.
  */
 const props = defineProps<{ experiment?: string, project: string, workspace: string }>()
 
@@ -105,22 +105,38 @@ const grids = computed<Grid[]>(() => {
   }
   return [...byEntry.entries()].map(([entryId, cells]) => buildGrid(entryId, cells, response))
 })
+/** When a point of a cell's history started: its run's start time, else the attempt label. */
+function pointTime(point: MatrixCell['history'][number]): string {
+  return point.startedAt == null ? attemptLabel(point.attemptId) : formatShortDateTime(new Date(point.startedAt))
+}
+
 /**
- * Change of the exact score from the run before the newest one, in percentage points; `undefined` when the cell has
- * fewer than two scored runs.
+ * Change of the exact score from the previous full run, in percentage points; `undefined` unless the cell's run and an
+ * earlier run both covered the cell fully (a partial run or one without a result is no baseline).
  */
 function scoreDelta(cell: MatrixCell): number | undefined {
-  const scored = cell.history.map(point => point.exact).filter((exact): exact is number => exact != null)
-  if (scored.length < 2)
+  if (cell.latest.coverage !== 'full' || cell.latest.exact == null)
     return undefined
-  return (scored.at(-1)! - scored.at(-2)!) * 100
+  const index = cell.history.findIndex(point => point.runKey === cell.latest.runKey)
+  const previous = cell.history.slice(0, Math.max(0, index)).findLast(point => point.coverage === 'full' && point.exact != null)
+  return previous == null ? undefined : (cell.latest.exact - previous.exact!) * 100
+}
+
+const COVERAGE_TEXT = { full: 'every case', none: 'no result', partial: 'some cases' } as const
+/** Tooltip of one history point: when, how much it measured, and its score. */
+function pointTitle(point: MatrixCell['history'][number]): string {
+  const measured = point.counts.passed + point.counts.failed
+  return `${pointTime(point)} · ${COVERAGE_TEXT[point.coverage]} (${measured} with a result) · exact ${formatScore(point.exact)}`
 }
 </script>
 
 <template>
   <StateView :error="matrix.error.value" :loading="matrix.isPending.value" :empty="grids.length === 0" empty-text="No matrix rows" empty-hint="Runs without tasks have nothing to show here." skeleton="matrix" @retry="matrix.refetch()">
-    <p :class="['text-xs muted mb-3']">
-      Newest run of every combination across {{ matrix.data.value?.runCount }} run(s); the line shows the exact score of each run before it.
+    <p :class="['flex flex-wrap items-center gap-x-3 gap-y-1 text-xs muted mb-3']">
+      <span>Newest full run of every combination across {{ matrix.data.value?.runCount }} run(s); a partial re-run never replaces it.</span>
+      <span :class="['inline-flex items-center gap-1']"><svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="2.5" fill="var(--series-1)" /></svg>full run</span>
+      <span :class="['inline-flex items-center gap-1']"><svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="2.5" fill="none" stroke="var(--series-1)" stroke-width="1.25" stroke-dasharray="1.5 1.2" /></svg>partial run</span>
+      <span :class="['inline-flex items-center gap-1']"><svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="2.5" fill="none" stroke="var(--mark-errored)" stroke-width="1.25" /></svg>no result</span>
     </p>
     <section v-for="grid in grids" :key="grid.entryId" :class="['card mb-4 overflow-x-auto']" :data-testid="`matrix-${grid.entryId}`">
       <h2 :class="['card-title']" :title="shortTaskId(grid.entryId)">
@@ -149,7 +165,7 @@ function scoreDelta(cell: MatrixCell): number | undefined {
                 :href="href({ name: 'task', runKey: cell.latest.runKey, taskId: cell.latest.taskId })"
                 :score="cell.latest.exact"
                 :state="cell.latest.state"
-                :counts="cell.latest.counts"
+                :counts="{ ...cell.latest.counts, total: Math.max(cell.latest.counts.total, cell.latest.caseTotal ?? 0) }"
                 :run="runOf(cell)"
                 data-testid="matrix-cell"
               >
@@ -157,15 +173,21 @@ function scoreDelta(cell: MatrixCell): number | undefined {
                   <span
                     v-if="scoreDelta(cell) !== undefined && Math.abs(scoreDelta(cell)!) >= 0.05"
                     :class="['inline-flex items-center text-xs font-medium tabular-nums', scoreDelta(cell)! > 0 ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400']"
-                    :title="`${scoreDelta(cell)! > 0 ? '+' : ''}${scoreDelta(cell)!.toFixed(1)} points from the run before`"
+                    :title="`${scoreDelta(cell)! > 0 ? '+' : ''}${scoreDelta(cell)!.toFixed(1)} points from the previous full run`"
                     data-testid="matrix-cell-delta"
                   >
                     <span :class="[scoreDelta(cell)! > 0 ? 'i-mingcute-arrow-up-line' : 'i-mingcute-arrow-down-line']" aria-hidden="true" />{{ Math.abs(scoreDelta(cell)!).toFixed(1) }}
                   </span>
                 </template>
                 <span :class="['flex items-center gap-1.5 min-w-0']" :title="`${attemptLabel(cell.latest.attemptId)} · ${cell.latest.runKey}`">
-                  <span :class="['truncate']">{{ attemptLabel(cell.latest.attemptId) }} · {{ countOf(cell.history.length, 'run') }}</span>
-                  <Sparkline :class="['ml-auto']" :values="cell.history.map(point => point.exact)" :label="`exact score of ${cell.history.length} runs`" :width="48" :height="16" />
+                  <span :class="['truncate']">{{ cell.latest.startedAt ? formatShortDateTime(new Date(cell.latest.startedAt)) : attemptLabel(cell.latest.attemptId) }} · {{ countOf(cell.history.length, 'run') }}</span>
+                  <Sparkline
+                    :class="['ml-auto']" :values="cell.history.map(point => point.exact)" :coverage="cell.history.map(point => point.coverage)" :titles="cell.history.map(pointTitle)"
+                    :label="`exact score of ${cell.history.length} runs`" :width="48" :height="16"
+                  />
+                </span>
+                <span v-if="cell.latest.coverage !== 'full' && cell.latest.state !== 'running' && cell.latest.state !== 'queued'" :class="['flex items-center gap-1.5 [color:var(--ink-errored)]']" data-testid="matrix-cell-partial">
+                  <span class="i-mingcute-alert-octagon-line" aria-hidden="true" />{{ cell.latest.counts.passed + cell.latest.counts.failed }} of {{ Math.max(cell.latest.counts.total, cell.latest.caseTotal ?? 0) }} cases with a result · no full run yet
                 </span>
               </ScoreCard>
               <span v-else :class="['flex items-center justify-center w-44 md:w-56 h-24 rounded-xl text-xs muted border border-dashed border-neutral-300/60 dark:border-neutral-700/40']">not run</span>

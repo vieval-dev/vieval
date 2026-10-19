@@ -19,7 +19,7 @@ import ViewTabs from '../components/ViewTabs.vue'
 import { useCatalog } from '../composables/useCatalog'
 import { formatDuration, formatScore } from '../format'
 import { levelIcons } from '../hierarchy'
-import { attemptDate, attemptLabel, experimentLabel, mergeMatrices, shortRunHash } from '../labels'
+import { attemptDate, attemptLabel, differingAxes, experimentLabel, formatAxisValues, mergeMatrices, shortRunHash } from '../labels'
 import { href, navigate } from '../router'
 
 /**
@@ -60,6 +60,15 @@ const attempts = computed(() => {
   }
   return [...byAttempt.entries()].map(([id, list]) => ({ date: attemptDate(id), id, label: attemptLabel(id), runs: list }))
 })
+
+/** Run and eval axes of a run in one record; what an attempt ran with. */
+const axesOf = (run: (typeof runs.value)[number]) => ({ ...run.matrix, ...run.evalMatrix })
+/** Axes whose values differ between the runs of this experiment: each run row names its values of them. */
+const changedAxes = computed(() => differingAxes(runs.value.map(axesOf)))
+/** Expected cases of a run in the case bar, so cases an interrupted or partial run never ran show as "not run". */
+const expectedCounts = (run: (typeof runs.value)[number]) => ({ ...run.counts, total: Math.max(run.counts.total, run.caseTotal ?? 0) })
+/** A finished run that settled fewer cases than it was expected to: interrupted, or a re-run of some cases. */
+const isPartial = (run: (typeof runs.value)[number]) => run.state !== 'running' && run.caseTotal != null && run.counts.total < run.caseTotal
 
 /**
  * Grid of a run row. Wide screens: one line with select, attempt, run, duration, cases, exact score, menu (the header
@@ -131,10 +140,18 @@ watch([() => props.attempt, () => attempts.value.length], async ([attempt]) => {
               >
                 <input type="checkbox" :checked="selected.includes(run.runKey)" :aria-label="`Select ${run.runKey} for comparison`" :class="['relative z-1 accent-[var(--series-1)]']" @change="toggle(run.runKey)">
                 <!-- The attempt (its time) once per attempt; further runs of the same attempt are sub-rows. -->
-                <span v-if="index === 0" :class="['flex items-center gap-2 min-w-0']">
-                  <span :class="[levelIcons.attempt, 'muted shrink-0']" aria-hidden="true" />
-                  <IdLabel :id="entry.id" :label="entry.label" :href="href({ name: 'run', runKey: run.runKey })" stretch />
-                  <TimeAgo v-if="entry.date" :time="entry.date" relative-only :class="['text-xs muted truncate']" />
+                <span v-if="index === 0" :class="['flex flex-col gap-1 min-w-0']">
+                  <span :class="['flex items-center gap-2 min-w-0']">
+                    <span :class="[levelIcons.attempt, 'muted shrink-0']" aria-hidden="true" />
+                    <IdLabel :id="entry.id" :label="entry.label" :href="href({ name: 'run', runKey: run.runKey })" stretch />
+                    <TimeAgo v-if="entry.date" :time="entry.date" relative-only :class="['text-xs muted truncate']" />
+                  </span>
+                  <!-- What this run ran with where the runs of the experiment differ (an eval axis changed between attempts). -->
+                  <span v-if="changedAxes.length > 0" :class="['flex flex-wrap gap-1 pl-6']">
+                    <span v-for="axis in changedAxes" :key="axis" :class="['badge state-neutral font-normal']" data-testid="attempt-axis">
+                      <span class="muted">{{ axis }}</span>{{ axesOf(run)[axis] ? formatAxisValues(axesOf(run)[axis]!) : '—' }}
+                    </span>
+                  </span>
                 </span>
                 <span v-else :class="['text-xs muted pl-6']">another run of this attempt</span>
                 <span :class="['flex items-center gap-2 min-w-0 max-md:(row-start-2 col-start-2)']">
@@ -143,7 +160,10 @@ watch([() => props.attempt, () => attempts.value.length], async ([attempt]) => {
                   <span v-else :class="['mono text-xs muted']" :title="run.runKey">{{ shortRunHash(run.runKey) }}</span>
                 </span>
                 <span :class="['text-xs muted tabular-nums whitespace-nowrap max-md:(row-start-2 col-start-3 col-span-2 text-right)']">{{ formatDuration(duration(run)) }}</span>
-                <CountsBar :class="['max-md:(row-start-3 col-start-2 col-span-3)']" :counts="run.counts" />
+                <span :class="['flex items-center gap-2 min-w-0', 'max-md:(row-start-3 col-start-2 col-span-3)']">
+                  <CountsBar :class="['flex-1']" :counts="expectedCounts(run)" />
+                  <span v-if="isPartial(run)" :class="['badge state-interrupted shrink-0']" :title="`${run.counts.total} of ${run.caseTotal} expected cases ran`" data-testid="attempt-partial">{{ run.counts.total }} / {{ run.caseTotal }}</span>
+                </span>
                 <span :class="['text-right tabular-nums font-semibold max-md:(row-start-1 col-start-3)']">{{ formatScore(run.exactAverage) }}</span>
                 <!-- IdMenu renders no element of its own; the wrapper carries the grid placement. -->
                 <span :class="['flex max-md:(row-start-1 col-start-4)']"><IdMenu :id="run.runKey" kind="run" /></span>

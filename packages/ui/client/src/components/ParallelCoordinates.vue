@@ -3,11 +3,12 @@ import type { ScaleContinuousNumeric, Selection } from 'd3'
 
 import type { CaseFilters, CaseRow } from '../caseMetrics'
 
-import { axisLeft, brushY, drag, format, line, scalePoint, select } from 'd3'
+import { axisLeft, brushY, drag, line, scalePoint, select } from 'd3'
 import { onMounted, shallowRef, useTemplateRef, watch } from 'vue'
 
 import { caseOffset, shortMetricName } from '../caseMetrics'
 import { useElementWidth } from '../composables/useElementWidth'
+import { formatTick } from '../format'
 
 /** One vertical axis: a numeric metric (brushable) or a category (values are picked by clicking their label). */
 export interface ParallelAxis {
@@ -29,6 +30,11 @@ const props = defineProps<{
   /** Values of each category axis, top to bottom. */
   categoryValues: Readonly<Record<string, readonly string[]>>
   colorOf: (row: CaseRow) => string
+  /**
+   * Cut lines of the metric the cases are colored by, drawn as draggable lines across its axis; dragging one past an
+   * end of the axis removes it.
+   */
+  cuts?: { name: string, values: readonly number[] }
   filters: CaseFilters
   /** Display name of an axis (a metric's localized label, or its name). */
   labelOf: (name: string) => string
@@ -41,6 +47,8 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   brush: [name: string, range: [number, number] | null]
+  /** New cut values of an axis (sorted) after a cut line was dragged or dragged off. */
+  cuts: [name: string, values: number[]]
   /** Case line under the pointer and the pointer position in the viewport; `null` when the pointer left the lines. */
   hover: [row: CaseRow | null, point: null | { x: number, y: number }, axis: null | string]
   /** Axis title under the pointer and its box in the viewport, or `null` when the pointer left it. */
@@ -56,7 +64,6 @@ const root = useTemplateRef<HTMLElement>('root')
 const width = useElementWidth(root, 800)
 const height = 360
 const margin = { bottom: 16, left: 96, right: 72, top: 40 }
-const tick = format('~s')
 
 /** Category values fan out this much (stable per case), so a hundred cases of one group do not draw one stroke. */
 const CATEGORY_FAN_PX = 13
@@ -186,7 +193,7 @@ function drawLines(svg: Selection<SVGSVGElement, unknown, null, undefined>) {
       return
     }
     const scale = scales.get(axis.name) as ScaleContinuousNumeric<number, number>
-    g.call(axisLeft(scale).ticks(5).tickFormat(value => tick(value as number)).tickSizeOuter(0))
+    g.call(axisLeft(scale).ticks(5).tickFormat(value => formatTick(value as number)).tickSizeOuter(0))
       .call(axisGroup => axisGroup.selectAll('text').attr('fill', 'var(--chart-text)'))
       .call(axisGroup => axisGroup.selectAll('line, path').attr('stroke', 'var(--chart-grid)'))
     const brush = brushY<unknown>().extent([[-12, margin.top], [12, height - margin.bottom]]).on('brush end', (event: { selection: [number, number] | null, sourceEvent?: Event }) => {
@@ -200,6 +207,8 @@ function drawLines(svg: Selection<SVGSVGElement, unknown, null, undefined>) {
     const range = props.filters.ranges[axis.name]
     if (range != null)
       brushGroup.call(brush.move, [scale(range[1]), scale(range[0])])
+    if (props.cuts?.name === axis.name)
+      drawCuts(g, axis.name, scale)
   })
 
   // Over the axes, so the marks of the focused case are never hidden behind a brush or a label.
@@ -218,6 +227,42 @@ function drawLines(svg: Selection<SVGSVGElement, unknown, null, undefined>) {
     focus.selectAll<SVGCircleElement, (typeof marks)[number]>('circle').data(marks, mark => mark.key).join('circle').attr('cx', mark => mark.x).attr('cy', mark => mark.y).attr('r', 4.5).attr('fill', pinned == null ? 'none' : props.colorOf(pinned)).attr('class', 'stroke-white dark:stroke-neutral-900').attr('stroke-width', 2)
   }
   return lines
+}
+
+/** How far a cut line reaches to each side of its axis, and how far past an end of the axis a drag removes it. */
+const CUT_REACH_PX = 32
+const CUT_REMOVE_PX = 10
+
+/**
+ * Draws the cut lines of the colored metric across its axis, over the brush: a dashed line, a handle to drag it, and
+ * its value. Dragging moves a line along the axis; dropping it past either end removes the cut. The new cuts are
+ * reported once the drag ends, so the chart is redrawn once, not on every move.
+ */
+function drawCuts(g: Selection<SVGGElement, unknown, null, undefined>, name: string, scale: ScaleContinuousNumeric<number, number>): void {
+  const values = [...(props.cuts?.values ?? [])]
+  const top = margin.top
+  const bottom = height - margin.bottom
+  values.forEach((value, index) => {
+    const cut = g.append('g').attr('transform', `translate(0,${scale(value)})`).style('cursor', 'ns-resize').attr('data-testid', 'cut-line')
+    cut.append('line').attr('x1', -CUT_REACH_PX).attr('x2', CUT_REACH_PX).attr('stroke', 'currentColor').attr('stroke-width', 1.25).attr('stroke-dasharray', '4 3')
+    // A wider transparent band takes the pointer, so the 1 px line is easy to grab.
+    cut.append('rect').attr('x', -CUT_REACH_PX).attr('y', -5).attr('width', CUT_REACH_PX * 2).attr('height', 10).attr('fill', 'transparent')
+    cut.append('circle').attr('cx', CUT_REACH_PX).attr('r', 4.5).attr('class', 'fill-white dark:fill-neutral-900').attr('stroke', 'currentColor').attr('stroke-width', 1.5)
+    const label = cut.append('text').attr('x', CUT_REACH_PX + 8).attr('y', 3.5).attr('font-size', 11).attr('font-weight', 600).attr('fill', 'currentColor').attr('class', 'stroke-white dark:stroke-neutral-900 [paint-order:stroke]').attr('stroke-width', 3).text(formatTick(value))
+    cut.call(drag<SVGGElement, unknown>()
+      .on('drag', (event: { y: number }) => {
+        cut.attr('transform', `translate(0,${event.y})`)
+        const off = event.y < top - CUT_REMOVE_PX || event.y > bottom + CUT_REMOVE_PX
+        cut.attr('opacity', off ? 0.35 : 1)
+        label.text(off ? 'remove' : formatTick(scale.invert(Math.min(bottom, Math.max(top, event.y)))))
+      })
+      .on('end', (event: { y: number }) => {
+        const next = values.filter((_, other) => other !== index)
+        if (event.y >= top - CUT_REMOVE_PX && event.y <= bottom + CUT_REMOVE_PX)
+          next.push(Number(scale.invert(Math.min(bottom, Math.max(top, event.y))).toPrecision(3)))
+        emit('cuts', name, next.sort((a, b) => a - b))
+      }))
+  })
 }
 
 /**
@@ -267,7 +312,7 @@ onMounted(render)
 // Separate sources, compared one by one: a getter returning a fresh array would redraw on every brush event (it
 // reads `props.filters`), which drops the brush the viewer is still dragging. Picked categories keep their object
 // while a range is brushed, so only a pick redraws (to bold the picked label).
-watch([() => props.rows, () => props.axes, () => props.categoryValues, () => props.scales, width, () => props.filters.categories], render)
+watch([() => props.rows, () => props.axes, () => props.categoryValues, () => props.scales, width, () => props.filters.categories, () => props.cuts], render)
 watch([() => props.selected, () => props.colorOf], paint)
 // Pinning redraws only the pinned line and its marks.
 watch(() => props.pinnedKey, () => drawFocus?.())

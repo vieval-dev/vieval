@@ -2,7 +2,7 @@ import type { CaseNode, MetricsResponse } from '../../src/shared/contract'
 
 import { describe, expect, it } from 'vitest'
 
-import { buildCaseTable, matchesFilters, separationOf } from './caseMetrics'
+import { buildCaseTable, derivedMetricName, matchesFilters, metricLabel, separationOf } from './caseMetrics'
 
 function caseNode(index: number, name: string, state: CaseNode['state']): CaseNode {
   const caseId = `${index}:${name}`
@@ -100,6 +100,44 @@ describe('buildCaseTable', () => {
   })
 })
 
+describe('buildCaseTable list metrics', () => {
+  // ROOT CAUSE:
+  //
+  // A metric recorded as a list of numbers per case (the grade of each listener vote, `[1, 1, 0]`) is neither a number
+  // nor a string, so the table dropped it and no chart could show how close a case came:
+  //
+  // if (point.caseId != null && (typeof point.value === 'string' || typeof point.value === 'boolean'))
+  //
+  // We fixed this by summarizing a list of finite numbers as two numeric axes, its mean and its length.
+  /**
+   * @example
+   * expect(table.rows.map(row => row.numbers['votes#mean'])).toEqual([2 / 3, 1, 0, 1 / 3])
+   */
+  it('summarizes a list of numbers per case as its mean and length', () => {
+    const table = buildCaseTable(cases, metrics({
+      notes: cases.map(node => [node.caseId, ['a', 'b']]),
+      votes: cases.map((node, index) => [node.caseId, [[1, 0, 1], [1, 1, 1], [0, 0, 0], [0, 1, 0]][index]!]),
+    }))
+
+    expect(table.rows.map(row => row.numbers[derivedMetricName('votes', 'mean')])).toEqual([2 / 3, 1, 0, 1 / 3])
+    // Every case has three votes: one value, so the length is a constant and gets no axis.
+    expect(table.constants).toContainEqual({ name: 'votes#length', value: 3 })
+    expect(table.groups.map(group => group.representative)).toContain('votes#mean')
+    expect(Object.keys(table.rows[0]!.numbers).some(name => name.startsWith('notes'))).toBe(false)
+  })
+
+  /**
+   * @example
+   * expect(metricLabel('votes#mean', definitions)).toBe('Listener votes · mean')
+   */
+  it('names a derived metric by the label of its list metric and the summary', () => {
+    const definitions = new Map([['votes', { label: 'Listener votes', name: 'votes' }]])
+
+    expect(metricLabel('votes#mean', definitions)).toBe('Listener votes · mean')
+    expect(metricLabel('steps', definitions)).toBe('steps')
+  })
+})
+
 describe('buildCaseTable across tasks', () => {
   /**
    * @example
@@ -170,5 +208,24 @@ describe('separationOf', () => {
     expect(separation.get('steps')).toEqual({ auc: 1, higherIn: 'failed' })
     expect(separation.get('captures')).toEqual({ auc: 1, higherIn: 'passed' })
     expect(separation.has('exact')).toBe(false)
+  })
+
+  // ROOT CAUSE:
+  //
+  // In a scored eval every case passes (a score of 0 is a result), so there was no failed case to compare against and
+  // the ranking was empty; the chart opened on metrics in recording order instead of the ones that lower the score.
+  //
+  // We fixed this by comparing cases below the mean `exact` score with the rest when no case failed.
+  /**
+   * @example
+   * expect(separation.get('steps')).toEqual({ auc: 1, higherIn: 'lower-scored' })
+   */
+  it('ranks against the exact score when every case passed', () => {
+    const passed = cases.slice(0, 3).map((node, index) => ({ ...node, scores: { exact: [1, 0, 1][index]! }, state: 'passed' as const }))
+    const table = buildCaseTable(passed, metrics({
+      steps: passed.map((node, index) => [node.caseId, [2, 50, 4][index]!]),
+    }))
+
+    expect(separationOf(table).get('steps')).toEqual({ auc: 1, higherIn: 'lower-scored' })
   })
 })

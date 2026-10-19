@@ -9,6 +9,7 @@ import { computed, reactive, shallowRef, watch } from 'vue'
 
 import BarChart from './BarChart.vue'
 import CaseCartesian from './CaseCartesian.vue'
+import CaseMetricsPanel from './CaseMetricsPanel.vue'
 import CountsBar from './CountsBar.vue'
 import LineChart from './LineChart.vue'
 import MetricInfo from './MetricInfo.vue'
@@ -18,10 +19,9 @@ import SegmentedControl from './SegmentedControl.vue'
 import StateView from './StateView.vue'
 
 import { api } from '../api'
-import { buildCaseTable, metricScale, separationOf } from '../caseMetrics'
+import { buildCaseTable, metricLabel, metricScale, separationOf } from '../caseMetrics'
 import { formatScore, previewValue } from '../format'
 import { levelIcons } from '../hierarchy'
-import { localize } from '../localize'
 import { href, navigate } from '../router'
 
 /**
@@ -62,7 +62,7 @@ function toggleMetric(name: string): void {
     expanded.add(name)
 }
 const definitions = computed(() => new Map<string, MetricDefinition>((metrics.data.value?.definitions ?? []).map(definition => [definition.name, definition])))
-const labelOf = (name: string) => localize(definitions.value.get(name)?.label) ?? name
+const labelOf = (name: string) => metricLabel(name, definitions.value)
 
 /**
  * The numeric metrics of the whole run, three ways: each metric over the recording order, every pair of metrics as
@@ -128,6 +128,9 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
           </div>
         </dl>
       </section>
+
+      <!-- Every case of the run against the matrix axes and its metrics: where the score is lost across tasks. -->
+      <CaseMetricsPanel :cases="props.snapshot.tasks.flatMap(task => task.cases)" :refresh-key="props.refreshKey" :run-key="runKey" />
 
       <section :class="['card']" data-testid="matrix-rows">
         <h2 :class="['card-title flex-wrap']">
