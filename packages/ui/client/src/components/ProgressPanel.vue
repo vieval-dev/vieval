@@ -97,6 +97,14 @@ const connectionText = computed(() => ({
           {{ progress.cases.running }}
         </dd>
       </div>
+      <div v-if="progress.cases.waiting > 0">
+        <dt class="text-xs muted">
+          Waiting to rerun
+        </dt>
+        <dd :class="['text-xl font-semibold tabular-nums', '[color:var(--ink-errored)]']" data-testid="progress-waiting">
+          {{ progress.cases.waiting }}
+        </dd>
+      </div>
       <div>
         <dt class="text-xs muted">
           Tasks done
@@ -139,9 +147,11 @@ const connectionText = computed(() => ({
       {{ `ETA basis: ${basisText}${live && progress.lowerBound ? '; auto attempts were seen, so more rounds may follow (lower bound)' : ''}. Rule: elapsed ÷ settled cases × estimated cases − elapsed, and at least as long as the longest running case has run.` }}
     </p>
 
-    <div v-if="props.snapshot.current.running.length > 0" :class="['max-md:order-1']" data-testid="current-position">
+    <div v-if="props.snapshot.current.running.length > 0 || props.snapshot.current.waiting.length > 0" :class="['max-md:order-1']" data-testid="current-position">
       <div :class="['text-xs font-semibold mb-1 flex items-center gap-1']">
-        <span :class="['i-mingcute-aiming-2-line', '[color:var(--mark-running)]']" aria-hidden="true" />Current position · {{ props.snapshot.current.running.length }} running
+        <span :class="['i-mingcute-aiming-2-line', '[color:var(--mark-running)]']" aria-hidden="true" />Current position · {{ props.snapshot.current.running.length }} running<template v-if="props.snapshot.current.waiting.length > 0">
+          · {{ props.snapshot.current.waiting.length }} waiting
+        </template>
       </div>
       <ul :class="['grid gap-1']" style="grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr))">
         <li v-for="item in props.snapshot.current.running" :key="`${item.taskId}/${item.caseId}`" :class="['flex items-center gap-2 rounded-md px-2 py-1 text-xs', '[background-color:color-mix(in_oklab,var(--mark-running)_10%,transparent)]']">
@@ -150,6 +160,13 @@ const connectionText = computed(() => ({
           <span v-if="item.roundIndex > 0" class="badge state-neutral">round {{ item.roundIndex }}</span>
           <span v-if="item.retryIndex > 0" class="badge state-interrupted">retry {{ item.retryIndex }}</span>
           <span :class="['ml-auto mono text-xs muted whitespace-nowrap']">{{ formatDuration(item.elapsedMs + drift) }}</span>
+        </li>
+        <!-- Cases waiting to rerun follow the running ones, in the order they were requeued. -->
+        <li v-for="item in props.snapshot.current.waiting" :key="`${item.taskId}/${item.caseId}`" :class="['flex items-center gap-2 rounded-md px-2 py-1 text-xs', '[background-color:color-mix(in_oklab,var(--mark-errored)_10%,transparent)]']" data-testid="current-waiting">
+          <span :class="['i-mingcute-time-fill shrink-0', '[color:var(--mark-errored)]']" aria-hidden="true" />
+          <a :href="href({ caseId: item.caseId, name: 'case', runKey: props.snapshot.runKey, taskId: item.taskId })" :class="['link mono text-xs truncate']" :title="item.name">{{ item.name }}</a>
+          <span class="badge state-interrupted">requeue {{ item.requeueIndex }}/{{ item.requeue }}</span>
+          <span :class="['ml-auto mono text-xs whitespace-nowrap', '[color:var(--ink-errored)]']">{{ Date.parse(item.requeuedAt) + item.delayMs > now ? `rerun in ${formatDuration(Date.parse(item.requeuedAt) + item.delayMs - now)}` : 'waiting for a slot' }}</span>
         </li>
       </ul>
     </div>

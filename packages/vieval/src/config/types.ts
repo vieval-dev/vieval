@@ -482,6 +482,21 @@ export interface TaskExecutionPolicy {
    */
   classifyError?: TaskErrorClassifier
   /**
+   * Most times a case that still has no result after its retries goes back to the end of the queue, so other cases
+   * run first and the provider has time to recover. Each run after a requeue gets its own `autoRetry` retries.
+   * Only `errored` and `timeout` runs are requeued; a failed assertion is a result. Only the final run is scored.
+   *
+   * @default 0
+   */
+  requeue?: number
+  /**
+   * Least time in milliseconds between a requeue and the next run of the case. The end of the queue may be next
+   * when few cases are left, so this keeps a requeue from becoming an immediate retry.
+   *
+   * @default 0
+   */
+  requeueDelay?: number
+  /**
    * Timeout in milliseconds for one case execution.
    */
   timeout?: number

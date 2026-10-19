@@ -146,6 +146,29 @@ Attempts measure nondeterministic reliability because every completed attempt co
 
 `timeout` is measured separately for each case try. When it expires, Vieval marks that try as `timeout`, aborts the case's `signal`, and may proceed to a configured retry or later attempt. Cancellation is cooperative: pass the signal to downstream operations. Code that ignores it may continue external side effects after Vieval has stopped accepting its scores and metrics.
 
+### Requeue a case that has no result yet
+
+`autoRetry` runs a case again right away, in its slot. When a provider rate-limits, the retries often land in the
+same cooldown. `requeue` sends the case to the end of the queue instead, so other cases run first and the provider has
+time to recover:
+
+```ts
+describeTask('read aloud', build, {
+  autoRetry: 1, // retry once right away
+  requeue: 2, // then go back to the end of the queue, at most twice
+  requeueDelay: 30_000, // and wait at least 30 seconds before running again
+})
+```
+
+Only runs without a result (`errored`, `timeout`) are requeued; a failed assertion is a result. A requeued case gives
+its slot back while it waits, and each later run gets its own `autoRetry` retries, so a case runs at most
+`(1 + autoRetry) × (1 + requeue)` times. `requeueDelay` matters when few cases are left: the end of the queue may then
+be next, and without a delay a requeue would be an immediate retry.
+
+Until its last run ends, the case has not ended. It emits `case.requeued` instead of `case.ended`, the viewer shows it
+as waiting to rerun (not done yet), and it does not count in scores or coverage. Only the final run is scored. A case
+whose retries and requeues all ran out ends `errored`; resume it later with `--resume`.
+
 ### Resume an attempt
 
 Retries happen inside one attempt. When a provider stays down for longer, many cases end `errored` or `timeout`. Fix

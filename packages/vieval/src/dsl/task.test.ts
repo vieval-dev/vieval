@@ -1224,6 +1224,164 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
    * @example
    * autoRetry: 2 without autoRetryIf -> an errored try runs again, a failed assertion does not.
    */
+  /**
+   * @example
+   * case concurrency 1, `flaky` errors once: starts run flaky, steady-a, steady-b, then flaky again after a requeue.
+   */
+  it('requeues a case without a result to the end of the queue and scores only its final run', async () => {
+    let flakyRuns = 0
+    const sequence: string[] = []
+
+    const taskDefinition = describeTask('dsl-case-requeue-order', () => {
+      caseOf('flaky', () => {
+        flakyRuns += 1
+        if (flakyRuns === 1) {
+          throw new Error('Remote sent 429 response')
+        }
+      })
+      caseOf('steady-a', () => {})
+      caseOf('steady-b', () => {})
+    }, { concurrency: { case: 1 }, requeue: 1 })
+
+    const runResult = await taskDefinition.task!.run({
+      cache: createTestTaskCacheRuntime(),
+      events: createTestRunEvents({ onAny: (envelope) => {
+        const data = envelope.data as { name?: string, requeueIndex?: number }
+        if (envelope.event === 'case.started' || envelope.event === 'case.requeued' || envelope.event === 'case.ended') {
+          sequence.push(`${envelope.event}:${data.name}${data.requeueIndex == null ? '' : `#${data.requeueIndex}`}`)
+        }
+      } }),
+      models: createTestModels(),
+      task: {
+        entry: { description: 'd', directory: 'x', filePath: '/tmp/x.eval.ts', id: 'x', name: 'x' },
+        id: 'task-requeue-order',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: createScheduledTaskMatrix(),
+      },
+    })
+
+    await waitForExpectation(() => {
+      expect(sequence).toEqual([
+        'case.started:flaky#0',
+        'case.requeued:flaky#1',
+        'case.started:steady-a#0',
+        'case.ended:steady-a',
+        'case.started:steady-b#0',
+        'case.ended:steady-b',
+        'case.started:flaky#1',
+        'case.ended:flaky',
+      ])
+    })
+    // Only the final run of `flaky` counts: three results, all passed.
+    expect(runResult.scores).toEqual([{ kind: 'exact', score: 1 }])
+    expect(runResult.coverage).toEqual({ measured: 3, total: 3 })
+  })
+
+  /**
+   * @example
+   * autoRetry 1 and requeue 2 -> at most (1 + 1) × (1 + 2) = 6 runs, then the case ends errored.
+   */
+  it('ends a case errored once its retries and requeues are used up', async () => {
+    let runs = 0
+    const requeues: number[] = []
+
+    const taskDefinition = describeTask('dsl-case-requeue-exhausted', () => {
+      caseOf('down', () => {
+        runs += 1
+        throw new Error('fetch failed')
+      })
+    }, { autoRetry: 1, autoRetryDelay: 0, requeue: 2 })
+
+    const runResult = await taskDefinition.task!.run({
+      cache: createTestTaskCacheRuntime(),
+      events: createTestRunEvents({ onAny: (envelope) => {
+        if (envelope.event === 'case.requeued') {
+          requeues.push((envelope.data as { requeueIndex: number }).requeueIndex)
+        }
+      } }),
+      models: createTestModels(),
+      task: {
+        entry: { description: 'd', directory: 'x', filePath: '/tmp/x.eval.ts', id: 'x', name: 'x' },
+        id: 'task-requeue-exhausted',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: createScheduledTaskMatrix(),
+      },
+    })
+
+    expect(runs).toBe(6)
+    await waitForExpectation(() => {
+      expect(requeues).toEqual([1, 2])
+    })
+    expect(runResult.coverage).toEqual({ measured: 0, total: 1 })
+  })
+
+  /**
+   * @example
+   * a failed assertion is a result, so `requeue` never runs it again.
+   */
+  it('does not requeue a failed assertion', async () => {
+    let runs = 0
+
+    const taskDefinition = describeTask('dsl-case-requeue-failed', () => {
+      caseOf('wrong', () => {
+        runs += 1
+        throw createAssertionError('wrong answer')
+      })
+    }, { requeue: 3 })
+
+    const runResult = await taskDefinition.task!.run({
+      cache: createTestTaskCacheRuntime(),
+      models: createTestModels(),
+      task: {
+        entry: { description: 'd', directory: 'x', filePath: '/tmp/x.eval.ts', id: 'x', name: 'x' },
+        id: 'task-requeue-failed',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: createScheduledTaskMatrix(),
+      },
+    })
+
+    expect(runs).toBe(1)
+    expect(runResult.scores).toEqual([{ kind: 'exact', score: 0 }])
+  })
+
+  /**
+   * @example
+   * an interrupt during `requeueDelay` ends the case errored at once instead of waiting out the delay.
+   */
+  it('stops waiting for a requeue when the run is interrupted', async () => {
+    const controller = new AbortController()
+    let runs = 0
+    const ended: string[] = []
+
+    const taskDefinition = describeTask('dsl-case-requeue-interrupt', () => {
+      caseOf('down', () => {
+        runs += 1
+        setTimeout(() => controller.abort(new Error('Run interrupted by SIGINT.')), 0)
+        throw new Error('fetch failed')
+      })
+    }, { requeue: 1, requeueDelay: 60_000 })
+
+    const startedAt = Date.now()
+    await taskDefinition.task!.run({
+      cache: createTestTaskCacheRuntime(),
+      events: createTestRunEvents({ onCaseEnd: data => ended.push(data.state) }),
+      models: createTestModels(),
+      signal: controller.signal,
+      task: {
+        entry: { description: 'd', directory: 'x', filePath: '/tmp/x.eval.ts', id: 'x', name: 'x' },
+        id: 'task-requeue-interrupt',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: createScheduledTaskMatrix(),
+      },
+    })
+
+    expect(Date.now() - startedAt).toBeLessThan(5_000)
+    expect(runs).toBe(1)
+    await waitForExpectation(() => {
+      expect(ended).toEqual(['errored'])
+    })
+  })
+
   it('retries errored tries but not failed assertions by default', async () => {
     let erroredRuns = 0
     let failedRuns = 0

@@ -73,7 +73,7 @@ const score = computed(() => {
   const snapshot = live.snapshot.value
   if (snapshot == null)
     return undefined
-  const counts = { errored: 0, failed: 0, passed: 0, running: 0, skipped: 0, timeout: 0, total: 0 }
+  const counts = { errored: 0, failed: 0, passed: 0, requeued: 0, running: 0, skipped: 0, timeout: 0, total: 0 }
   for (const task of snapshot.tasks) {
     for (const key of Object.keys(counts) as (keyof typeof counts)[])
       counts[key] += task.caseCounts[key]

@@ -6,7 +6,7 @@ import { defineComponent, h } from 'vue'
 import CountsBar from './CountsBar.vue'
 
 /** A run of one million cases, as a matrix cell or a list row shows it. */
-const counts = { errored: 0, failed: 482_113, passed: 517_887, running: 0, skipped: 0, timeout: 0, total: 1_000_000 }
+const counts = { errored: 0, failed: 482_113, passed: 517_887, requeued: 0, running: 0, skipped: 0, timeout: 0, total: 1_000_000 }
 
 /** Renders the bar inside a box of `width` px, like a narrow matrix cell or a table cell; tooltips need the provider `App.vue` sets. */
 function inBox(width: number, labels: 'hover' | 'tooltip') {
@@ -20,7 +20,7 @@ describe('countsBar', () => {
    */
   it('shows cases without a result as their own hatched segment, apart from failed ones', async () => {
     const screen = await render(defineComponent(() => () => h(TooltipProvider, { delayDuration: 0 }, () => h('div', { style: { width: '200px' } }, [
-      h(CountsBar, { counts: { errored: 2, failed: 2, passed: 5, running: 0, skipped: 0, timeout: 1, total: 10 }, labels: 'none' }),
+      h(CountsBar, { counts: { errored: 2, failed: 2, passed: 5, requeued: 0, running: 0, skipped: 0, timeout: 1, total: 10 }, labels: 'none' }),
     ]))))
 
     const bar = screen.getByTestId('counts-bar')
@@ -36,7 +36,7 @@ describe('countsBar', () => {
    * data-color-vision="safe" turns the passed segment from green to Okabe-Ito blue (#0072b2).
    */
   it('recolors the segments in the colorblind-safe mode', async () => {
-    const screen = await render(defineComponent(() => () => h(CountsBar, { counts: { errored: 0, failed: 0, passed: 1, running: 0, skipped: 0, timeout: 0, total: 1 }, labels: 'none' })))
+    const screen = await render(defineComponent(() => () => h(CountsBar, { counts: { errored: 0, failed: 0, passed: 1, requeued: 0, running: 0, skipped: 0, timeout: 0, total: 1 }, labels: 'none' })))
     const passed = screen.getByTestId('counts-bar').element().children[0] as HTMLElement
 
     expect(getComputedStyle(passed).backgroundColor).toBe('rgb(47, 158, 68)')

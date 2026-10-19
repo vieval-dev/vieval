@@ -26,6 +26,10 @@ export interface CliReporter {
    */
   onCaseOutput: (payload: CliReporterCaseOutputPayload) => void
   /**
+   * Handles a case that went back to the queue without a result; it has not ended and will start again.
+   */
+  onCaseRequeue?: (payload: CliReporterCaseRequeuePayload) => void
+  /**
    * Handles case start.
    */
   onCaseStart: (payload: CliReporterCaseStartPayload) => void
@@ -123,6 +127,23 @@ export interface CliReporterCaseOutputPayload {
  * - `taskId` matches the owning task
  * - `caseId` uniquely identifies the case within the task
  */
+/**
+ * Payload of {@link CliReporter.onCaseRequeue}.
+ */
+export interface CliReporterCaseRequeuePayload {
+  caseId: string
+  /** Least time in ms before the case starts again. */
+  delayMs: number
+  errorMessage?: string
+  /** Most times the case may be requeued. */
+  requeue: number
+  /** One-based number of this requeue. */
+  requeueIndex: number
+  /** How the run ended. */
+  state: 'errored' | 'timeout'
+  taskId: string
+}
+
 export interface CliReporterCaseStartPayload {
   /**
    * Maximum retry count configured for this case.

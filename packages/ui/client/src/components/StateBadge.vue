@@ -28,6 +28,9 @@ const look = computed(() => {
     case 'stale':
     case 'unfinished':
       return { class: 'state-interrupted', icon: props.state === 'retried' ? 'i-mingcute-history-anticlockwise-fill' : 'i-mingcute-warning-fill' }
+    // Waiting at the end of the queue to run again: not ended, so the clock of waiting, not a failure icon.
+    case 'requeued':
+      return { class: 'state-interrupted', icon: 'i-mingcute-time-fill' }
     case 'running':
       return { class: 'state-running', icon: 'i-mingcute-loading-line animate-spin' }
     case 'timeout':

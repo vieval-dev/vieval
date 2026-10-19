@@ -19,26 +19,47 @@ const now = useTimestamp({ scheduler: callback => useIntervalFn(callback, 1000) 
 
 const lanes = computed(() => {
   const entries = props.timeline.entries
+  // A case still waiting to rerun stretches the axis to now, so its wait shows.
+  const waitingNow = entries.at(-1)?.state === 'requeued'
   const start = extent(entries.map(entry => Date.parse(entry.startedAt))).min
-  const end = extent(entries.map(entry => (entry.endedAt == null ? now.value : Date.parse(entry.endedAt)))).max
+  const end = Math.max(extent(entries.map(entry => (entry.endedAt == null ? now.value : Date.parse(entry.endedAt)))).max, waitingNow ? now.value : 0)
   const span = Math.max(1, end - start)
   const rounds = [...new Set(entries.map(entry => entry.roundIndex))].sort((a, b) => a - b)
   return {
     end,
-    lanes: rounds.map(roundIndex => ({
-      inferred: entries.some(entry => entry.roundIndex === roundIndex && entry.roundIndexInferred),
-      roundIndex,
-      tries: entries.filter(entry => entry.roundIndex === roundIndex).map((entry) => {
-        const from = Date.parse(entry.startedAt)
-        const to = entry.endedAt == null ? now.value : Date.parse(entry.endedAt)
-        return { ...entry, left: ((from - start) / span) * 100, width: Math.max(0.6, ((to - from) / span) * 100) }
-      }),
-    })),
+    lanes: rounds.map((roundIndex) => {
+      const inRound = entries.filter(entry => entry.roundIndex === roundIndex)
+      return {
+        inferred: inRound.some(entry => entry.roundIndexInferred),
+        roundIndex,
+        tries: inRound.map((entry, tryIndex) => {
+          const from = Date.parse(entry.startedAt)
+          const to = entry.endedAt == null ? now.value : Date.parse(entry.endedAt)
+          return { ...entry, left: ((from - start) / span) * 100, tryNumber: tryIndex + 1, width: Math.max(0.6, ((to - from) / span) * 100) }
+        }),
+        // The time a requeued try waited at the end of the queue: from its end to the next try, or to now.
+        waits: inRound.flatMap((entry, tryIndex) => {
+          if (entry.state !== 'requeued' || entry.endedAt == null) {
+            return []
+          }
+          const from = Date.parse(entry.endedAt)
+          const next = inRound[tryIndex + 1]
+          const to = next == null ? now.value : Date.parse(next.startedAt)
+          return [{ key: `${entry.roundIndex}:${tryIndex}`, left: ((from - start) / span) * 100, ms: to - from, width: Math.max(0.6, ((to - from) / span) * 100) }]
+        }),
+      }
+    }),
     start,
   }
 })
+/** Table rows: tries numbered within their round across requeues, as on the lanes. */
+const tableRows = computed(() => props.timeline.entries.map((entry, position, entries) => ({
+  ...entry,
+  key: `${entry.roundIndex}:${position}`,
+  tryNumber: entries.slice(0, position + 1).filter(other => other.roundIndex === entry.roundIndex).length,
+})))
 /** Fill of a try or round bar from the state tokens (`styles.css`), so the colorblind-safe mode recolors it; a retried try is a try without a result. */
-const stateColor = (state: string) => ['errored', 'failed', 'passed', 'running', 'timeout', 'unfinished'].includes(state) ? `var(--mark-${state})` : state === 'retried' ? 'var(--mark-errored)' : 'var(--mark-skipped)'
+const stateColor = (state: string) => ['errored', 'failed', 'passed', 'running', 'timeout', 'unfinished'].includes(state) ? `var(--mark-${state})` : state === 'retried' || state === 'requeued' ? 'var(--mark-errored)' : 'var(--mark-skipped)'
 </script>
 
 <template>
@@ -58,13 +79,23 @@ const stateColor = (state: string) => ['errored', 'failed', 'passed', 'running',
         </div>
       </div>
       <div :class="['relative flex-1 h-7 rounded bg-neutral-100 dark:bg-neutral-800']">
+        <!-- Waits behind the bars: a dashed amber outline, "no result yet", from a requeue to the next try. -->
         <div
-          v-for="entry in lane.tries" :key="entry.retryIndex"
+          v-for="wait in lane.waits" :key="wait.key"
+          :class="['absolute top-1 h-5 rounded-sm border border-dashed flex items-center px-1 text-[10px] overflow-hidden whitespace-nowrap', '[border-color:var(--mark-errored)] [color:var(--ink-errored)]']"
+          :style="{ left: `${wait.left}%`, width: `${wait.width}%` }"
+          :title="`waited ${formatDuration(wait.ms)} at the end of the queue`"
+          data-testid="timeline-wait"
+        >
+          waiting
+        </div>
+        <div
+          v-for="entry in lane.tries" :key="entry.tryNumber"
           :class="['absolute top-1 h-5 rounded-sm flex items-center px-1 text-[10px] text-white overflow-hidden whitespace-nowrap', entry.state === 'running' && 'vv-pulse']"
           :style="{ left: `${entry.left}%`, width: `${entry.width}%`, background: stateColor(entry.state) }"
-          :title="`round ${entry.roundIndex}, try ${entry.retryIndex + 1}: ${entry.state}, ${formatDuration(entry.durationMs)}${entry.errorMessage ? `\n${entry.errorMessage}` : ''}`"
+          :title="`round ${entry.roundIndex}, try ${entry.tryNumber}: ${entry.state}, ${formatDuration(entry.durationMs)}${entry.errorMessage ? `\n${entry.errorMessage}` : ''}`"
         >
-          try {{ entry.retryIndex + 1 }}
+          try {{ entry.tryNumber }}
         </div>
       </div>
     </div>
@@ -94,12 +125,12 @@ const stateColor = (state: string) => ['errored', 'failed', 'passed', 'running',
           </tr>
         </thead>
         <tbody>
-          <tr v-for="entry in props.timeline.entries" :key="`${entry.roundIndex}:${entry.retryIndex}`" :class="['border-b border-neutral-100/70 dark:border-neutral-900']">
+          <tr v-for="entry in tableRows" :key="entry.key" :class="['border-b border-neutral-100/70 dark:border-neutral-900']">
             <td :class="['td mono text-xs']">
               {{ entry.roundIndex }}
             </td>
             <td :class="['td mono text-xs']">
-              {{ entry.retryIndex + 1 }}<span v-if="entry.retryIndex > 0" class="muted"> (retry {{ entry.retryIndex }})</span>
+              {{ entry.tryNumber }}<span v-if="entry.retryIndex > 0" class="muted"> (retry {{ entry.retryIndex }})</span><span v-else-if="entry.requeueIndex > 0" class="muted"> (requeue {{ entry.requeueIndex }})</span>
             </td>
             <td class="td">
               <StateBadge :state="entry.state" />
@@ -110,7 +141,7 @@ const stateColor = (state: string) => ['errored', 'failed', 'passed', 'running',
             <td :class="['td mono text-xs']">
               {{ formatDuration(entry.durationMs) }}
             </td>
-            <td :class="['td text-xs text-red-700 dark:text-red-400 break-all']">
+            <td :class="['td text-xs break-all', entry.state === 'failed' ? '[color:var(--ink-failed)]' : '[color:var(--ink-errored)]']">
               {{ entry.errorMessage }}
             </td>
           </tr>

@@ -212,8 +212,10 @@ export function buildTimeline(handle: RunHandle, filter: { caseId?: string, task
           caseId: node.caseId,
           durationMs: entry.endedAt == null ? undefined : Date.parse(entry.endedAt) - Date.parse(entry.startedAt),
           endedAt: entry.endedAt,
-          errorMessage: entry === round.tries.at(-1) ? round.errorMessage : undefined,
+          // A requeued try keeps its own error; the round's error belongs to its last try.
+          errorMessage: entry.errorMessage ?? (entry === round.tries.at(-1) ? round.errorMessage : undefined),
           name: node.name,
+          requeueIndex: entry.requeueIndex,
           retryIndex: entry.retryIndex,
           roundIndex: round.roundIndex,
           roundIndexInferred: round.roundIndexInferred,
@@ -234,7 +236,8 @@ export function buildTimeline(handle: RunHandle, filter: { caseId?: string, task
       if (round.state === 'passed') {
         summary.passed += 1
       }
-      else if (round.state === 'running') {
+      // A requeued round waits to run again, so it has not ended either.
+      else if (round.state === 'running' || round.state === 'requeued') {
         summary.running += 1
       }
       else if (round.state === 'failed') {

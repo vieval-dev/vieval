@@ -34,6 +34,58 @@ describe('createRunReducer', () => {
 
   /**
    * @example
+   * case.started → case.requeued → case.started(requeueIndex 1) → case.ended: one round, tries [requeued, passed].
+   */
+  it('keeps a requeued case waiting in its round, then scores only its final run', () => {
+    const envelope = createEnvelopeFactory()
+    const reducer = createRunReducer()
+    reducer.apply(envelope('run.started', { totalTasks: 1 }))
+    reducer.apply(envelope('task.started', {}, scope()))
+    reducer.apply(envelope('case.started', { index: 0, name: 'a', requeue: 2, requeueIndex: 0, total: 1 }, scope('0:a')))
+    reducer.apply(envelope('case.requeued', { delayMs: 30_000, errorMessage: 'Remote sent 429 response', errorName: 'APICallError', index: 0, name: 'a', requeue: 2, requeueIndex: 1, state: 'errored', total: 1 }, scope('0:a')))
+
+    let [task] = buildTaskNodes(reducer, () => 0)
+    expect(task.cases[0].state).toBe('requeued')
+    expect(task.caseCounts).toMatchObject({ errored: 0, requeued: 1 })
+    expect(task.scores.exact).toBeNull()
+    expect(currentPosition(reducer, 0).waiting).toEqual([expect.objectContaining({ delayMs: 30_000, name: 'a', requeue: 2, requeueIndex: 1 })])
+    expect(estimateProgress(reducer, 0).cases.completed).toBe(0)
+
+    reducer.apply(envelope('case.started', { index: 0, name: 'a', requeue: 2, requeueIndex: 1, total: 1 }, scope('0:a')))
+    reducer.apply(envelope('case.ended', { index: 0, name: 'a', state: 'passed', total: 1 }, scope('0:a')))
+
+    ;[task] = buildTaskNodes(reducer, () => 0)
+    const [round] = task.cases[0].rounds
+    expect(task.cases[0].rounds).toHaveLength(1)
+    expect(round.tries.map(entry => [entry.state, entry.requeueIndex])).toEqual([['requeued', 0], ['passed', 1]])
+    // The error that requeued the case stays on its try; the passed run carries none.
+    expect(round.tries[0]!.errorMessage).toBe('Remote sent 429 response')
+    expect(round.errorMessage).toBeUndefined()
+    expect(task.cases[0].state).toBe('passed')
+    expect(task.scores.exact).toBe(1)
+    expect(estimateProgress(reducer, 0).cases.completed).toBe(1)
+    expect(currentPosition(reducer, 0).waiting).toEqual([])
+  })
+
+  /**
+   * @example
+   * the run ends while a case waits to rerun -> the case is unfinished, a case without a result.
+   */
+  it('marks a case that was still waiting when the run ended as unfinished', () => {
+    const envelope = createEnvelopeFactory()
+    const reducer = createRunReducer()
+    reducer.apply(envelope('run.started', { totalTasks: 1 }))
+    reducer.apply(envelope('case.started', { index: 0, name: 'a', requeue: 1, requeueIndex: 0, total: 1 }, scope('0:a')))
+    reducer.apply(envelope('case.requeued', { delayMs: 0, index: 0, name: 'a', requeue: 1, requeueIndex: 1, state: 'timeout', total: 1 }, scope('0:a')))
+    reducer.apply(envelope('run.ended', { failedTasks: 0, passedTasks: 0, skippedTasks: 0, totalTasks: 1 }))
+
+    const [task] = buildTaskNodes(reducer, () => 0)
+    expect(task.cases[0].state).toBe('unfinished')
+    expect(task.caseCounts.errored).toBe(1)
+  })
+
+  /**
+   * @example
    * expect(task.cases[0].errorName).toBe('APICallError')
    */
   it('keeps the state and the error name of a case without a result', () => {
@@ -209,7 +261,7 @@ describe('estimateProgress', () => {
 
     const progress = estimateProgress(reducer, start + 100_000)
     expect(progress.basis).toBe('cases+task-extrapolation')
-    expect(progress.cases).toEqual({ completed: 2, estimatedTotal: 20, knownTotal: 10, running: 2 })
+    expect(progress.cases).toEqual({ completed: 2, estimatedTotal: 20, knownTotal: 10, running: 2, waiting: 0 })
     expect(progress.elapsedMs).toBe(100_000)
     // 100 s for 2 cases → 50 s per case × 20 cases.
     expect(progress.estimatedTotalMs).toBe(1_000_000)

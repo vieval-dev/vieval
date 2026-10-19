@@ -57,6 +57,8 @@ export const caseCountsSchema = v.object({
   /** Cases with a failed assertion: a wrong result. */
   failed: v.number(),
   passed: v.number(),
+  /** Cases waiting at the end of the queue to run again; they have not ended. */
+  requeued: v.number(),
   running: v.number(),
   skipped: v.number(),
   timeout: v.number(),
@@ -114,15 +116,20 @@ export const treeResponseSchema = v.object({
 // Execution tree: run → project → task → round → case → try
 // ---------------------------------------------------------------------------------------------------------------
 
-export const caseStateSchema = v.picklist(['running', 'passed', 'failed', 'errored', 'skipped', 'timeout', 'unfinished'])
+/** `requeued`: the case ran without a result and waits at the end of the queue to run again; it has not ended. */
+export const caseStateSchema = v.picklist(['running', 'requeued', 'passed', 'failed', 'errored', 'skipped', 'timeout', 'unfinished'])
 
 export const tryNodeSchema = v.object({
   autoRetry: v.number(),
   endedAt: v.optional(v.string()),
+  /** Why a `requeued` try went back to the queue. */
+  errorMessage: v.optional(v.string()),
+  /** Number of requeues before this try; `0` before the first requeue. */
+  requeueIndex: v.number(),
   /** Retried tries end when the next try starts. */
   retryIndex: v.number(),
   startedAt: v.string(),
-  /** `retried`: this try failed and the case was retried. */
+  /** `retried`: this try failed and the case was retried at once. `requeued`: it failed and the case was requeued. */
   state: v.union([caseStateSchema, v.literal('retried')]),
 })
 
@@ -136,6 +143,12 @@ export const caseRoundSchema = v.object({
   errorMessage: v.optional(v.string()),
   /** `name` of the thrown error (`AssertionError`, `APICallError`, …), for grouping failures. */
   errorName: v.optional(v.string()),
+  /** Most times the case may be requeued, when the task requeues. */
+  requeue: v.optional(v.number()),
+  /** When the round was last requeued, while it is `requeued`. */
+  requeuedAt: v.optional(v.string()),
+  /** Least wait in ms after the last requeue, while the round is `requeued`. */
+  requeueDelayMs: v.optional(v.number()),
   roundIndex: v.number(),
   roundIndexInferred: v.boolean(),
   /** Scores recorded with `recordScore` during this round. */
@@ -223,6 +236,8 @@ export const runProgressSchema = v.object({
     estimatedTotal: v.optional(v.number()),
     knownTotal: v.number(),
     running: v.number(),
+    /** Cases waiting at the end of the queue to run again: neither running nor completed. */
+    waiting: v.number(),
   }),
   elapsedMs: v.number(),
   estimatedTotalMs: v.optional(v.number()),
@@ -260,6 +275,19 @@ export const currentPositionSchema = v.object({
     retryIndex: v.number(),
     roundIndex: v.number(),
     startedAt: v.string(),
+    taskDisplayName: v.string(),
+    taskId: v.string(),
+  })),
+  /** Cases waiting at the end of the queue to run again, oldest requeue first. */
+  waiting: v.array(v.object({
+    caseId: v.string(),
+    delayMs: v.number(),
+    name: v.string(),
+    projectId: v.optional(v.string()),
+    requeue: v.number(),
+    requeuedAt: v.string(),
+    /** Requeues so far, including this one. */
+    requeueIndex: v.number(),
     taskDisplayName: v.string(),
     taskId: v.string(),
   })),
@@ -400,6 +428,7 @@ export const timelineEntrySchema = v.object({
   endedAt: v.optional(v.string()),
   errorMessage: v.optional(v.string()),
   name: v.string(),
+  requeueIndex: v.number(),
   retryIndex: v.number(),
   roundIndex: v.number(),
   roundIndexInferred: v.boolean(),

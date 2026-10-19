@@ -29,7 +29,7 @@ import { collectEvalEntries, createFilesystemTaskCacheRuntime, createRunnerSched
 import { createProcessOutputInterceptor } from '../core/runner/case-output'
 import { createRunEventBus } from '../core/runner/event-bus'
 import { createNoopTelemetryRuntime, createOpenTelemetryRuntime } from '../core/telemetry'
-import { caseEnded, caseEndedDataSchema, caseOutput, caseOutputDataSchema, caseStarted, caseStartedDataSchema, projectEnded, projectStarted, runEnded, runInterrupted, runStarted, taskEnded, taskEndedDataSchema, taskQueued, taskQueuedDataSchema, taskStarted } from '../events'
+import { caseEnded, caseEndedDataSchema, caseOutput, caseOutputDataSchema, caseRequeued, caseRequeuedDataSchema, caseStarted, caseStartedDataSchema, projectEnded, projectStarted, runEnded, runInterrupted, runStarted, taskEnded, taskEndedDataSchema, taskQueued, taskQueuedDataSchema, taskStarted } from '../events'
 import { loadVievalCliConfig } from './config'
 import { discoverEvalFiles } from './discovery'
 import { exitCodeFromSignal, listenForInterrupt } from './interrupt'
@@ -413,6 +413,7 @@ export function createRunReporter(options: RunVievalCliReporterOptions | undefin
     },
     onCaseEnd: withRender(payload => reporter.onCaseEnd(payload)),
     onCaseOutput: withRender(payload => reporter.onCaseOutput(payload)),
+    onCaseRequeue: withRender(payload => reporter.onCaseRequeue?.(payload)),
     onCaseStart: withRender(payload => reporter.onCaseStart(payload)),
     onRunEnd: withRender(payload => reporter.onRunEnd(payload)),
     onRunStart: withRender(payload => reporter.onRunStart(payload)),
@@ -600,6 +601,21 @@ export function forwardRunEventToReporter(envelope: RunEventEnvelope, reporter: 
       const data = v.safeParse(caseOutputDataSchema, envelope.data)
       if (data.success && caseId != null) {
         reporter.onCaseOutput({ caseId, content: data.output.content, stream: data.output.stream, taskId })
+      }
+      return
+    }
+    case caseRequeued.id: {
+      const data = v.safeParse(caseRequeuedDataSchema, envelope.data)
+      if (data.success && caseId != null) {
+        reporter.onCaseRequeue?.({
+          caseId,
+          delayMs: data.output.delayMs,
+          errorMessage: data.output.errorMessage,
+          requeue: data.output.requeue,
+          requeueIndex: data.output.requeueIndex,
+          state: data.output.state,
+          taskId,
+        })
       }
       return
     }

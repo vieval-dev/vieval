@@ -82,11 +82,12 @@ export function sumCounts(runs: readonly RunListItem[]): CaseCounts {
     errored: sum.errored + run.counts.errored,
     failed: sum.failed + run.counts.failed,
     passed: sum.passed + run.counts.passed,
+    requeued: sum.requeued + run.counts.requeued,
     running: sum.running + run.counts.running,
     skipped: sum.skipped + run.counts.skipped,
     timeout: sum.timeout + run.counts.timeout,
     total: sum.total + run.counts.total,
-  }), { errored: 0, failed: 0, passed: 0, running: 0, skipped: 0, timeout: 0, total: 0 })
+  }), { errored: 0, failed: 0, passed: 0, requeued: 0, running: 0, skipped: 0, timeout: 0, total: 0 })
 }
 
 /**

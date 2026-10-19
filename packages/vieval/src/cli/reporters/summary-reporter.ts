@@ -2,6 +2,7 @@ import type {
   CliReporter,
   CliReporterCaseEndPayload,
   CliReporterCaseOutputPayload,
+  CliReporterCaseRequeuePayload,
   CliReporterCaseStartPayload,
   CliReporterRunEndPayload,
   CliReporterRunStartPayload,
@@ -348,6 +349,21 @@ class SummaryReporterStateMachine implements SummaryReporter {
    */
   onCaseOutput(payload: CliReporterCaseOutputPayload): void {
     this.caseOutput.onCaseOutput(payload)
+  }
+
+  /**
+   * Handles a case that went back to the queue without a result.
+   *
+   * Use when:
+   * - a case run ended `errored` or `timeout` and the task requeues it
+   *
+   * Returns:
+   * - no direct value; the case leaves the running cases but does not count as completed until it ends
+   */
+  onCaseRequeue(payload: CliReporterCaseRequeuePayload): void {
+    const task = this.getOrCreateTaskState(payload.taskId)
+    task.runningCases.delete(payload.caseId)
+    this.caseOutput.onCaseRequeue(payload)
   }
 
   /**

@@ -14,7 +14,7 @@ import { runWithCaseOutput } from '../core/runner/case-output'
 import { createScheduler } from '../core/scheduler/runtime'
 import { scoreCaseOutcomes } from '../core/scoring'
 import { createNoopTelemetryRuntime } from '../core/telemetry'
-import { artifactRecorded, caseEnded, caseOutput, caseStarted, metricDefined, metricRecorded, scoreRecorded } from '../events'
+import { artifactRecorded, caseEnded, caseOutput, caseRequeued, caseStarted, metricDefined, metricRecorded, scoreRecorded } from '../events'
 import { createCaseArtifacts } from './case-artifacts'
 import { createMetricAnnouncements } from './metrics'
 import { registerEvalDefinition } from './registry'
@@ -353,6 +353,81 @@ function emitSafely<TData>(events: RunEventEmitter | undefined, definition: RunE
   }
 }
 
+/**
+ * Runs one case through its retries and, while it still has no result, requeues it.
+ *
+ * Use when:
+ * - a task schedules one case of one attempt
+ *
+ * Expects:
+ * - `schedule` to admit the work through the case pools; each run is admitted separately, so a requeued case gives
+ *   its slot back and waits at the end of the queue behind the cases that were waiting already
+ * - `onFinal`, when given, to report the final outcome; it runs while the case still holds its slot, so
+ *   `case.ended` comes before the next case of a full pool starts
+ *
+ * Returns:
+ * - the outcome of the last run, or `undefined` when the run was interrupted before the case started
+ */
+async function executeCaseWithRequeue(
+  context: TaskRunContext,
+  taskCase: RegisteredCase<unknown>,
+  index: number,
+  totalCases: number,
+  taskExecutionPolicy: TaskExecutionPolicy | undefined,
+  autoAttempt: CaseAutoAttempt | undefined,
+  schedule: <T>(execute: () => Promise<T>) => Promise<T>,
+  onFinal?: (outcome: CaseExecutionOutcome) => void,
+): Promise<CaseExecutionOutcome | undefined> {
+  const { requeue, requeueDelay } = resolveCaseExecutionPolicy(taskCase, taskExecutionPolicy)
+  let lastOutcome: CaseExecutionOutcome | undefined
+
+  for (let requeueIndex = 0; ; requeueIndex += 1) {
+    const run = await schedule(async () => {
+      const outcome = await executeRegisteredCase(context, taskCase, index, totalCases, taskExecutionPolicy, autoAttempt, requeueIndex)
+      // Interrupted before this run started: the previous run, if any, is the case's last word.
+      const final = outcome ?? lastOutcome
+      if (final == null) {
+        return undefined
+      }
+
+      const requeues = outcome != null
+        && (outcome.state === 'errored' || outcome.state === 'timeout')
+        && requeueIndex < requeue
+        && context.signal?.aborted !== true
+      if (!requeues) {
+        onFinal?.(final)
+        return { final: true as const, outcome: final }
+      }
+
+      const errorName = outcome.error == null ? undefined : errorNameFrom(outcome.error)
+      emitSafely(context.events?.scope({ caseId: createCaseId(index, taskCase.name) }), caseRequeued, {
+        ...autoAttempt,
+        delayMs: requeueDelay,
+        ...(outcome.errorMessage == null ? {} : { errorMessage: outcome.errorMessage }),
+        ...(errorName == null ? {} : { errorName }),
+        index,
+        name: taskCase.name,
+        requeue,
+        requeueIndex: requeueIndex + 1,
+        state: outcome.state as 'errored' | 'timeout',
+        total: totalCases,
+      })
+      return { final: false as const, outcome }
+    })
+    if (run == null || run.final) {
+      return run?.outcome
+    }
+    lastOutcome = run.outcome
+
+    // The wait happens without a slot, so other cases run meanwhile.
+    if (requeueDelay > 0 && !(await waitUnlessAborted(requeueDelay, context.signal))) {
+      // Interrupted while waiting: the requeued run is the case's last word.
+      await schedule(async () => onFinal?.(run.outcome))
+      return run.outcome
+    }
+  }
+}
+
 async function executeRegisteredCase(
   context: TaskRunContext,
   taskCase: RegisteredCase<unknown>,
@@ -360,6 +435,7 @@ async function executeRegisteredCase(
   totalCases: number,
   taskExecutionPolicy: TaskExecutionPolicy | undefined,
   autoAttempt: CaseAutoAttempt | undefined,
+  requeueIndex = 0,
 ): Promise<CaseExecutionOutcome | undefined> {
   const resolvedPolicy = resolveCaseExecutionPolicy(taskCase, taskExecutionPolicy)
   let lastOutcome: CaseExecutionOutcome | undefined
@@ -390,6 +466,7 @@ async function executeRegisteredCase(
       index,
       ...(taskCase.input === undefined ? {} : { input: taskCase.input }),
       name: taskCase.name,
+      ...(resolvedPolicy.requeue > 0 ? { requeue: resolvedPolicy.requeue, requeueIndex } : {}),
       total: totalCases,
     })
     lastOutcome = await runCaseOnce(context, taskCase, index, resolvedPolicy, autoAttempt)
@@ -436,6 +513,14 @@ function normalizeExecutionPolicy(policy: TaskExecutionPolicy | undefined, label
     assertNonNegativeInteger(policy.autoRetry, `${label} autoRetry`)
   }
 
+  if (policy.requeue != null) {
+    assertNonNegativeInteger(policy.requeue, `${label} requeue`)
+  }
+
+  if (policy.requeueDelay != null) {
+    assertNonNegativeNumber(policy.requeueDelay, `${label} requeueDelay`)
+  }
+
   if (typeof policy.autoRetryDelay === 'number') {
     assertNonNegativeNumber(policy.autoRetryDelay, `${label} autoRetryDelay`)
   }
@@ -450,6 +535,8 @@ function normalizeExecutionPolicy(policy: TaskExecutionPolicy | undefined, label
     autoRetryDelay: policy.autoRetryDelay,
     autoRetryIf: policy.autoRetryIf,
     classifyError: policy.classifyError,
+    requeue: policy.requeue,
+    requeueDelay: policy.requeueDelay,
     timeout: policy.timeout,
   }
 
@@ -471,13 +558,15 @@ function resolveAutoRetryDelay(policy: TaskExecutionPolicy, retryIndex: number, 
 function resolveCaseExecutionPolicy(
   taskCase: RegisteredCase<unknown>,
   taskExecutionPolicy: TaskExecutionPolicy | undefined,
-): Pick<TaskExecutionPolicy, 'autoRetryDelay' | 'autoRetryIf' | 'timeout'> & Required<Pick<TaskExecutionPolicy, 'autoAttempt' | 'autoRetry' | 'classifyError'>> {
+): Pick<TaskExecutionPolicy, 'autoRetryDelay' | 'autoRetryIf' | 'timeout'> & Required<Pick<TaskExecutionPolicy, 'autoAttempt' | 'autoRetry' | 'classifyError' | 'requeue' | 'requeueDelay'>> {
   return {
     autoAttempt: taskCase.executionPolicy?.autoAttempt ?? taskExecutionPolicy?.autoAttempt ?? 0,
     autoRetry: taskCase.executionPolicy?.autoRetry ?? taskExecutionPolicy?.autoRetry ?? 0,
     autoRetryDelay: taskCase.executionPolicy?.autoRetryDelay ?? taskExecutionPolicy?.autoRetryDelay,
     autoRetryIf: taskCase.executionPolicy?.autoRetryIf ?? taskExecutionPolicy?.autoRetryIf,
     classifyError: taskCase.executionPolicy?.classifyError ?? taskExecutionPolicy?.classifyError ?? classifyCaseErrorByDefault,
+    requeue: taskCase.executionPolicy?.requeue ?? taskExecutionPolicy?.requeue ?? 0,
+    requeueDelay: taskCase.executionPolicy?.requeueDelay ?? taskExecutionPolicy?.requeueDelay ?? 0,
     timeout: taskCase.executionPolicy?.timeout ?? taskExecutionPolicy?.timeout,
   }
 }
@@ -487,6 +576,30 @@ function toScoredCaseOutcome(outcome: CaseExecutionOutcome): ScoredCaseOutcome {
     scores: { exact: outcome.scoresByKind.get('exact'), judge: outcome.scoresByKind.get('judge') },
     state: outcome.state,
   }
+}
+
+/**
+ * Waits `milliseconds`, or until `signal` aborts.
+ *
+ * Returns:
+ * - `true` when the wait ran out, `false` when the signal aborted it
+ */
+async function waitUnlessAborted(milliseconds: number, signal: AbortSignal | undefined): Promise<boolean> {
+  if (signal?.aborted === true) {
+    return false
+  }
+  return await new Promise<boolean>((resolveWait) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const onAbort = () => {
+      clearTimeout(timer)
+      resolveWait(false)
+    }
+    timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolveWait(true)
+    }, milliseconds)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 /**
@@ -775,12 +888,7 @@ export function describeTask(
         if (!hasAutoAttempt) {
           await Promise.all(
             runCases.map(async ({ index, taskCase }) => {
-              await scheduleCase(taskCase, index, 0, async () => {
-                const outcome = await executeRegisteredCase(context, taskCase, index, totalCases, taskExecutionPolicy, undefined)
-                // Not started because the run was interrupted.
-                if (outcome == null) {
-                  return
-                }
+              await executeCaseWithRequeue(context, taskCase, index, totalCases, taskExecutionPolicy, undefined, async execute => await scheduleCase(taskCase, index, 0, execute), (outcome) => {
                 emitCaseOutcome(context, taskCase, outcome, index, totalCases, undefined)
                 settledOutcomes.push(toScoredCaseOutcome(outcome))
               })
@@ -797,11 +905,14 @@ export function describeTask(
               autoAttempt: resolveCaseExecutionPolicy(taskCase, taskExecutionPolicy).autoAttempt,
             })
             const attemptOutcomes = await Promise.all(
-              runCases.map(async ({ index, taskCase }) => await scheduleCase(
+              runCases.map(async ({ index, taskCase }) => await executeCaseWithRequeue(
+                context,
                 taskCase,
                 index,
-                attemptIndex,
-                async () => await executeRegisteredCase(context, taskCase, index, totalCases, taskExecutionPolicy, autoAttemptOf(taskCase)),
+                totalCases,
+                taskExecutionPolicy,
+                autoAttemptOf(taskCase),
+                async execute => await scheduleCase(taskCase, index, attemptIndex, execute),
               )),
             )
 
