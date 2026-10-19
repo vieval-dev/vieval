@@ -88,6 +88,8 @@ export interface CaseRecord {
   output?: unknown
   /** Project name for the task/case when known. */
   projectName: string
+  /** Times the case went back to the queue without a result (`requeue`) before its final outcome. */
+  requeueCount?: number
   /** Number of retries (`autoRetry`) within the final case outcome; auto attempts are not counted. */
   retryCount: number
   /** Run identity attached to the run. */
@@ -144,6 +146,7 @@ interface CaseDraft {
   metrics: Record<string, CaseMetricValue>
   output?: unknown
   projectName: string
+  requeueCount: number
   retryCount: number
   runId: string
   scores: Record<string, number>
@@ -323,6 +326,7 @@ function applyCaseStart(draft: CaseDraft, event: RunEventEnvelope, data: CaseSta
   draft.scores = {}
   draft.state = undefined
   draft.input = data.input
+  draft.requeueCount = Math.max(draft.requeueCount, data.requeueIndex ?? 0)
 
   if (data.attemptIndex == null) {
     // Without auto attempts, every start after the first is a retry.
@@ -424,6 +428,7 @@ function getOrCreateDraft(
     experimentId: event.experimentId,
     metrics: {},
     projectName: event.projectId ?? args.projectName,
+    requeueCount: 0,
     retryCount: 0,
     runId: event.runId,
     scores: {},
@@ -469,6 +474,7 @@ function toCaseRecord(draft: CaseDraft): CaseRecord {
     metrics: draft.metrics,
     ...(draft.output === undefined ? {} : { output: draft.output }),
     projectName: draft.projectName,
+    ...(draft.requeueCount === 0 ? {} : { requeueCount: draft.requeueCount }),
     retryCount: draft.retryCount,
     runId: draft.runId,
     schemaVersion: 1,

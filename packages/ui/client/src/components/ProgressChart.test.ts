@@ -8,7 +8,7 @@ import ProgressChart from './ProgressChart.vue'
 /** A run 1 h in: 30 of 120 cases settled at a steady pace, the ETA says 3 more hours. */
 const progress: RunProgress = {
   basis: 'cases',
-  cases: { completed: 30, estimatedTotal: 120, knownTotal: 120, running: 4 },
+  cases: { completed: 30, estimatedTotal: 120, knownTotal: 120, running: 4, waiting: 0 },
   elapsedMs: 3_600_000,
   estimatedTotalMs: 14_400_000,
   etaMs: 10_800_000,

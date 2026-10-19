@@ -3,6 +3,7 @@ import type {
   CliReporter,
   CliReporterCaseEndPayload,
   CliReporterCaseOutputPayload,
+  CliReporterCaseRequeuePayload,
   CliReporterCaseStartPayload,
   CliReporterCaseState,
   CliReporterTaskQueuedPayload,
@@ -152,6 +153,15 @@ export class CaseOutputCollector {
 
   onCaseOutput(payload: CliReporterCaseOutputPayload): void {
     this.getCase(payload.taskId, payload.caseId).lines.append(payload.stream, payload.content)
+  }
+
+  onCaseRequeue(payload: CliReporterCaseRequeuePayload): void {
+    const entry = this.cases.get(createCaseKey(payload.taskId, payload.caseId))
+    if (entry == null || entry.state != null || entry.lines.lines.length === 0) {
+      return
+    }
+    const reason = payload.errorMessage == null ? payload.state : `${payload.state}: ${payload.errorMessage}`
+    entry.lines.appendMarker(`── requeued ${payload.requeueIndex}/${payload.requeue} (${reason}) ──`)
   }
 
   onCaseStart(payload: CliReporterCaseStartPayload & { caseName?: string }): void {
@@ -335,6 +345,7 @@ export function createCaseOutputReporter(options: Pick<CaseOutputCollectorOption
     dispose: () => collector.flush(),
     onCaseEnd: payload => collector.onCaseEnd(payload),
     onCaseOutput: payload => collector.onCaseOutput(payload),
+    onCaseRequeue: payload => collector.onCaseRequeue(payload),
     onCaseStart: payload => collector.onCaseStart(payload),
     onRunEnd() {},
     onRunStart() {},

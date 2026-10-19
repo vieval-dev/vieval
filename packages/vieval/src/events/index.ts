@@ -194,7 +194,32 @@ export const caseStartedDataSchema = v.object({
   index: v.number(),
   input: v.optional(v.unknown()),
   name: v.string(),
+  /** Most times this case may go back to the queue (`requeue`); present when the task requeues. */
+  requeue: v.optional(v.number()),
+  /** Zero-based count of requeues before this run; a run after a requeue continues the same round. */
+  requeueIndex: v.optional(v.number()),
   retryIndex: v.optional(v.number()),
+  total: v.number(),
+})
+
+/**
+ * Payload of {@link caseRequeued}: a case ended a run without a result and went back to the queue. It has not
+ * ended; a later `case.started` with a higher `requeueIndex` runs it again.
+ */
+export const caseRequeuedDataSchema = v.object({
+  ...caseAutoAttemptEntries,
+  /** Least time in ms before the case may start again. */
+  delayMs: v.number(),
+  errorMessage: v.optional(v.string()),
+  errorName: v.optional(v.string()),
+  index: v.number(),
+  name: v.string(),
+  /** Most times this case may go back to the queue. */
+  requeue: v.number(),
+  /** One-based number of this requeue. */
+  requeueIndex: v.number(),
+  /** How the run ended: without a result. */
+  state: v.picklist(['errored', 'timeout']),
   total: v.number(),
 })
 
@@ -303,6 +328,7 @@ export const toolCallDataSchema = v.object({
 export type ArtifactRecordedData = v.InferOutput<typeof artifactRecordedDataSchema>
 export type CaseEndedData = v.InferOutput<typeof caseEndedDataSchema>
 export type CaseOutputData = v.InferOutput<typeof caseOutputDataSchema>
+export type CaseRequeuedData = v.InferOutput<typeof caseRequeuedDataSchema>
 export type CaseStartedData = v.InferOutput<typeof caseStartedDataSchema>
 export type InferenceFailedData = v.InferOutput<typeof inferenceFailedDataSchema>
 export type InferenceRequestedData = v.InferOutput<typeof inferenceRequestedDataSchema>
@@ -344,6 +370,8 @@ export const taskEnded = defineEventa<TaskEndedData>('task.ended')
 export const caseStarted = defineEventa<CaseStartedData>('case.started')
 /** One case settled after all retries; emitted once per auto attempt with `attemptIndex`. */
 export const caseEnded = defineEventa<CaseEndedData>('case.ended')
+/** A case without a result went back to the queue; it has not ended. */
+export const caseRequeued = defineEventa<CaseRequeuedData>('case.requeued')
 /** One chunk written to `process.stdout` / `process.stderr` while the case ran. */
 export const caseOutput = defineEventa<CaseOutputData>('case.output')
 /**

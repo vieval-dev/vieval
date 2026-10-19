@@ -41,7 +41,8 @@ const parts = computed(() => {
     { class: '[background-color:var(--mark-failed)]', label: 'failed', text: '[color:var(--ink-failed)]', value: failed },
     { class: '[background-color:var(--mark-errored)] vv-hatch', label: 'no result', text: '[color:var(--ink-errored)]', value: errored + timeout },
     { class: '[background-color:var(--mark-running)] vv-pulse', label: 'running', text: '[color:var(--ink-running)]', value: running },
-    { class: 'bg-neutral-400 dark:bg-neutral-600', label: 'not run', text: 'muted', value: other },
+    // Cases waiting to rerun have not ended, so they stay in this segment; the label says how many wait.
+    { class: 'bg-neutral-400 dark:bg-neutral-600', label: props.counts.requeued > 0 ? `not run (${props.counts.requeued} waiting to rerun)` : 'not run', text: 'muted', value: other },
   ].filter(part => part.value > 0).map(part => ({ ...part, width: `${(part.value / sum) * 100}%` }))
 })
 const summary = computed(() => [...parts.value.map(part => `${part.value} ${part.label}`), `${props.counts.total} total`].join(', '))

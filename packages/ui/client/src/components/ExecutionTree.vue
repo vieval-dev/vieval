@@ -38,6 +38,8 @@ interface Row {
   /** Start of a running case (ISO); the row shows how long it has run, ticking every second. */
   runningSince?: string
   state: string
+  /** A case waiting to rerun: when it may start again (ISO); the row counts down, ticking every second. */
+  waitingUntil?: string
 }
 
 const open = reactive(new Set<string>())
@@ -61,6 +63,9 @@ function matches(state: string, name: string): boolean {
     return true
   if (filter.value === 'failed')
     return state === 'failed' || state === 'errored' || state === 'timeout' || state === 'unfinished'
+  // A case waiting to rerun has not ended, so it lists with the running ones.
+  if (filter.value === 'running')
+    return state === 'running' || state === 'requeued'
   return state === filter.value
 }
 
@@ -85,11 +90,13 @@ const rows = computed<Row[]>(() => {
           return
         const caseKey = `c:${node.key}:${round?.roundIndex ?? 'last'}`
         const last = round ?? node.rounds.at(-1)
-        const retries = (last?.tries.length ?? 1) - 1
+        const retries = last?.tries.filter(entry => entry.retryIndex > 0).length ?? 0
+        // Requeues so far: the last try's count, plus the requeue the case is waiting on.
+        const requeues = (last?.tries.at(-1)?.requeueIndex ?? 0) + (last?.state === 'requeued' ? 1 : 0)
         list.push({
           caseNode: node,
           depth,
-          detail: [node.durationMs == null ? undefined : formatDuration(node.durationMs), retries > 0 ? `${retries} retr${retries === 1 ? 'y' : 'ies'}` : undefined, node.rounds.length > 1 && round == null ? `${node.rounds.length} rounds` : undefined, node.artifactCount > 0 ? `${node.artifactCount} artifacts` : undefined, node.evidenceLinkCount > 0 ? 'evidence' : undefined].filter(Boolean).join(' · '),
+          detail: [node.durationMs == null ? undefined : formatDuration(node.durationMs), retries > 0 ? `${retries} retr${retries === 1 ? 'y' : 'ies'}` : undefined, requeues > 0 ? `requeued ${requeues}/${last?.requeue ?? requeues}` : undefined, node.rounds.length > 1 && round == null ? `${node.rounds.length} rounds` : undefined, node.artifactCount > 0 ? `${node.artifactCount} artifacts` : undefined, node.evidenceLinkCount > 0 ? 'evidence' : undefined].filter(Boolean).join(' · '),
           expandable: (last?.tries.length ?? 0) > 0,
           href: href({ caseId: node.caseId, name: 'case', runKey: snapshot.runKey, taskId: node.taskId }),
           key: caseKey,
@@ -101,8 +108,13 @@ const rows = computed<Row[]>(() => {
           state,
         })
         if (open.has(caseKey) && last != null) {
-          for (const attempt of last.tries)
-            list.push({ depth: depth + 1, detail: `${attempt.endedAt == null ? 'running' : formatDuration(Date.parse(attempt.endedAt) - Date.parse(attempt.startedAt))}`, expandable: false, key: `${caseKey}:try:${attempt.retryIndex}`, kind: 'try', label: `try ${attempt.retryIndex + 1}${attempt.retryIndex > 0 ? ` (retry ${attempt.retryIndex})` : ''}`, state: attempt.state })
+          // Tries are numbered across requeues; the note says whether a try was an immediate retry or ran after a requeue.
+          last.tries.forEach((attempt, tryIndex) => {
+            const note = attempt.retryIndex > 0 ? ` (retry ${attempt.retryIndex})` : attempt.requeueIndex > 0 ? ` (requeue ${attempt.requeueIndex})` : ''
+            list.push({ depth: depth + 1, detail: `${attempt.endedAt == null ? 'running' : formatDuration(Date.parse(attempt.endedAt) - Date.parse(attempt.startedAt))}`, expandable: false, key: `${caseKey}:try:${tryIndex}`, kind: 'try', label: `try ${tryIndex + 1}${note}`, state: attempt.state })
+          })
+          if (last.state === 'requeued' && last.requeuedAt != null)
+            list.push({ depth: depth + 1, detail: `after ${last.tries.length} ${last.tries.length === 1 ? 'try' : 'tries'}`, expandable: false, key: `${caseKey}:waiting`, kind: 'try', label: 'waiting to rerun', state: 'requeued', waitingUntil: new Date(Date.parse(last.requeuedAt) + (last.requeueDelayMs ?? 0)).toISOString() })
         }
       }
       if (task.roundCount > 1) {
@@ -216,6 +228,8 @@ const counts = computed(() => props.snapshot.tasks.reduce((sum, task) => sum + t
             <span :class="['md:(ml-auto pl-2) flex items-center gap-1.5 min-w-0', 'muted mono text-xs whitespace-nowrap max-md:text-[11px]']">
               <CountsBar v-if="rows[item.index]!.counts" :class="['w-24 shrink-0']" :counts="rows[item.index]!.counts!" />
               <span v-if="rows[item.index]!.runningSince" :class="['[color:var(--ink-running)] tabular-nums']" data-testid="running-elapsed">running {{ formatDuration(Math.max(0, now - Date.parse(rows[item.index]!.runningSince!))) }}</span>
+              <!-- After the delay the case waits for a slot at the end of the queue, which has no countdown. -->
+              <span v-if="rows[item.index]!.waitingUntil" :class="['[color:var(--ink-errored)] tabular-nums']" data-testid="waiting-countdown">{{ Date.parse(rows[item.index]!.waitingUntil!) > now ? `rerun in ${formatDuration(Date.parse(rows[item.index]!.waitingUntil!) - now)}` : 'waiting for a slot' }}</span>
               <span :class="['truncate']">{{ rows[item.index]!.detail }}</span>
             </span>
           </span>

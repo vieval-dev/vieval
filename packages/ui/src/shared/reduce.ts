@@ -143,6 +143,9 @@ interface MutableRound {
   errorMessage?: string
   errorName?: string
   output?: unknown
+  requeue?: number
+  requeuedAt?: string
+  requeueDelayMs?: number
   roundIndex: number
   roundIndexInferred: boolean
   scores: { exact?: number, judge?: number }
@@ -154,6 +157,9 @@ interface MutableRound {
 interface MutableTry {
   autoRetry: number
   endedAt?: string
+  /** Why a requeued try went back to the queue; the round keeps only the error of its latest run. */
+  errorMessage?: string
+  requeueIndex: number
   retryIndex: number
   startedAt: string
   state: TryNode['state']
@@ -273,12 +279,13 @@ export function compareNatural(left: string, right: string): number {
  * Counts final case states.
  */
 export function countCases(nodes: readonly Pick<CaseNode, 'state'>[]): CaseCounts {
-  const counts: CaseCounts = { errored: 0, failed: 0, passed: 0, running: 0, skipped: 0, timeout: 0, total: nodes.length }
+  const counts: CaseCounts = { errored: 0, failed: 0, passed: 0, requeued: 0, running: 0, skipped: 0, timeout: 0, total: nodes.length }
   for (const node of nodes) {
     switch (node.state) {
       case 'errored':
       case 'failed':
       case 'passed':
+      case 'requeued':
       case 'running':
       case 'skipped':
       case 'timeout':
@@ -419,6 +426,7 @@ export function createRunReducer(): RunReducer {
     }
 
     const retryIndex = asNumber(data.retryIndex) ?? 0
+    const requeueIndex = asNumber(data.requeueIndex) ?? 0
     const autoRetry = asNumber(data.autoRetry) ?? 0
     const attemptIndex = asNumber(data.attemptIndex)
     const lastRound = reduced.rounds.at(-1)
@@ -426,8 +434,8 @@ export function createRunReducer(): RunReducer {
     if (attemptIndex != null) {
       round = reduced.rounds.find(candidate => candidate.roundIndex === attemptIndex)
     }
-    else if (retryIndex > 0) {
-      // A retry stays in the round of the failed try.
+    else if (retryIndex > 0 || requeueIndex > 0) {
+      // A retry, and the run after a requeue, stay in the round of the failed try.
       round = lastRound
     }
 
@@ -443,8 +451,9 @@ export function createRunReducer(): RunReducer {
       reduced.rounds.push(round)
     }
 
-    if (round.state !== 'running') {
+    if (round.state !== 'running' && round.state !== 'requeued') {
       // A settled round runs again (the same `attemptIndex` started twice): it no longer counts as completed.
+      // A requeued round never counted as completed, so it is not taken back.
       recordSettlement(-1, envelope.time)
     }
     const previousTry = round.tries.at(-1)
@@ -453,8 +462,44 @@ export function createRunReducer(): RunReducer {
       previousTry.state = 'retried'
       previousTry.endedAt = envelope.time
     }
+    const requeue = asNumber(data.requeue)
+    if (requeue != null) {
+      round.requeue = requeue
+    }
+    if (requeueIndex > 0 && retryIndex === 0) {
+      // A run after a requeue starts clean: the error that requeued it stays on its try, not on the round.
+      round.errorMessage = undefined
+      round.errorName = undefined
+    }
+    round.requeuedAt = undefined
+    round.requeueDelayMs = undefined
     round.state = 'running'
-    round.tries.push({ autoRetry, retryIndex, startedAt: envelope.time, state: 'running' })
+    round.tries.push({ autoRetry, requeueIndex, retryIndex, startedAt: envelope.time, state: 'running' })
+  }
+
+  /** A run ended without a result and the case went back to the queue: it waits, and has not ended. */
+  function applyCaseRequeued(envelope: RunEvent): void {
+    const data = asRecord(envelope.data)
+    const reduced = ensureCase(envelope, asString(data.name), asNumber(data.index))
+    const attemptIndex = asNumber(data.attemptIndex)
+    const round = attemptIndex == null
+      ? reduced?.rounds.at(-1)
+      : reduced?.rounds.find(candidate => candidate.roundIndex === attemptIndex)
+    if (round == null) {
+      return
+    }
+    const lastTry = round.tries.at(-1)
+    if (lastTry != null && lastTry.state === 'running') {
+      lastTry.state = 'requeued'
+      lastTry.endedAt = envelope.time
+      lastTry.errorMessage = asString(data.errorMessage)
+    }
+    round.state = 'requeued'
+    round.requeuedAt = envelope.time
+    round.requeueDelayMs = asNumber(data.delayMs) ?? 0
+    round.requeue = asNumber(data.requeue) ?? round.requeue
+    round.errorMessage = asString(data.errorMessage) ?? round.errorMessage
+    round.errorName = asString(data.errorName) ?? round.errorName
   }
 
   function applyCaseEnded(envelope: RunEvent): void {
@@ -474,7 +519,7 @@ export function createRunReducer(): RunReducer {
         scores: {},
         startedAt: envelope.time,
         state: 'running',
-        tries: [{ autoRetry: 0, retryIndex: 0, startedAt: envelope.time, state: 'running' }],
+        tries: [{ autoRetry: 0, requeueIndex: 0, retryIndex: 0, startedAt: envelope.time, state: 'running' }],
       }
       reduced.rounds.push(round)
     }
@@ -578,6 +623,9 @@ export function createRunReducer(): RunReducer {
         }
         break
       }
+      case 'case.requeued':
+        applyCaseRequeued(envelope)
+        break
       case 'case.started':
         applyCaseStarted(envelope)
         break
@@ -754,7 +802,29 @@ export function currentPosition(reducer: RunReducer, now: number): CurrentPositi
     }
   }
   running.sort((left, right) => left.startedAt.localeCompare(right.startedAt))
-  return { lastEvent: run.lastEvent, running }
+
+  const waiting: CurrentPosition['waiting'] = []
+  if (!run.terminated) {
+    for (const reduced of reducer.cases.values()) {
+      const round = reduced.rounds.at(-1)
+      if (round == null || round.state !== 'requeued' || round.requeuedAt == null) {
+        continue
+      }
+      waiting.push({
+        caseId: reduced.caseId,
+        delayMs: round.requeueDelayMs ?? 0,
+        name: reduced.name,
+        projectId: reduced.projectId,
+        requeue: round.requeue ?? 0,
+        requeuedAt: round.requeuedAt,
+        requeueIndex: (round.tries.at(-1)?.requeueIndex ?? 0) + 1,
+        taskDisplayName: reducer.tasks.get(reduced.taskId)?.displayName ?? reduced.taskId,
+        taskId: reduced.taskId,
+      })
+    }
+  }
+  waiting.sort((left, right) => left.requeuedAt.localeCompare(right.requeuedAt))
+  return { lastEvent: run.lastEvent, running, waiting }
 }
 
 /**
@@ -774,6 +844,7 @@ export function estimateProgress(reducer: RunReducer, now: number): RunProgress 
   const completedTasks = taskList.filter(task => task.state === 'passed' || task.state === 'failed' || task.state === 'skipped').length
   let completed = 0
   let running = 0
+  let waiting = 0
   let extraRounds = 0
   let longestRunningMs = 0
   for (const reduced of reducer.cases.values()) {
@@ -787,6 +858,10 @@ export function estimateProgress(reducer: RunReducer, now: number): RunProgress 
         if (startedAt != null) {
           longestRunningMs = Math.max(longestRunningMs, now - Date.parse(startedAt))
         }
+      }
+      // A requeued round waits to run again: it has not completed, and it is not running either.
+      else if (round.state === 'requeued') {
+        waiting += 1
       }
       else {
         completed += 1
@@ -808,7 +883,7 @@ export function estimateProgress(reducer: RunReducer, now: number): RunProgress 
   if (run.terminated) {
     return {
       basis: 'ended',
-      cases: { completed, estimatedTotal: completed + running, knownTotal, running: 0 },
+      cases: { completed, estimatedTotal: completed + running + waiting, knownTotal, running: 0, waiting: 0 },
       elapsedMs,
       history,
       lowerBound,
@@ -820,7 +895,7 @@ export function estimateProgress(reducer: RunReducer, now: number): RunProgress 
   if (knownTasks.length === 0 || completed === 0) {
     return {
       basis: 'unknown',
-      cases: { completed, knownTotal, running },
+      cases: { completed, knownTotal, running, waiting },
       elapsedMs,
       history,
       lowerBound,
@@ -834,7 +909,7 @@ export function estimateProgress(reducer: RunReducer, now: number): RunProgress 
   const etaMs = running > 0 ? Math.max(throughputEtaMs, longestRunningMs) : throughputEtaMs
   return {
     basis: unknownTasks === 0 ? 'cases' : 'cases+task-extrapolation',
-    cases: { completed, estimatedTotal, knownTotal, running },
+    cases: { completed, estimatedTotal, knownTotal, running, waiting },
     elapsedMs,
     estimatedTotalMs: elapsedMs + etaMs,
     etaMs,
@@ -873,7 +948,8 @@ export function parseTaskId(taskId: string): { entryId?: string, inferenceExecut
  * of `exact` and lower `coverage`.
  */
 export function scoreRounds(rounds: readonly Pick<CaseRound, 'scores' | 'state'>[]): CaseOutcomeScores {
-  return scoreCaseOutcomes(rounds.flatMap(round => round.state === 'running'
+  // Running and requeued rounds have not ended, so they do not count yet.
+  return scoreCaseOutcomes(rounds.flatMap(round => round.state === 'running' || round.state === 'requeued'
     ? []
     : [{ scores: round.scores, state: toOutcomeState(round.state) }]))
 }
@@ -1017,16 +1093,20 @@ function splitOutputLines(content: string): string[] {
 }
 
 /** A round the run ended while it ran (`unfinished`) produced no result, like an errored one. */
-function toOutcomeState(state: Exclude<CaseState, 'running'>): CaseOutcomeState {
+function toOutcomeState(state: Exclude<CaseState, 'requeued' | 'running'>): CaseOutcomeState {
   return state === 'unfinished' ? 'errored' : state
 }
 
 function toRound(round: MutableRound, terminated: boolean): CaseRound {
-  const unfinished = terminated && round.state === 'running'
+  // A run that ended while the case ran, or while it waited to run again, left the case without a result.
+  const unfinished = terminated && (round.state === 'running' || round.state === 'requeued')
   return {
     endedAt: round.endedAt,
     errorMessage: round.errorMessage,
     errorName: round.errorName,
+    ...(round.requeue == null ? {} : { requeue: round.requeue }),
+    ...(unfinished || round.requeueDelayMs == null ? {} : { requeueDelayMs: round.requeueDelayMs }),
+    ...(unfinished || round.requeuedAt == null ? {} : { requeuedAt: round.requeuedAt }),
     roundIndex: round.roundIndex,
     roundIndexInferred: round.roundIndexInferred,
     scores: { ...round.scores },

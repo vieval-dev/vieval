@@ -296,7 +296,7 @@ export async function readRunSummary(filePath: string): Promise<RunSummaryInfo |
   if (parsed == null) {
     return undefined
   }
-  const caseSummary: CaseCounts = { errored: 0, failed: 0, passed: 0, running: 0, skipped: 0, timeout: 0, total: 0 }
+  const caseSummary: CaseCounts = { errored: 0, failed: 0, passed: 0, requeued: 0, running: 0, skipped: 0, timeout: 0, total: 0 }
   let hasCaseSummary = false
   const weighted = { exact: [0, 0], judge: [0, 0] }
   for (const project of parsed.projects) {
