@@ -1,6 +1,8 @@
+import type { MatrixAxes } from './labels'
+
 import { describe, expect, it } from 'vitest'
 
-import { attemptDate, attemptLabel, experimentLabel, formatAxisValues, formatFinish, mergeMatrices, relativeTime, runLabel, shortRunHash } from './labels'
+import { attemptDate, attemptLabel, differingAxes, experimentLabel, formatAxisValues, formatFinish, mergeMatrices, relativeTime, runLabel, shortRunHash } from './labels'
 
 describe('formatAxisValues', () => {
   /**
@@ -64,6 +66,22 @@ describe('mergeMatrices', () => {
    */
   it('unions the axes and values of several runs', () => {
     expect(mergeMatrices([{ model: ['gpt-5.5'], repeat: ['2'] }, { repeat: ['10', '1'] }, undefined])).toEqual({ model: ['gpt-5.5'], repeat: ['1', '2', '10'] })
+  })
+})
+
+describe('differingAxes', () => {
+  /**
+   * @example
+   * expect(differingAxes([{ asr: ['apple-speech'] }, { asr: ['whisper-1'] }])).toEqual(['asr'])
+   */
+  it('names the axes whose values change between runs, and an axis only some runs have', () => {
+    const runs: MatrixAxes[] = [
+      { asr: ['apple-speech'], listener: ['gpt-6-luna'], tts: ['none', 'official'] },
+      { asr: ['whisper-1'], listener: ['gpt-6-luna'], tts: ['official', 'none'] },
+      { asr: ['whisper-1'], listener: ['gpt-6-luna'], rewrite: ['gpt-6-luna'], tts: ['none', 'official'] },
+    ]
+    expect(differingAxes(runs)).toEqual(['asr', 'rewrite'])
+    expect(differingAxes([runs[1]!, runs[1]!])).toEqual([])
   })
 })
 

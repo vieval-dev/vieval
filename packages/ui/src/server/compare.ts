@@ -1,4 +1,4 @@
-import type { ComparedRun, ComparisonCell, ComparisonResponse, MatrixCell, MatrixResponse, RunListItem, TaskNode } from '../shared/contract'
+import type { CellCoverage, ComparedRun, ComparisonCell, ComparisonResponse, MatrixCell, MatrixResponse, RunListItem, TaskNode } from '../shared/contract'
 import type { RunHandle } from './store'
 
 import { axisValues, buildTaskNodes, compareNatural } from '../shared/reduce'
@@ -20,13 +20,16 @@ interface Column {
  * - each run with the task nodes it was listed with (built once per run by the caller)
  *
  * Returns:
- * - cells ordered by entry, then run row and eval row in natural order; `latest` is the newest run (by start
- *   time) with a task in the cell, `history` every such run oldest first. Tasks without a parsable matrix are
- *   skipped. Tasks of one run that share a cell (several inference executors) keep the last one in queue order.
+ * - cells ordered by entry, then run row and eval row in natural order; `history` is every run with a task in the
+ *   cell, oldest first, each with its coverage; `latest` is the newest run that covered the cell fully or is still
+ *   running it, else the newest run. Tasks without a parsable matrix are skipped. Tasks of one run that share a cell
+ *   (several inference executors) keep the last one in queue order.
  */
 export function buildMatrix(runs: readonly { item: RunListItem, tasks: readonly TaskNode[] }[]): MatrixResponse {
   const oldestFirst = [...runs].sort((left, right) => (left.item.startedAt ?? '').localeCompare(right.item.startedAt ?? ''))
   const cells = new Map<string, MatrixCell>()
+  // Whether the cell's `latest` is a headline run (full or running); a partial run only fills an empty headline.
+  const headline = new Map<string, boolean>()
   const runRows: Record<string, string>[] = []
   const evalRows: Record<string, string>[] = []
   for (const { item, tasks } of oldestFirst) {
@@ -36,10 +39,13 @@ export function buildMatrix(runs: readonly { item: RunListItem, tasks: readonly 
       }
       runRows.push(task.matrix.run)
       evalRows.push(task.matrix.eval)
-      const point = { exact: task.scores.exact, runKey: item.runKey, startedAt: item.startedAt, state: task.state }
+      const coverage = coverageOf(task)
+      const point = { attemptId: item.attemptId, counts: task.caseCounts, coverage, exact: task.scores.exact, runKey: item.runKey, startedAt: item.startedAt, state: task.state }
       const latest: MatrixCell['latest'] = {
         attemptId: item.attemptId,
+        caseTotal: task.caseTotal,
         counts: task.caseCounts,
+        coverage,
         exact: task.scores.exact,
         experimentId: item.experimentId,
         judge: task.scores.judge,
@@ -48,21 +54,27 @@ export function buildMatrix(runs: readonly { item: RunListItem, tasks: readonly 
         state: task.state,
         taskId: task.id,
       }
+      const isHeadline = coverage === 'full' || task.state === 'running' || task.state === 'queued'
       // NUL cannot appear in decoded ids, so the joined key is unambiguous.
       const key = [task.entryId, task.matrix.runRowId, task.matrix.evalRowId].join('\0')
       const cell = cells.get(key)
       if (cell == null) {
         cells.set(key, { entryId: task.entryId, eval: task.matrix.eval, evalRowId: task.matrix.evalRowId, history: [point], latest, run: task.matrix.run, runRowId: task.matrix.runRowId })
+        headline.set(key, isHeadline)
         continue
       }
-      // Runs are visited oldest first, so the newer run replaces `latest`; a second task of the same run replaces its point.
-      if (cell.history.at(-1)?.runKey === item.runKey) {
+      // Runs are visited oldest first; a second task of the same run replaces its point (and its headline).
+      const sameRun = cell.history.at(-1)?.runKey === item.runKey
+      if (sameRun) {
         cell.history[cell.history.length - 1] = point
       }
       else {
         cell.history.push(point)
       }
-      cell.latest = latest
+      if (isHeadline || sameRun || headline.get(key) !== true) {
+        cell.latest = latest
+        headline.set(key, isHeadline)
+      }
     }
   }
   return {
@@ -158,6 +170,19 @@ function buildComparison(view: ComparisonResponse['view'], columns: readonly Col
     summary: { changed: outputRows.filter(row => row.changed).length, rows: outputRows.length },
     view,
   }
+}
+
+/**
+ * How much of its task a run measured (see `cellCoverageSchema`): cases with a result are `passed` and `failed`;
+ * every expected case must have settled for `full`.
+ */
+function coverageOf(task: TaskNode): CellCoverage {
+  const { errored, failed, passed, skipped, timeout, total } = task.caseCounts
+  if (passed + failed === 0) {
+    return 'none'
+  }
+  const expected = Math.max(total, task.caseTotal ?? 0)
+  return passed + failed + errored + skipped + timeout >= expected ? 'full' : 'partial'
 }
 
 function matches(handle: RunHandle, filter: { project: string, workspace: string }, now: number): boolean {

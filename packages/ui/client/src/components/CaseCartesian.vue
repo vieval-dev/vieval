@@ -4,11 +4,12 @@ import type { ScaleBand, ScaleContinuousNumeric, Selection } from 'd3'
 import type { CaseFilters, CaseRow } from '../caseMetrics'
 import type { ParallelAxis } from './ParallelCoordinates.vue'
 
-import { axisBottom, axisLeft, brush, brushX, brushY, format, scaleBand, select } from 'd3'
+import { axisBottom, axisLeft, brush, brushX, brushY, scaleBand, select } from 'd3'
 import { onMounted, useTemplateRef, watch } from 'vue'
 
 import { caseOffset } from '../caseMetrics'
 import { useElementWidth } from '../composables/useElementWidth'
+import { formatTick } from '../format'
 
 /**
  * Cases on one or two axes, one dot per case: a strip along one axis, or a plane of two. A metric axis is a scale
@@ -48,7 +49,6 @@ const width = useElementWidth(root, 800)
 /** A strip needs less height than a plane; both leave room for the axis labels. */
 const heights = { plane: 360, strip: 200 }
 const margin = { bottom: 40, left: 120, right: 24, top: 16 }
-const tick = format('~s')
 
 let dots: ReturnType<typeof drawDots> | undefined
 let drawPinned: (() => void) | undefined
@@ -75,7 +75,7 @@ function drawDots(svg: Selection<SVGSVGElement, unknown, null, undefined>) {
     if ('bandwidth' in scale)
       g.call((horizontal ? axisBottom(scale) : axisLeft(scale)).tickSizeOuter(0))
     else
-      g.call((horizontal ? axisBottom(scale) : axisLeft(scale)).ticks(horizontal ? 8 : 5).tickFormat(tick).tickSizeOuter(0))
+      g.call((horizontal ? axisBottom(scale) : axisLeft(scale)).ticks(horizontal ? 8 : 5).tickFormat(value => formatTick(value as number)).tickSizeOuter(0))
     g.call(group => group.selectAll('line, path').attr('stroke', 'var(--chart-grid)'))
       .call(group => group.selectAll('text').attr('fill', 'var(--chart-text)').attr('font-size', 11))
     if (axis.kind === 'category') {

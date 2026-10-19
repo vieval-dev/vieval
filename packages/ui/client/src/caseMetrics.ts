@@ -1,8 +1,11 @@
 import type { ScaleContinuousNumeric } from 'd3'
 
-import type { CaseNode, CaseState, MetricsResponse } from '../../src/shared/contract'
+import type { CaseNode, CaseState, MetricDefinition, MetricsResponse } from '../../src/shared/contract'
 
 import { scaleLinear, scaleSymlog } from 'd3'
+
+import { parseTaskId } from '../../src/shared/reduce'
+import { localize } from './localize'
 
 /** One case of a task, flattened for the multi-metric charts (parallel coordinates, scatterplot matrix). */
 export interface CaseRow {
@@ -66,15 +69,21 @@ export interface CaseFilters {
   ranges: Record<string, [number, number]>
 }
 
-/** How well one metric tells failed cases from passed ones. */
+/** Summaries drawn for a metric recorded as a list of numbers per case. */
+export type DerivedSummary = 'length' | 'mean'
+
+/**
+ * How well one metric tells failed cases from passed ones, or, when every case ended the same way, lower-scored
+ * cases from higher-scored ones.
+ */
 export interface MetricSeparation {
   /**
-   * Area under the ROC curve, folded to `0.5..1`: the chance that a random failed and a random passed case are told
-   * apart by this metric alone (`0.5`: no better than a coin, `1`: every failed case lies on one side).
+   * Area under the ROC curve, folded to `0.5..1`: the chance that a random case of each outcome is told apart by this
+   * metric alone (`0.5`: no better than a coin, `1`: every case of one outcome lies on one side).
    */
   auc: number
-  /** Which outcome has the larger values. */
-  higherIn: 'failed' | 'passed'
+  /** Which outcome has the larger values: a case state, or the lower / higher `exact` score. */
+  higherIn: 'failed' | 'higher-scored' | 'lower-scored' | 'passed'
 }
 
 /**
@@ -90,7 +99,10 @@ export interface MetricSeparation {
  *
  * Returns:
  * - one row per case with the value of its last round for every metric; built-in axes `duration_s`, `exact`,
- *   `judge` (when recorded), `state`, and `group` (the name prefix before `/`, when names share that shape)
+ *   `judge` (when recorded), `state`, `group` (the name prefix before `/`, when names share that shape), and the
+ *   eval `entry` and the run and eval matrix axes of the case's task (they split the cases only when several tasks
+ *   are in the table)
+ * - metrics recorded as a list of numbers per case summarized as `<name>#mean` and `<name>#length`
  * - constant metrics split out, and correlated metrics (|r| ≥ 0.95 on `log1p` values) folded into the first of
  *   them in recording order, built-ins first
  */
@@ -120,11 +132,31 @@ export function buildCaseTable(cases: readonly CaseNode[], metrics: MetricsRespo
       }
     }
   }
+  const derivedNames: string[] = []
   for (const series of metrics?.nonNumeric ?? []) {
     for (const point of series.values) {
+      if (point.caseId == null)
+        continue
       // Flags (`gui_only: true`) split cases like any other category.
-      if (point.caseId != null && (typeof point.value === 'string' || typeof point.value === 'boolean'))
+      if (typeof point.value === 'string' || typeof point.value === 'boolean') {
         entryOf(point.taskId, point.caseId).strings[series.name] = String(point.value)
+        continue
+      }
+      // A list of numbers per case (the grade of each listener vote, every sample's reward) is drawn by its summaries.
+      const values = numbersOf(point.value)
+      if (values == null)
+        continue
+      const entry = entryOf(point.taskId, point.caseId)
+      const round = point.roundIndex ?? 0
+      for (const [summary, value] of [['mean', values.reduce((sum, item) => sum + item, 0) / values.length], ['length', values.length]] as const) {
+        const name = derivedMetricName(series.name, summary)
+        if (!derivedNames.includes(name))
+          derivedNames.push(name)
+        if ((entry.rounds[name] ?? -1) <= round) {
+          entry.rounds[name] = round
+          entry.numbers[name] = value
+        }
+      }
     }
   }
 
@@ -139,7 +171,10 @@ export function buildCaseTable(cases: readonly CaseNode[], metrics: MetricsRespo
     if (node.scores.judge != null)
       numbers.judge = node.scores.judge
     // Built-ins first (key order is the default axis order), and they win over a recorded metric of the same name.
-    const builtIn: Record<string, string> = { state: node.state }
+    // The matrix axes of the case's task (`tts`, `asr`, …): one value per task, so they split only a run-wide table.
+    // The eval entry too (`…/formula-speech/en`, by its last path segment): one entry per language or dataset split.
+    const { entryId, matrix } = parseTaskId(node.taskId)
+    const builtIn: Record<string, string> = { ...(entryId == null ? {} : { entry: entryId.split('/').at(-1) ?? entryId }), ...matrix?.run, ...matrix?.eval, state: node.state }
     if (grouped)
       builtIn.group = node.name.slice(0, node.name.indexOf('/'))
     const categories: Record<string, string> = { ...builtIn, ...recorded?.strings, ...builtIn }
@@ -147,7 +182,7 @@ export function buildCaseTable(cases: readonly CaseNode[], metrics: MetricsRespo
   })
 
   const builtIns = ['duration_s', 'exact', 'judge']
-  const recordedNames = (metrics?.numeric ?? []).map(series => series.name)
+  const recordedNames = [...(metrics?.numeric ?? []).map(series => series.name), ...derivedNames]
   const numericNames = [...builtIns, ...recordedNames].filter((name, index, all) => all.indexOf(name) === index && rows.some(row => row.numbers[name] != null))
 
   const constants: CaseTable['constants'] = []
@@ -203,11 +238,19 @@ export function buildCaseTable(cases: readonly CaseNode[], metrics: MetricsRespo
       continue
     }
     categories.push(name)
-    const order = name === 'state' ? (value: string) => STATE_ORDER.indexOf(value) : (value: string) => -counts.get(value)!
+    // States in their usual order; numbers (a 0 / 1 score) low to high, so a chart that stacks values upward puts the
+    // high end on top like on a metric axis; other values most frequent first.
+    const numericValues = [...counts.keys()].every(value => value.trim() !== '' && Number.isFinite(Number(value)))
+    const order = name === 'state'
+      ? (value: string) => STATE_ORDER.indexOf(value)
+      : numericValues ? (value: string) => Number(value) : (value: string) => -counts.get(value)!
     valueCounts[name] = new Map([...counts].sort(([a], [b]) => order(a) - order(b)))
   }
   return { categories, constants, duplicates, groups, heavyTailed, rows, valueCounts }
 }
+
+/** Separator between a list metric's name and its summary in a derived metric name; never part of a recorded name. */
+const DERIVED_SEPARATOR = '#'
 
 /**
  * Pearson correlation of two metrics over the cases that recorded both, on `log1p` values so token counts that span
@@ -244,6 +287,19 @@ export function correlationOf(rows: readonly CaseRow[], left: string, right: str
 }
 
 /**
+ * Name of the numeric axis that summarizes a list metric.
+ *
+ * Before:
+ * - "tts_speech_formula.votes", "mean"
+ *
+ * After:
+ * - "tts_speech_formula.votes#mean"
+ */
+export function derivedMetricName(name: string, summary: DerivedSummary): string {
+  return `${name}${DERIVED_SEPARATOR}${summary}`
+}
+
+/**
  * Whether a case passes every filter; a case without a value on a filtered numeric axis does not.
  *
  * Use when:
@@ -267,6 +323,32 @@ export function matchesFilters(row: CaseRow, filters: CaseFilters): boolean {
       return false
   }
   return true
+}
+
+/**
+ * Definition of a metric for its hover card; a derived metric borrows the description of its list metric (and its
+ * unit for the mean, not for the length).
+ */
+export function metricDefinition(name: string, definitions: ReadonlyMap<string, MetricDefinition>): MetricDefinition | undefined {
+  const derived = parseDerivedMetric(name)
+  const base = definitions.get(derived?.base ?? name)
+  if (derived == null || base == null)
+    return base
+  return { ...base, label: metricLabel(name, definitions), name, unit: derived.summary === 'mean' ? base.unit : undefined }
+}
+
+/**
+ * Readable name of a metric: the label it was defined with, else its name; a derived metric names its list metric and
+ * the summary (`Listener votes · mean`).
+ *
+ * Use when:
+ * - any chart, menu, or table names a metric of a {@link CaseTable}
+ */
+export function metricLabel(name: string, definitions: ReadonlyMap<string, MetricDefinition>): string {
+  const derived = parseDerivedMetric(name)
+  if (derived != null)
+    return `${metricLabel(derived.base, definitions)} · ${derived.summary}`
+  return localize(definitions.get(name)?.label) ?? name
 }
 
 /**
@@ -294,6 +376,18 @@ export function metricScale(table: CaseTable, name: string): ScaleContinuousNume
 }
 
 /**
+ * Splits a derived metric name into the list metric and its summary; `undefined` for a recorded metric.
+ *
+ * Use when:
+ * - labelling an axis (`Listener votes · mean`) or looking up the definition of the metric it summarizes
+ */
+export function parseDerivedMetric(name: string): undefined | { base: string, summary: DerivedSummary } {
+  const at = name.lastIndexOf(DERIVED_SEPARATOR)
+  const summary = name.slice(at + 1)
+  return at > 0 && (summary === 'mean' || summary === 'length') ? { base: name.slice(0, at), summary } : undefined
+}
+
+/**
  * Short label of a metric for a chart axis: the last dot segment, or more segments while two picked metrics would
  * share a label.
  *
@@ -311,6 +405,13 @@ export function shortMetricName(name: string, all: readonly string[]): string {
       return label
   }
   return name
+}
+
+/** The numbers of a recorded list value, or `undefined` when it is not a non-empty list of finite numbers. */
+function numbersOf(value: unknown): number[] | undefined {
+  if (!Array.isArray(value) || value.length === 0)
+    return undefined
+  return value.every(item => typeof item === 'number' && Number.isFinite(item)) ? value as number[] : undefined
 }
 
 /** Whether two categories split the cases the same way, value for value (`exact` 1/0 against `state` passed/failed). */
@@ -355,31 +456,37 @@ export function caseOffset(key: string, salt = 0): number {
  * - finished cases (`passed`, `failed`, `errored`, `timeout`); running and skipped cases are left out
  *
  * Returns:
- * - one entry per non-constant metric with at least one passed and one failed value, except the score metrics;
- *   ties count half (Mann–Whitney U), so a metric that is mostly 0 in both outcomes stays near `0.5`
+ * - one entry per non-constant metric with values in both outcomes, except the score metrics; ties count half
+ *   (Mann–Whitney U), so a metric that is mostly 0 in both outcomes stays near `0.5`
+ * - when no finished case failed (a scored eval, where a score of 0 is a result, not a failure), the outcomes are the
+ *   cases below the mean `exact` score against the rest, so the ranking still explains what lowers the score
  */
 export function separationOf(table: CaseTable): Map<string, MetricSeparation> {
   const result = new Map<string, MetricSeparation>()
   const finished = table.rows.filter(row => row.state === 'passed' || row.state === 'failed' || row.state === 'errored' || row.state === 'timeout')
+  const outcome = outcomeOf(finished)
+  if (outcome == null)
+    return result
   for (const name of table.groups.flatMap(group => [group.representative, ...group.members.map(member => member.name)])) {
     if (OUTCOME_METRICS.has(name))
       continue
-    const failed: number[] = []
-    const passed: number[] = []
+    const low: number[] = []
+    const high: number[] = []
     for (const row of finished) {
       const value = row.numbers[name]
-      if (value != null)
-        (row.state === 'passed' ? passed : failed).push(value)
+      const side = outcome.sideOf(row)
+      if (value != null && side != null)
+        (side === 'high' ? high : low).push(value)
     }
-    if (failed.length === 0 || passed.length === 0)
+    if (low.length === 0 || high.length === 0)
       continue
-    // U statistic by sorting both samples together: each failed value counts the passed values below it, ties half.
-    const sortedPassed = passed.toSorted((a, b) => a - b)
+    // U statistic by sorting both samples together: each low-outcome value counts the high-outcome values below it, ties half.
+    const sortedHigh = high.toSorted((a, b) => a - b)
     let wins = 0
-    for (const value of failed) {
+    for (const value of low) {
       let below = 0
       let tied = 0
-      for (const other of sortedPassed) {
+      for (const other of sortedHigh) {
         if (other < value)
           below++
         else if (other === value)
@@ -389,8 +496,29 @@ export function separationOf(table: CaseTable): Map<string, MetricSeparation> {
       }
       wins += below + tied / 2
     }
-    const auc = wins / (failed.length * passed.length)
-    result.set(name, { auc: Math.max(auc, 1 - auc), higherIn: auc >= 0.5 ? 'failed' : 'passed' })
+    const auc = wins / (low.length * high.length)
+    result.set(name, { auc: Math.max(auc, 1 - auc), higherIn: auc >= 0.5 ? outcome.low : outcome.high })
   }
   return result
+}
+
+/**
+ * The two outcomes the separation compares: failed against passed cases, or, with no failed case, cases below the
+ * mean `exact` score against the rest. `undefined` when neither split has two sides.
+ */
+function outcomeOf(finished: readonly CaseRow[]): undefined | { high: MetricSeparation['higherIn'], low: MetricSeparation['higherIn'], sideOf: (row: CaseRow) => 'high' | 'low' | undefined } {
+  if (finished.some(row => row.state === 'failed') && finished.some(row => row.state === 'passed'))
+    return { high: 'passed', low: 'failed', sideOf: row => (row.state === 'passed' ? 'high' : 'low') }
+  const scores = finished.map(row => row.numbers.exact).filter((value): value is number => value != null)
+  if (new Set(scores).size < 2)
+    return undefined
+  const mean = scores.reduce((sum, value) => sum + value, 0) / scores.length
+  return {
+    high: 'higher-scored',
+    low: 'lower-scored',
+    sideOf: (row) => {
+      const value = row.numbers.exact
+      return value == null ? undefined : value < mean ? 'low' : 'high'
+    },
+  }
 }

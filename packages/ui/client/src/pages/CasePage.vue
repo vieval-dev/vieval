@@ -19,10 +19,10 @@ import StateView from '../components/StateView.vue'
 import ViewTabs from '../components/ViewTabs.vue'
 
 import { api } from '../api'
+import { metricLabel } from '../caseMetrics'
 import { useRunLive } from '../composables/useRunLive'
 import { useStatusFavicon } from '../composables/useStatusFavicon'
 import { formatDateTime, formatDuration, formatScore, formatTime, previewValue } from '../format'
-import { localize } from '../localize'
 import { href, navigate } from '../router'
 import { runSwitcherOptions } from '../switcher'
 
@@ -44,7 +44,7 @@ const taskMetrics = useQuery({
   query: () => api.metrics(props.route.runKey, { taskId: props.route.taskId }),
 })
 const definitions = computed(() => new Map<string, MetricDefinition>((detail.data.value?.metricDefinitions ?? []).map(definition => [definition.name, definition])))
-const labelOf = (name: string) => localize(definitions.value.get(name)?.label) ?? name
+const labelOf = (name: string) => metricLabel(name, definitions.value)
 function taskValuesOf(name: string): unknown[] {
   const data = taskMetrics.data.value
   return [...(data?.numeric.find(series => series.name === name)?.points ?? []), ...(data?.nonNumeric.find(series => series.name === name)?.values ?? [])].map(entry => entry.value)

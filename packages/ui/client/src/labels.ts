@@ -62,6 +62,25 @@ export function attemptLabel(attemptId: string): string {
 }
 
 /**
+ * Axes whose values are not the same in every one of several runs, with each run's values: what tells attempts of one
+ * experiment apart (an attempt that ran `asr=whisper-1` where the others ran `apple-speech`).
+ *
+ * Use when:
+ * - listing attempts or runs side by side, to name what changed between them
+ *
+ * Expects:
+ * - one matrix per run (run and eval axes merged by the caller); a run without an axis counts as "—" on it
+ *
+ * Returns:
+ * - axis names in alphabetical order; empty when every run has the same values
+ */
+export function differingAxes(matrices: readonly MatrixAxes[]): string[] {
+  const axes = new Set(matrices.flatMap(matrix => Object.keys(matrix)))
+  const key = (matrix: MatrixAxes, axis: string) => sortAxisValues([...(matrix[axis] ?? [])]).join('\u0000') || '—'
+  return [...axes].filter(axis => new Set(matrices.map(matrix => key(matrix, axis))).size > 1).sort((a, b) => a.localeCompare(b))
+}
+
+/**
  * Builds the readable name of an experiment from its id and the matrix of its runs.
  *
  * Before:
