@@ -34,6 +34,26 @@ describe('createRunReducer', () => {
 
   /**
    * @example
+   * expect(task.cases[0].errorName).toBe('APICallError')
+   */
+  it('keeps the state and the error name of a case without a result', () => {
+    const envelope = createEnvelopeFactory()
+    const reducer = createRunReducer()
+    reducer.apply(envelope('run.started', { totalTasks: 1 }))
+    reducer.apply(envelope('task.started', {}, scope()))
+    reducer.apply(envelope('case.started', { index: 0, name: 'a', total: 1 }, scope('0:a')))
+    reducer.apply(envelope('case.ended', { errorMessage: 'Remote sent 429 response', errorName: 'APICallError', index: 0, name: 'a', state: 'errored', total: 1 }, scope('0:a')))
+
+    const [task] = buildTaskNodes(reducer, () => 0)
+    expect(task.cases[0].state).toBe('errored')
+    expect(task.cases[0].errorName).toBe('APICallError')
+    expect(task.cases[0].rounds[0]?.errorName).toBe('APICallError')
+    expect(task.caseCounts.errored).toBe(1)
+    expect(task.scores.exact).toBeNull()
+  })
+
+  /**
+   * @example
    * expect(reducer.metricDefinitions.get('agent.steps')).toEqual({ better: 'lower', label: { en: 'Agent steps' }, name: 'agent.steps', unit: 'steps' })
    */
   it('keeps the latest metric definition per name and drops malformed text', () => {

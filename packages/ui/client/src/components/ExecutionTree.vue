@@ -197,7 +197,7 @@ const counts = computed(() => props.snapshot.tasks.reduce((sum, task) => sum + t
           v-for="item in virtualizer.getVirtualItems()" :key="rows[item.index]!.key"
           :class="[
             'absolute left-0 right-0 flex items-center gap-1.5 pr-3 text-[13px] border-l-2',
-            rows[item.index]!.running ? 'border-blue-500/60 bg-blue-50 dark:bg-blue-950/40' : 'border-transparent hover:bg-neutral-50 dark:hover:bg-neutral-800/50',
+            rows[item.index]!.running ? '[border-color:color-mix(in_oklab,var(--mark-running)_60%,transparent)] [background-color:color-mix(in_oklab,var(--mark-running)_10%,transparent)]' : 'border-transparent hover:bg-neutral-50 dark:hover:bg-neutral-800/50',
             flashing.has(rows[item.index]!.key) && 'vv-flash',
           ]"
           :style="{ height: `${item.size}px`, transform: `translateY(${item.start}px)`, paddingLeft: `${(wide ? 8 : 4) + rows[item.index]!.depth * (wide ? 18 : 10)}px` }"
@@ -215,7 +215,7 @@ const counts = computed(() => props.snapshot.tasks.reduce((sum, task) => sum + t
             </span>
             <span :class="['md:(ml-auto pl-2) flex items-center gap-1.5 min-w-0', 'muted mono text-xs whitespace-nowrap max-md:text-[11px]']">
               <CountsBar v-if="rows[item.index]!.counts" :class="['w-24 shrink-0']" :counts="rows[item.index]!.counts!" />
-              <span v-if="rows[item.index]!.runningSince" :class="['text-blue-700 dark:text-blue-300 tabular-nums']" data-testid="running-elapsed">running {{ formatDuration(Math.max(0, now - Date.parse(rows[item.index]!.runningSince!))) }}</span>
+              <span v-if="rows[item.index]!.runningSince" :class="['[color:var(--ink-running)] tabular-nums']" data-testid="running-elapsed">running {{ formatDuration(Math.max(0, now - Date.parse(rows[item.index]!.runningSince!))) }}</span>
               <span :class="['truncate']">{{ rows[item.index]!.detail }}</span>
             </span>
           </span>

@@ -66,7 +66,7 @@ const connectionText = computed(() => ({
       :value="percent ?? 0"
       :segments="[
         { class: 'bg-primary-500 dark:bg-primary-400', percent: percent ?? 0, title: `${progress.cases.completed} cases done` },
-        ...(live ? [{ class: 'bg-blue-300 dark:bg-blue-400/50', percent: runningPercent, title: `${progress.cases.running} cases running` }] : []),
+        ...(live ? [{ class: '[background-color:color-mix(in_oklab,var(--mark-running)_50%,transparent)]', percent: runningPercent, title: `${progress.cases.running} cases running` }] : []),
       ]"
     />
     <!-- Phones show the numbers (progress, ETA, expected finish) right under the bar and the chart after them. -->
@@ -141,11 +141,11 @@ const connectionText = computed(() => ({
 
     <div v-if="props.snapshot.current.running.length > 0" :class="['max-md:order-1']" data-testid="current-position">
       <div :class="['text-xs font-semibold mb-1 flex items-center gap-1']">
-        <span class="i-mingcute-aiming-2-line text-blue-600" aria-hidden="true" />Current position · {{ props.snapshot.current.running.length }} running
+        <span :class="['i-mingcute-aiming-2-line', '[color:var(--mark-running)]']" aria-hidden="true" />Current position · {{ props.snapshot.current.running.length }} running
       </div>
       <ul :class="['grid gap-1']" style="grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr))">
-        <li v-for="item in props.snapshot.current.running" :key="`${item.taskId}/${item.caseId}`" :class="['flex items-center gap-2 rounded-md bg-blue-50 dark:bg-blue-950/40 px-2 py-1 text-xs']">
-          <span class="i-mingcute-loading-line text-blue-600 shrink-0 animate-spin" aria-hidden="true" />
+        <li v-for="item in props.snapshot.current.running" :key="`${item.taskId}/${item.caseId}`" :class="['flex items-center gap-2 rounded-md px-2 py-1 text-xs', '[background-color:color-mix(in_oklab,var(--mark-running)_10%,transparent)]']">
+          <span :class="['i-mingcute-loading-line shrink-0 animate-spin', '[color:var(--mark-running)]']" aria-hidden="true" />
           <a :href="href({ caseId: item.caseId, name: 'case', runKey: props.snapshot.runKey, taskId: item.taskId })" :class="['link mono text-xs truncate']" :title="item.name">{{ item.name }}</a>
           <span v-if="item.roundIndex > 0" class="badge state-neutral">round {{ item.roundIndex }}</span>
           <span v-if="item.retryIndex > 0" class="badge state-interrupted">retry {{ item.retryIndex }}</span>

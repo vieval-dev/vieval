@@ -6,6 +6,7 @@ import type { Route } from '../router'
 import { computed, toRef } from 'vue'
 
 import CountsBar from '../components/CountsBar.vue'
+import ErrorGroupsPanel from '../components/ErrorGroupsPanel.vue'
 import ExecutionTree from '../components/ExecutionTree.vue'
 import ExperimentName from '../components/ExperimentName.vue'
 import IdLabel from '../components/IdLabel.vue'
@@ -77,7 +78,8 @@ const score = computed(() => {
     for (const key of Object.keys(counts) as (keyof typeof counts)[])
       counts[key] += task.caseCounts[key]
   }
-  return { counts, exact: scoreRounds(snapshot.tasks.flatMap(task => task.cases.flatMap(node => node.rounds))).exact }
+  const { coverage, exact } = scoreRounds(snapshot.tasks.flatMap(task => task.cases.flatMap(node => node.rounds)))
+  return { counts, coverage: coverage.total === 0 ? undefined : coverage.measured / coverage.total, exact }
 })
 useStatusFavicon(() => live.snapshot.value?.state)
 const label = computed(() => runLabel({ runKey: props.route.runKey, startedAt: live.snapshot.value?.startedAt }))
@@ -87,6 +89,7 @@ const documentTitle = computed(() => {
   return live.snapshot.value?.state === 'running' && ratio != null ? `${(Math.min(1, ratio) * 100).toFixed(1)}% · ${label.value}` : label.value
 })
 const caseHref = (line: LogLine) => href({ caseId: line.caseId!, name: 'case', runKey: runKey.value, taskId: line.taskId! })
+const errorCaseHref = (target: { caseId: string, taskId: string }) => href({ ...target, name: 'case', runKey: runKey.value })
 </script>
 
 <template>
@@ -120,6 +123,10 @@ const caseHref = (line: LogLine) => href({ caseId: line.caseId!, name: 'case', r
           <span :class="['text-xl font-semibold tabular-nums leading-none']">{{ formatScore(score.exact) }}</span>
           <span :class="['text-xs muted']">exact</span>
         </span>
+        <!-- A score over part of the cases is not the score of the run, so a coverage below 100% stands next to it. -->
+        <span v-if="score.coverage != null && score.coverage < 1" :class="['text-xs tabular-nums', '[color:var(--ink-errored)]']" title="Share of settled cases that produced a result" data-testid="run-coverage">
+          {{ (score.coverage * 100).toFixed(1) }}% coverage
+        </span>
         <CountsBar :class="['w-32 max-md:flex-1']" :counts="score.counts" />
       </span>
       <a v-if="position.workspace && position.project && position.experiment" :class="['btn']" :href="href({ name: 'compare', query: { experiment: position.experiment, project: position.project, view: 'attempts', workspace: position.workspace } })">
@@ -134,6 +141,7 @@ const caseHref = (line: LogLine) => href({ caseId: line.caseId!, name: 'case', r
       <div v-if="live.error.value" role="alert" :class="['mt-2 text-xs rounded state-failed px-2 py-1']">
         Refresh failed: {{ live.error.value.message }} — showing the last snapshot.
       </div>
+      <ErrorGroupsPanel :tasks="live.snapshot.value.tasks" :case-href="errorCaseHref" />
       <div :class="['mt-4']">
         <ViewTabs v-model="tab" :items="tabs" :href="value => href(tabRoute(value))" label="Run views">
           <ExecutionTree v-if="tab === 'execution'" :snapshot="live.snapshot.value" />

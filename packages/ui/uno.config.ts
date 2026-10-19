@@ -75,13 +75,19 @@ export default defineConfig({
     'selected': 'bg-primary-500/15 text-primary-900 dark:text-primary-100',
     // Placeholder block of `LoadingSkeleton.vue`; `.skeleton` in styles.css sweeps a highlight across it.
     'skeleton': 'rounded-md bg-neutral-500/12 dark:bg-neutral-500/16',
-    'state-failed': 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300',
-    'state-interrupted': 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300',
+    // State badges read the `--mark-*` / `--ink-*` tokens of `client/src/styles.css`, so the colorblind-safe mode
+    // (`data-color-vision`) recolors them with the bars and charts. The tint is the mark mixed into the surface.
+    'state-failed': '[background-color:color-mix(in_oklab,var(--mark-failed)_16%,transparent)] [color:var(--ink-failed)]',
+    // No result and execution trouble: `errored`, `timeout`, interrupted runs, retries, stale runs, warnings.
+    'state-interrupted': '[background-color:color-mix(in_oklab,var(--mark-errored)_16%,transparent)] [color:var(--ink-errored)]',
     'state-neutral': 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300',
-    'state-passed': 'bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300',
-    'state-running': 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300',
+    'state-passed': '[background-color:color-mix(in_oklab,var(--mark-passed)_16%,transparent)] [color:var(--ink-passed)]',
+    'state-running': '[background-color:color-mix(in_oklab,var(--mark-running)_16%,transparent)] [color:var(--ink-running)]',
     // The link covers its nearest positioned ancestor (a card); controls inside the card need `relative z-1`.
     'stretched-link': 'after:(content-[""] absolute inset-0)',
+    // On/off setting (reka-ui Switch): a gray track that fills with the accent when on; the thumb slides with it.
+    'switch': 'relative inline-flex h-4 w-7 shrink-0 items-center rounded-full bg-neutral-500/25 cursor-pointer select-none transition-colors data-[state=checked]:bg-primary-500 focus-visible:(outline-2 outline-offset-1 outline-primary-500) disabled:(opacity-40 pointer-events-none)',
+    'switch-thumb': 'block size-3 rounded-full bg-white shadow-sm translate-x-0.5 transition-transform duration-200 data-[state=checked]:translate-x-3.5',
     // Tabs (`ViewTabs.vue`, reka-ui Tabs): the active trigger carries `data-state="active"`.
     'tab': 'inline-flex items-center gap-1.5 px-3 py-2 text-sm border-b-2 border-transparent muted whitespace-nowrap transition-colors hover:text-neutral-900 dark:hover:text-neutral-100 focus-visible:(outline-2 -outline-offset-2 outline-primary-500) data-[state=active]:(border-primary-500 text-neutral-900 dark:text-neutral-100 font-medium)',
     'td': 'px-2 py-1.5 text-sm align-top',

@@ -134,6 +134,8 @@ export const scoreValuesSchema = v.object({
 export const caseRoundSchema = v.object({
   endedAt: v.optional(v.string()),
   errorMessage: v.optional(v.string()),
+  /** `name` of the thrown error (`AssertionError`, `APICallError`, …), for grouping failures. */
+  errorName: v.optional(v.string()),
   roundIndex: v.number(),
   roundIndexInferred: v.boolean(),
   /** Scores recorded with `recordScore` during this round. */
@@ -149,6 +151,8 @@ export const caseNodeSchema = v.object({
   durationMs: v.optional(v.number()),
   endedAt: v.optional(v.string()),
   errorMessage: v.optional(v.string()),
+  /** `name` of the error that ended the last round, for grouping failures. */
+  errorName: v.optional(v.string()),
   evidenceLinkCount: v.number(),
   index: v.number(),
   /** `taskId + '\u0000' + caseId`, the same key `cases.jsonl` tooling uses. */
@@ -406,10 +410,12 @@ export const timelineEntrySchema = v.object({
 
 export const timelineResponseSchema = v.object({
   entries: v.array(timelineEntrySchema),
-  /** Rounds per task: `[{taskId, rounds: [{roundIndex, startedAt, endedAt, passed, failed}]}]`. */
+  /** Rounds per task: `[{taskId, rounds: [{roundIndex, startedAt, endedAt, passed, failed, errored}]}]`. */
   rounds: v.array(v.object({
     rounds: v.array(v.object({
       endedAt: v.optional(v.string()),
+      /** Cases of the round without a result: errored, timed out, skipped, or unfinished. */
+      errored: v.number(),
       failed: v.number(),
       passed: v.number(),
       roundIndex: v.number(),

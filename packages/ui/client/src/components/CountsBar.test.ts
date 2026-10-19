@@ -14,6 +14,41 @@ function inBox(width: number, labels: 'hover' | 'tooltip') {
 }
 
 describe('countsBar', () => {
+  /**
+   * @example
+   * expect(bar).toHaveAttribute('aria-label', '5 passed, 2 failed, 3 no result, 10 total')
+   */
+  it('shows cases without a result as their own hatched segment, apart from failed ones', async () => {
+    const screen = await render(defineComponent(() => () => h(TooltipProvider, { delayDuration: 0 }, () => h('div', { style: { width: '200px' } }, [
+      h(CountsBar, { counts: { errored: 2, failed: 2, passed: 5, running: 0, skipped: 0, timeout: 1, total: 10 }, labels: 'none' }),
+    ]))))
+
+    const bar = screen.getByTestId('counts-bar')
+    await expect.element(bar).toHaveAttribute('aria-label', '5 passed, 2 failed, 3 no result, 10 total')
+    const segments = [...bar.element().children] as HTMLElement[]
+    expect(segments).toHaveLength(3)
+    expect(segments[2]!.classList.contains('vv-hatch')).toBe(true)
+    expect(segments[1]!.classList.contains('vv-hatch')).toBe(false)
+  })
+
+  /**
+   * @example
+   * data-color-vision="safe" turns the passed segment from green to Okabe-Ito blue (#0072b2).
+   */
+  it('recolors the segments in the colorblind-safe mode', async () => {
+    const screen = await render(defineComponent(() => () => h(CountsBar, { counts: { errored: 0, failed: 0, passed: 1, running: 0, skipped: 0, timeout: 0, total: 1 }, labels: 'none' })))
+    const passed = screen.getByTestId('counts-bar').element().children[0] as HTMLElement
+
+    expect(getComputedStyle(passed).backgroundColor).toBe('rgb(47, 158, 68)')
+    document.documentElement.dataset.colorVision = 'safe'
+    try {
+      expect(getComputedStyle(passed).backgroundColor).toBe('rgb(0, 114, 178)')
+    }
+    finally {
+      delete document.documentElement.dataset.colorVision
+    }
+  })
+
   // ROOT CAUSE:
   //
   // The counts sat right of the bar with `whitespace-nowrap` and the bar was `flex-1`: the longer the numbers, the

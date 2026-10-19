@@ -37,7 +37,8 @@ const lanes = computed(() => {
     start,
   }
 })
-const stateColor = (state: string) => ({ errored: '#e34948', failed: '#e34948', passed: '#008300', retried: '#eda100', running: '#2a78d6', timeout: '#e34948' } as Record<string, string>)[state] ?? '#a3a3a3'
+/** Fill of a try or round bar from the state tokens (`styles.css`), so the colorblind-safe mode recolors it; a retried try is a try without a result. */
+const stateColor = (state: string) => ['errored', 'failed', 'passed', 'running', 'timeout', 'unfinished'].includes(state) ? `var(--mark-${state})` : state === 'retried' ? 'var(--mark-errored)' : 'var(--mark-skipped)'
 </script>
 
 <template>

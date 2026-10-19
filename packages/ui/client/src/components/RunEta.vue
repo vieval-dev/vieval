@@ -72,7 +72,7 @@ const startedAgo = computed(() => (props.startedAt == null ? undefined : formatD
               :value="view.percent ?? 0"
               :segments="[
                 { class: 'bg-primary-500 dark:bg-primary-400', percent: view.percent ?? 0 },
-                { class: 'bg-blue-400 dark:bg-blue-400/60', percent: view.runningPercent },
+                { class: '[background-color:color-mix(in_oklab,var(--mark-running)_70%,transparent)]', percent: view.runningPercent },
               ]"
             />
           </div>

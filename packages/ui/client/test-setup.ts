@@ -10,6 +10,8 @@ import { queryDefaults } from './src/queryDefaults'
 // classes, so without the stylesheet every row would render.
 import '@unocss/reset/tailwind.css'
 import 'virtual:uno.css'
+// The state and chart tokens (`--mark-*`, `--ink-*`, `--series-*`) that components read through `var(...)`.
+import './src/styles.css'
 
 // Components read the API through Pinia Colada and set the document title through Unhead, as in `main.ts`; every
 // test gets its own cache and head, so nothing leaks between tests.

@@ -18,10 +18,11 @@ const look = computed(() => {
     case 'passed':
       return { class: 'state-passed', icon: 'i-mingcute-check-circle-fill' }
     case 'error':
-    case 'errored':
     case 'failed':
-    case 'timeout':
-      return { class: 'state-failed', icon: props.state === 'timeout' ? 'i-mingcute-stopwatch-2-off-fill' : 'i-mingcute-close-circle-fill' }
+      return { class: 'state-failed', icon: 'i-mingcute-close-circle-fill' }
+    // No result: amber like other execution trouble, with its own icon so it never reads as a wrong result.
+    case 'errored':
+      return { class: 'state-interrupted', icon: 'i-mingcute-alert-octagon-fill' }
     case 'interrupted':
     case 'retried':
     case 'stale':
@@ -29,6 +30,8 @@ const look = computed(() => {
       return { class: 'state-interrupted', icon: props.state === 'retried' ? 'i-mingcute-history-anticlockwise-fill' : 'i-mingcute-warning-fill' }
     case 'running':
       return { class: 'state-running', icon: 'i-mingcute-loading-line animate-spin' }
+    case 'timeout':
+      return { class: 'state-interrupted', icon: 'i-mingcute-stopwatch-2-off-fill' }
     default:
       return { class: 'state-neutral', icon: props.state === 'queued' ? 'i-mingcute-time-fill' : 'i-mingcute-circle-dash-fill' }
   }

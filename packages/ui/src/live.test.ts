@@ -165,7 +165,8 @@ describe('--with-viewer: in-process run on the event bus', () => {
       expect(runs.filter(item => item.runKey === runKey).map(item => item.source)).toEqual(['live-bus'])
 
       const timeline = await api<TimelineResponse>(`/api/runs/${runKey}/timeline`)
-      expect(timeline.rounds[0].rounds.map(round => [round.roundIndex, round.passed, round.failed])).toEqual([[0, 2, 1], [1, 3, 0]])
+      // The first attempt of `flaky/attempt` threw a plain error: a case without a result, not a wrong one.
+      expect(timeline.rounds[0].rounds.map(round => [round.roundIndex, round.passed, round.failed, round.errored])).toEqual([[0, 2, 0, 1], [1, 3, 0, 0]])
 
       const logs = await api<LogsResponse>(`/api/runs/${runKey}/logs`)
       expect(logs.lines.map(line => [line.stream, line.text])).toEqual(expect.arrayContaining([['stdout', 'slow case started'], ['stderr', 'slow case done']]))
