@@ -30,12 +30,13 @@ const props = withDefaults(defineProps<{
 }>(), { labels: 'tooltip' })
 
 const parts = computed(() => {
-  const { failed, passed, running, skipped, timeout, total } = props.counts
-  const other = Math.max(0, total - passed - failed - running - timeout - skipped) + skipped
+  const { errored, failed, passed, running, skipped, timeout, total } = props.counts
+  const other = Math.max(0, total - passed - failed - errored - running - timeout - skipped) + skipped
   const sum = Math.max(1, total)
   return [
     { class: 'bg-green-600 dark:bg-green-500', label: 'passed', text: 'text-green-700 dark:text-green-400', value: passed },
-    { class: 'bg-red-600 dark:bg-red-500', label: 'failed', text: 'text-red-700 dark:text-red-400', value: failed + timeout },
+    // TODO: give cases without a result (`errored`, `timeout`) their own amber, hatched segment.
+    { class: 'bg-red-600 dark:bg-red-500', label: 'failed', text: 'text-red-700 dark:text-red-400', value: failed + errored + timeout },
     { class: 'bg-blue-500 vv-pulse', label: 'running', text: 'text-blue-700 dark:text-blue-400', value: running },
     { class: 'bg-neutral-400 dark:bg-neutral-600', label: 'not run', text: 'muted', value: other },
   ].filter(part => part.value > 0).map(part => ({ ...part, width: `${(part.value / sum) * 100}%` }))

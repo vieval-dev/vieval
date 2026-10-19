@@ -10,10 +10,11 @@ import { readFile, stat } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 
 import { glob } from 'tinyglobby'
+import { hybridAverage } from 'vieval/core/scoring'
 
 import * as v from 'valibot'
 
-import { average, axisValues, buildTaskNodes, countCases, createRunReducer, hybridAverage } from '../shared/reduce'
+import { average, axisValues, buildTaskNodes, countCases, createRunReducer } from '../shared/reduce'
 import { createEventTail } from './event-tail'
 import { parseJsonText } from './files'
 
@@ -42,6 +43,8 @@ const runSummaryFileSchema = v.looseObject({
   interruptSignal: v.optional(v.string()),
   projects: v.optional(v.array(v.looseObject({
     caseSummary: v.nullish(v.looseObject({
+      // Reports from before vieval split errored cases out of failed ones have no `errored` count.
+      errored: v.optional(v.number(), 0),
       failed: v.optional(v.number(), 0),
       passed: v.optional(v.number(), 0),
       skipped: v.optional(v.number(), 0),
@@ -293,14 +296,14 @@ export async function readRunSummary(filePath: string): Promise<RunSummaryInfo |
   if (parsed == null) {
     return undefined
   }
-  const caseSummary: CaseCounts = { failed: 0, passed: 0, running: 0, skipped: 0, timeout: 0, total: 0 }
+  const caseSummary: CaseCounts = { errored: 0, failed: 0, passed: 0, running: 0, skipped: 0, timeout: 0, total: 0 }
   let hasCaseSummary = false
   const weighted = { exact: [0, 0], judge: [0, 0] }
   for (const project of parsed.projects) {
     const counts = project.caseSummary
     if (counts != null) {
       hasCaseSummary = true
-      for (const key of ['failed', 'passed', 'skipped', 'timeout', 'total'] as const) {
+      for (const key of ['errored', 'failed', 'passed', 'skipped', 'timeout', 'total'] as const) {
         caseSummary[key] += counts[key]
       }
     }

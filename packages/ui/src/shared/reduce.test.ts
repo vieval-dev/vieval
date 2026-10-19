@@ -284,13 +284,30 @@ describe('axisValues', () => {
 })
 
 describe('scoreRounds / parseTaskId', () => {
-  it('follows collectCaseOutcomeScores: failed → 0, passed without score → 1, judge averaged separately', () => {
+  it('follows scoreCaseOutcomes: failed → 0, passed without score → 1, judge averaged separately', () => {
     expect(scoreRounds([
       { scores: {}, state: 'failed' },
       { scores: {}, state: 'passed' },
       { scores: { exact: 0.5, judge: 0.8 }, state: 'passed' },
       { scores: {}, state: 'running' },
-    ])).toEqual({ exact: 0.5, hybrid: 0.65, judge: 0.8 })
+    ])).toEqual({ coverage: { measured: 3, total: 3 }, exact: 0.5, hybrid: 0.65, judge: 0.8, strictExact: 0.5 })
+  })
+
+  /**
+   * @example
+   * errored and unfinished rounds stay out of exact and lower the coverage, as in the run summary of vieval.
+   */
+  it('leaves rounds without a result out of exact and counts them in coverage', () => {
+    const scores = scoreRounds([
+      { scores: {}, state: 'passed' },
+      { scores: {}, state: 'errored' },
+      { scores: {}, state: 'timeout' },
+      { scores: {}, state: 'unfinished' },
+    ])
+
+    expect(scores.exact).toBe(1)
+    expect(scores.coverage).toEqual({ measured: 1, total: 4 })
+    expect(scores.strictExact).toBe(0.25)
   })
 
   it('returns no matrix for ids that are not scheduled task ids', () => {

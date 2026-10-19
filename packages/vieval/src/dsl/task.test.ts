@@ -14,6 +14,16 @@ import { caseEnded, caseEndedDataSchema, caseStarted, caseStartedDataSchema, met
 import { defineMetric } from './metrics'
 import { caseOf, casesFromInputs, describeEval, describeTask } from './task'
 
+/**
+ * A failed assertion, as the `expect` of vieval throws it (chai's `AssertionError`): the case measured a wrong result.
+ * A plain `Error` would end the case `errored` instead.
+ */
+function createAssertionError(message: string): Error {
+  const error = new Error(message)
+  error.name = 'AssertionError'
+  return error
+}
+
 function createDeferredPromise() {
   let resolve!: () => void
   const promise = new Promise<void>((promiseResolve) => {
@@ -190,7 +200,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
       }, { input: 'pass-later' })
 
       caseOf('case-2', async () => {
-        throw new Error('boom')
+        throw createAssertionError('boom')
       }, { input: 'fail-fast' })
     })
 
@@ -218,7 +228,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
     })
 
     await waitForExpectation(() => {
-      expect(endPayloads).toEqual([{ errorMessage: 'boom', index: 1, name: 'case-2', state: 'failed', total: 2 }])
+      expect(endPayloads).toEqual([{ errorMessage: 'boom', errorName: 'AssertionError', index: 1, name: 'case-2', state: 'failed', total: 2 }])
     })
 
     expect(startPayloads).toEqual([
@@ -231,7 +241,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
     const runResult = await runPromise
 
     expect(endPayloads).toEqual([
-      { errorMessage: 'boom', index: 1, name: 'case-2', state: 'failed', total: 2 },
+      { errorMessage: 'boom', errorName: 'AssertionError', index: 1, name: 'case-2', state: 'failed', total: 2 },
       { index: 0, name: 'case-1', state: 'passed', total: 2 },
     ])
     expect(runResult?.scores[0]?.score).toBe(0.5)
@@ -638,7 +648,9 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     expect(rejectedErrors).toHaveLength(1)
     expect(errorMessageFrom(rejectedErrors[0])).toBe('case exploded')
-    expect(runResult?.scores).toEqual([{ kind: 'exact', score: 0 }])
+    // The errored case measured nothing: no exact score, and coverage counts it as settled but unmeasured.
+    expect(runResult?.scores).toEqual([])
+    expect(runResult?.coverage).toEqual({ measured: 0, total: 1 })
   })
 
   it('supports caseOf without input by exposing undefined inputs in context', async () => {
@@ -923,13 +935,15 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
     expect(endPayloads).toEqual([
       {
         errorMessage: 'Case timed out after 5ms.',
+        errorName: 'TimeoutError',
         index: 0,
         name: 'slow-case',
         state: 'timeout',
         total: 1,
       },
     ])
-    expect(runResult?.scores[0]?.score).toBe(0)
+    expect(runResult?.scores).toEqual([])
+    expect(runResult?.coverage).toEqual({ measured: 0, total: 1 })
   })
 
   it('retries a failing case within the same task attempt until it passes', async () => {
@@ -1142,6 +1156,108 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
   })
 
   /**
+   * @example
+   * expect(states).toEqual({ 'wrong': 'failed', 'crash': 'errored' }); exact 0.5 over the 2 measured cases.
+   */
+  it('ends an assertion failure as failed and any other error as errored, scoring only measured cases', async () => {
+    const states: Record<string, string> = {}
+
+    const taskDefinition = describeTask('dsl-case-outcome-classification', () => {
+      caseOf('right', () => {})
+      caseOf('wrong', () => {
+        // The `expect` of vieval throws chai's AssertionError, as this one does.
+        expect('heard').toBe('expected')
+      })
+      caseOf('crash', () => {
+        throw new TypeError('provider client is undefined')
+      })
+    })
+
+    const runResult = await taskDefinition.task!.run({
+      cache: createTestTaskCacheRuntime(),
+      events: createTestRunEvents({ onCaseEnd: (data) => {
+        states[data.name] = data.state
+      } }),
+      models: createTestModels(),
+      task: {
+        entry: { description: 'd', directory: 'x', filePath: '/tmp/x.eval.ts', id: 'x', name: 'x' },
+        id: 'task-outcome-classification',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: createScheduledTaskMatrix(),
+      },
+    })
+
+    await waitForExpectation(() => {
+      expect(states).toEqual({ crash: 'errored', right: 'passed', wrong: 'failed' })
+    })
+    expect(runResult.scores).toEqual([{ kind: 'exact', score: 0.5 }])
+    expect(runResult.coverage).toEqual({ measured: 2, total: 3 })
+  })
+
+  /**
+   * @example
+   * classifyError: () => 'failed' turns a crash of the test object into a wrong result.
+   */
+  it('lets classifyError count a thrown error as a wrong result', async () => {
+    const taskDefinition = describeTask('dsl-case-classify-error', () => {
+      caseOf('crash', () => {
+        throw new TypeError('rule table has no entry')
+      })
+    }, { classifyError: () => 'failed' })
+
+    const runResult = await taskDefinition.task!.run({
+      cache: createTestTaskCacheRuntime(),
+      models: createTestModels(),
+      task: {
+        entry: { description: 'd', directory: 'x', filePath: '/tmp/x.eval.ts', id: 'x', name: 'x' },
+        id: 'task-classify-error',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: createScheduledTaskMatrix(),
+      },
+    })
+
+    expect(runResult.scores).toEqual([{ kind: 'exact', score: 0 }])
+    expect(runResult.coverage).toEqual({ measured: 1, total: 1 })
+  })
+
+  /**
+   * @example
+   * autoRetry: 2 without autoRetryIf -> an errored try runs again, a failed assertion does not.
+   */
+  it('retries errored tries but not failed assertions by default', async () => {
+    let erroredRuns = 0
+    let failedRuns = 0
+
+    const taskDefinition = describeTask('dsl-case-default-retry', () => {
+      caseOf('flaky-provider', () => {
+        erroredRuns += 1
+        if (erroredRuns === 1) {
+          throw new Error('fetch failed')
+        }
+      })
+      caseOf('wrong-answer', () => {
+        failedRuns += 1
+        throw createAssertionError('wrong answer')
+      })
+    }, { autoRetry: 2, autoRetryDelay: 0 })
+
+    const runResult = await taskDefinition.task!.run({
+      cache: createTestTaskCacheRuntime(),
+      models: createTestModels(),
+      task: {
+        entry: { description: 'd', directory: 'x', filePath: '/tmp/x.eval.ts', id: 'x', name: 'x' },
+        id: 'task-default-retry',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: createScheduledTaskMatrix(),
+      },
+    })
+
+    expect(erroredRuns).toBe(2)
+    expect(failedRuns).toBe(1)
+    expect(runResult.scores).toEqual([{ kind: 'exact', score: 0.5 }])
+  })
+
+  /**
    * it('passes the failed try error to the auto retry delay') lets a delay follow a provider `Retry-After`.
    *
    * @example
@@ -1200,7 +1316,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
         if (runs === 1) {
           throw Object.assign(new Error('rate limited'), { statusCode: 429 })
         }
-        throw new Error('wrong answer')
+        throw createAssertionError('wrong answer')
       }, {
         autoRetry: 3,
         autoRetryDelay: 0,
@@ -1251,7 +1367,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
         releasesByAttempt.set(key, release)
         await release.promise
         if (key === 'case-b:0') {
-          throw new Error('retry-on-next-attempt')
+          throw createAssertionError('retry-on-next-attempt')
         }
       }, {
         autoAttempt: 1,
@@ -1314,7 +1430,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
         runs += 1
 
         if (runs === 1) {
-          throw new Error('first-attempt-failed')
+          throw createAssertionError('first-attempt-failed')
         }
       }, {
         autoAttempt: 1,
@@ -1406,7 +1522,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
       caseOf('flaky', async () => {
         flakyRuns += 1
         if (flakyRuns === 1) {
-          throw new Error('first-attempt-failed')
+          throw createAssertionError('first-attempt-failed')
         }
       }, {
         autoAttempt: 1,
@@ -1437,7 +1553,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
       { caseId: '0:stable', data: { attemptIndex: 0, autoAttempt: 0, index: 0, name: 'stable', total: 2 }, event: 'case.started' },
       { caseId: '1:flaky', data: { attemptIndex: 0, autoAttempt: 1, index: 1, name: 'flaky', total: 2 }, event: 'case.started' },
       { caseId: '0:stable', data: { attemptIndex: 0, autoAttempt: 0, index: 0, name: 'stable', state: 'passed', total: 2 }, event: 'case.ended' },
-      { caseId: '1:flaky', data: { attemptIndex: 0, autoAttempt: 1, errorMessage: 'first-attempt-failed', index: 1, name: 'flaky', state: 'failed', total: 2 }, event: 'case.ended' },
+      { caseId: '1:flaky', data: { attemptIndex: 0, autoAttempt: 1, errorMessage: 'first-attempt-failed', errorName: 'AssertionError', index: 1, name: 'flaky', state: 'failed', total: 2 }, event: 'case.ended' },
       { caseId: '0:stable', data: { attemptIndex: 1, autoAttempt: 0, index: 0, name: 'stable', total: 2 }, event: 'case.started' },
       { caseId: '1:flaky', data: { attemptIndex: 1, autoAttempt: 1, index: 1, name: 'flaky', total: 2 }, event: 'case.started' },
       { caseId: '0:stable', data: { attemptIndex: 1, autoAttempt: 0, index: 0, name: 'stable', state: 'passed', total: 2 }, event: 'case.ended' },
@@ -1567,7 +1683,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
           flakyRuns += 1
           if (flakyRuns === 1) {
             attemptIndex = 1
-            throw new Error('retry-on-next-attempt')
+            throw createAssertionError('retry-on-next-attempt')
           }
         }
       }, { autoAttempt: 1 })
@@ -1848,20 +1964,21 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
      * @example
      * expect(startedCases).toEqual(['running'])
      */
-    // The failed case is not retried and the queued case never starts.
+    // The interrupted case is not retried and the queued case never starts.
     expect(startedCases).toEqual(['running'])
     /**
      * @example
-     * expect(endedCases).toEqual([expect.objectContaining({ errorMessage: 'Run interrupted by SIGINT.', name: 'running', state: 'failed' })])
+     * expect(endedCases).toEqual([expect.objectContaining({ errorMessage: 'Run interrupted by SIGINT.', name: 'running', state: 'errored' })])
      */
-    expect(endedCases).toEqual([expect.objectContaining({ errorMessage: 'Run interrupted by SIGINT.', name: 'running', state: 'failed' })])
+    // An interrupted case measured nothing, so it ends `errored`, not `failed`.
+    expect(endedCases).toEqual([expect.objectContaining({ errorMessage: 'Run interrupted by SIGINT.', name: 'running', state: 'errored' })])
   })
 
   /**
    * @example
-   * it('reports a case that ignored the interrupt and returned normally as failed', async () => {})
+   * it('reports a case that ignored the interrupt and returned normally as errored', async () => {})
    */
-  it('reports a case that ignored the interrupt and returned normally as failed', async () => {
+  it('reports a case that ignored the interrupt and returned normally as errored', async () => {
     const interruption = new AbortController()
     const endedCases: CaseEndedData[] = []
     const taskDefinition = describeTask('dsl-interrupt-ignored', () => {
@@ -1885,8 +2002,8 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     /**
      * @example
-     * expect(endedCases.map(data => [data.state, data.errorMessage])).toEqual([['failed', 'Run interrupted by SIGTERM.']])
+     * expect(endedCases.map(data => [data.state, data.errorMessage])).toEqual([['errored', 'Run interrupted by SIGTERM.']])
      */
-    expect(endedCases.map(data => [data.state, data.errorMessage])).toEqual([['failed', 'Run interrupted by SIGTERM.']])
+    expect(endedCases.map(data => [data.state, data.errorMessage])).toEqual([['errored', 'Run interrupted by SIGTERM.']])
   })
 })

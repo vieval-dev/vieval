@@ -6,7 +6,7 @@ import { defineComponent, h } from 'vue'
 import CountsBar from './CountsBar.vue'
 
 /** A run of one million cases, as a matrix cell or a list row shows it. */
-const counts = { failed: 482_113, passed: 517_887, running: 0, skipped: 0, timeout: 0, total: 1_000_000 }
+const counts = { errored: 0, failed: 482_113, passed: 517_887, running: 0, skipped: 0, timeout: 0, total: 1_000_000 }
 
 /** Renders the bar inside a box of `width` px, like a narrow matrix cell or a table cell; tooltips need the provider `App.vue` sets. */
 function inBox(width: number, labels: 'hover' | 'tooltip') {

@@ -18,6 +18,7 @@ const look = computed(() => {
     case 'passed':
       return { class: 'state-passed', icon: 'i-mingcute-check-circle-fill' }
     case 'error':
+    case 'errored':
     case 'failed':
     case 'timeout':
       return { class: 'state-failed', icon: props.state === 'timeout' ? 'i-mingcute-stopwatch-2-off-fill' : 'i-mingcute-close-circle-fill' }

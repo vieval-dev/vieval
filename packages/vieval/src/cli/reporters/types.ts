@@ -1,4 +1,5 @@
 import type { CaseOutputStream } from '../../core/runner/case-output'
+import type { CaseOutcomeState } from '../../core/scoring'
 
 /**
  * Reporter lifecycle contract for `vieval` CLI output.
@@ -155,7 +156,7 @@ export interface CliReporterCaseStartPayload {
  * Expects:
  * - reporters treat the values as terminal case results
  */
-export type CliReporterCaseState = 'failed' | 'passed' | 'skipped' | 'timeout'
+export type CliReporterCaseState = CaseOutcomeState
 
 /**
  * Payload emitted when the overall run finishes.

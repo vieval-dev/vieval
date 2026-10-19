@@ -77,6 +77,27 @@ describe('report records', () => {
 
   /**
    * @example
+   * an errored case record has no exact score; a failed one gets exact 0.
+   */
+  it('gives a default exact score only to cases that produced a result', () => {
+    const records = buildCaseRecords({
+      events: [
+        envelopeOf('case.started', { index: 0, name: 'errored', total: 2 }, { caseId: 'case-errored' }),
+        envelopeOf('case.ended', { errorMessage: 'fetch failed', errorName: 'TypeError', index: 0, name: 'errored', state: 'errored', total: 2 }, { caseId: 'case-errored' }),
+        envelopeOf('case.started', { index: 1, name: 'failed', total: 2 }, { caseId: 'case-failed' }),
+        envelopeOf('case.ended', { errorMessage: 'expected 1 to be 2', errorName: 'AssertionError', index: 1, name: 'failed', state: 'failed', total: 2 }, { caseId: 'case-failed' }),
+      ],
+      projectName: 'project-1',
+    })
+
+    const byName = Object.fromEntries(records.map(record => [record.caseName, record]))
+    expect(byName.errored?.state).toBe('errored')
+    expect(byName.errored?.scores.exact).toBeUndefined()
+    expect(byName.failed?.scores.exact).toBe(0)
+  })
+
+  /**
+   * @example
    * it('uses the fallback project name and ignores invalid durations') covers events from custom project executors.
    */
   it('uses the fallback project name and ignores invalid durations', () => {

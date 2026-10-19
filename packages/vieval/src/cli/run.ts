@@ -53,6 +53,9 @@ export interface CliProjectCaseFailure {
  * Captures case-level summary counts for one project.
  */
 export interface CliProjectCaseSummary {
+  /** Cases that threw something other than an assertion, so they produced no result. */
+  errored: number
+  /** Cases with a failed assertion: a wrong result. */
   failed: number
   passed: number
   skipped: number
@@ -474,7 +477,7 @@ export function formatVievalCliRunOutput(output: CliRunOutput): string {
 
     const badge = createProjectBadge(project.name, colors, colorEnabled)
     const isFailed = project.errorMessage != null
-    const hasFailedCases = (project.caseSummary?.failed ?? 0) > 0 || (project.caseSummary?.timeout ?? 0) > 0 || (project.caseFailures?.length ?? 0) > 0
+    const hasFailedCases = (project.caseSummary?.failed ?? 0) > 0 || (project.caseSummary?.errored ?? 0) > 0 || (project.caseSummary?.timeout ?? 0) > 0 || (project.caseFailures?.length ?? 0) > 0
     if (isFailed) {
       failedProjects += 1
       lines.push(` ${colors.red('❯')} ${badge}${formatDuration(project.durationMs, colors)}`)
@@ -509,8 +512,10 @@ export function formatVievalCliRunOutput(output: CliRunOutput): string {
     const countLabel = colors.dim(`(${project.taskCount} tasks)`)
     const caseSummaryLabel = project.caseSummary == null
       ? ''
-      : `, cases ${project.caseSummary.passed} passed | ${project.caseSummary.failed} failed | ${project.caseSummary.timeout} timeout`
-    const detailsLabel = colors.dim(` ${project.discoveredEvalFileCount} files, ${project.entryCount} entries, ${runCount} runs${caseSummaryLabel}, hybrid ${hybridAverageLabel}`)
+      : `, cases ${project.caseSummary.passed} passed | ${project.caseSummary.failed} failed | ${project.caseSummary.errored} errored | ${project.caseSummary.timeout} timeout`
+    const coverage = project.result?.overall.coverage
+    const coverageLabel = coverage == null || coverage.total === 0 ? '' : `, coverage ${formatHybridAverage(coverage.measured / coverage.total)}`
+    const detailsLabel = colors.dim(` ${project.discoveredEvalFileCount} files, ${project.entryCount} entries, ${runCount} runs${caseSummaryLabel}, hybrid ${hybridAverageLabel}${coverageLabel}`)
     const matrixSummary = formatMatrixSummary(project.matrixSummary)
     lines.push(` ${hasFailedCases ? colors.red('❯') : colors.green('✓')} ${badge}${countLabel}${detailsLabel}${formatDuration(project.durationMs, colors)}`)
     if (matrixSummary != null) {
@@ -648,7 +653,7 @@ export function hasRunFailures(output: CliRunOutput): boolean {
       return true
     }
 
-    if (project.caseSummary != null && (project.caseSummary.failed > 0 || project.caseSummary.timeout > 0)) {
+    if (project.caseSummary != null && (project.caseSummary.failed > 0 || project.caseSummary.errored > 0 || project.caseSummary.timeout > 0)) {
       return true
     }
 
@@ -1010,6 +1015,7 @@ function createAutoTaskExecutor(): ScheduledTaskExecutor {
     })
 
     return {
+      ...(output.coverage == null ? {} : { coverage: { ...output.coverage } }),
       entryId: task.entry.id,
       id: task.id,
       inferenceExecutorId: task.inferenceExecutor.id,
@@ -1677,7 +1683,7 @@ function subscribeProjectCaseSummary(bus: RunEventBus, projectName: string): {
   failures: CliProjectCaseFailure[]
   toSummary: () => CliProjectCaseSummary
 } {
-  const counters = { failed: 0, passed: 0, skipped: 0, timeout: 0 }
+  const counters = { errored: 0, failed: 0, passed: 0, skipped: 0, timeout: 0 }
   const seenCaseIds = new Set<string>()
   const failures: CliProjectCaseFailure[] = []
 
@@ -1692,7 +1698,7 @@ function subscribeProjectCaseSummary(bus: RunEventBus, projectName: string): {
       counters[data.state] += 1
     }
 
-    if ((data.state === 'failed' || data.state === 'timeout') && data.errorMessage != null) {
+    if ((data.state === 'failed' || data.state === 'errored' || data.state === 'timeout') && data.errorMessage != null) {
       failures.push({
         caseId,
         caseName: data.name,

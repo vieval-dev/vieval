@@ -1,7 +1,9 @@
+import type { CaseOutcomeState } from '../core/scoring'
 import type { CaseEndedData, CaseStartedData, RunEventEnvelope } from '../events'
 
 import * as v from 'valibot'
 
+import { isMeasuredState } from '../core/scoring'
 import { caseEnded, caseEndedDataSchema, caseStarted, caseStartedDataSchema, metricRecorded, metricRecordedDataSchema, scoreRecorded, scoreRecordedDataSchema } from '../events'
 
 /** Arguments for building normalized case records from report events. */
@@ -105,7 +107,7 @@ export interface CaseRecord {
 }
 
 /** Terminal state stored for one normalized case record. */
-export type CaseRecordState = 'failed' | 'passed' | 'skipped' | 'timeout'
+export type CaseRecordState = CaseOutcomeState
 
 /** Generic metrics summary for overall scores and requested group facets. */
 export interface MetricsSummary {
@@ -289,7 +291,11 @@ function applyCaseEnd(draft: CaseDraft, event: RunEventEnvelope, data: CaseEnded
   draft.endedAt = event.time
   draft.output = data.output ?? draft.output
   draft.state = data.state
-  draft.scores.exact ??= draft.state === 'passed' ? 1 : 0
+  // Only a case with a result gets a default exact score. An errored or timed-out case measured nothing, so it has
+  // no exact score and report means leave it out, as the task score does.
+  if (isMeasuredState(draft.state)) {
+    draft.scores.exact ??= draft.state === 'passed' ? 1 : 0
+  }
 
   if (data.attemptIndex != null) {
     const startedAt = draft.attemptStartedAt ?? event.time

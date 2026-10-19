@@ -31,6 +31,7 @@ Vieval 提供以下公开导入路径。编写普通评测时，通常只需从 
 | `vieval/cli` | 解析顶层 CLI 参数并分派命令，导出 `parseTopLevelCliArguments` 和 `runTopLevelCli`。 |
 | `vieval/core/runner` | 收集评测、生成调度任务、执行任务并汇总结果。常用导出包括 `collectEvalEntries`、`createRunnerSchedule`、`runScheduledTasks` 和 `aggregateRunResults`。 |
 | `vieval/core/scheduler` | 通过槽位池和中间件放行项目、任务和用例，导出 `createScheduler`；用 `Scheduler.child` 创建只属于某个项目、任务或用例组的池。 |
+| `vieval/core/scoring` | 用与任务和查看器相同的规则为用例结果计分，导出 `scoreCaseOutcomes`、`strictExactOf` 和 `isMeasuredState`。它没有副作用，浏览器代码也可以导入。 |
 | `vieval/core/processors/results` | 处理运行结果并执行内置的结果判定策略，导出 `processRunResults` 和 `ResultGateDecision`。 |
 
 如果需要自行组织运行器、调度器、重试和缓存逻辑，请先阅读[可靠执行](/zh-hans/guide/learn/reliable-execution)。结果汇总、判定和报告文件的关系见[报告与比较](/zh-hans/guide/learn/reports-and-comparisons)。

@@ -1,3 +1,4 @@
+import type { CaseOutcomeScores, CaseOutcomeState } from 'vieval/core/scoring'
 import type { LocalizedText } from 'vieval/events'
 
 import type {
@@ -17,6 +18,8 @@ import type {
   TaskNode,
   TryNode,
 } from './contract'
+
+import { scoreCaseOutcomes } from 'vieval/core/scoring'
 
 /**
  * Result of {@link RunReducer.apply}.
@@ -269,9 +272,10 @@ export function compareNatural(left: string, right: string): number {
  * Counts final case states.
  */
 export function countCases(nodes: readonly Pick<CaseNode, 'state'>[]): CaseCounts {
-  const counts: CaseCounts = { failed: 0, passed: 0, running: 0, skipped: 0, timeout: 0, total: nodes.length }
+  const counts: CaseCounts = { errored: 0, failed: 0, passed: 0, running: 0, skipped: 0, timeout: 0, total: nodes.length }
   for (const node of nodes) {
     switch (node.state) {
+      case 'errored':
       case 'failed':
       case 'passed':
       case 'running':
@@ -279,8 +283,9 @@ export function countCases(nodes: readonly Pick<CaseNode, 'state'>[]): CaseCount
       case 'timeout':
         counts[node.state] += 1
         break
+      // The run ended while the case ran, so it produced no result.
       case 'unfinished':
-        counts.failed += 1
+        counts.errored += 1
         break
     }
   }
@@ -836,16 +841,6 @@ export function estimateProgress(reducer: RunReducer, now: number): RunProgress 
 }
 
 /**
- * The hybrid average of vieval's aggregate (`createHybridAverage`).
- */
-export function hybridAverage(exact: null | number, judge: null | number): null | number {
-  if (exact != null && judge != null) {
-    return (exact + judge) / 2
-  }
-  return exact ?? judge
-}
-
-/**
  * Parses `<entryId>::<inferenceExecutorId>::run=<runRowId>::eval=<evalRowId>` (segments URI-encoded).
  */
 export function parseTaskId(taskId: string): { entryId?: string, inferenceExecutorId?: string, matrix?: TaskMatrix } {
@@ -868,32 +863,14 @@ export function parseTaskId(taskId: string): { entryId?: string, inferenceExecut
 }
 
 /**
- * Task score with the rule of `describeTask` (`collectCaseOutcomeScores`): every settled round of every case
- * contributes; a case that did not pass scores exact 0; a passed case without `recordScore` scores exact 1.
+ * Task score with the rule of `describeTask` (`scoreCaseOutcomes` of `vieval/core/scoring`), so the viewer and the
+ * run summary agree: every settled round of every case contributes; errored, timed-out, and unfinished rounds stay out
+ * of `exact` and lower `coverage`.
  */
-export function scoreRounds(rounds: readonly Pick<CaseRound, 'scores' | 'state'>[]): { exact: null | number, hybrid: null | number, judge: null | number } {
-  const exact: number[] = []
-  const judge: number[] = []
-  for (const round of rounds) {
-    if (round.state === 'running') {
-      continue
-    }
-    if (round.state !== 'passed') {
-      exact.push(0)
-      continue
-    }
-    if (round.scores.exact == null && round.scores.judge == null) {
-      exact.push(1)
-      continue
-    }
-    exact.push(round.scores.exact ?? 1)
-    if (round.scores.judge != null) {
-      judge.push(round.scores.judge)
-    }
-  }
-  const exactAverage = average(exact)
-  const judgeAverage = average(judge)
-  return { exact: exactAverage, hybrid: hybridAverage(exactAverage, judgeAverage), judge: judgeAverage }
+export function scoreRounds(rounds: readonly Pick<CaseRound, 'scores' | 'state'>[]): CaseOutcomeScores {
+  return scoreCaseOutcomes(rounds.flatMap(round => round.state === 'running'
+    ? []
+    : [{ scores: round.scores, state: toOutcomeState(round.state) }]))
 }
 
 /**
@@ -926,7 +903,7 @@ export function toCaseNode(reduced: ReducedCase, options: { evidenceLinkCount: n
 }
 
 function asCaseState(value: unknown): CaseState {
-  return value === 'passed' || value === 'failed' || value === 'skipped' || value === 'timeout' ? value : 'failed'
+  return value === 'passed' || value === 'failed' || value === 'errored' || value === 'skipped' || value === 'timeout' ? value : 'errored'
 }
 
 /**
@@ -1031,6 +1008,11 @@ function splitOutputLines(content: string): string[] {
     lines.pop()
   }
   return lines
+}
+
+/** A round the run ended while it ran (`unfinished`) produced no result, like an errored one. */
+function toOutcomeState(state: Exclude<CaseState, 'running'>): CaseOutcomeState {
+  return state === 'unfinished' ? 'errored' : state
 }
 
 function toRound(round: MutableRound, terminated: boolean): CaseRound {

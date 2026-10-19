@@ -14,7 +14,20 @@ next:
 
 ## 从确定性断言开始
 
-Vieval 导出了与 Vitest 兼容的 `expect`。如果匹配失败，`expect` 会抛出错误，当前用例也会随之失败。没有记录自定义分数的用例通过时，会得到 `1` 分的 `exact` 分数；失败时则得到 `0` 分。
+Vieval 导出了与 Vitest 兼容的 `expect`。如果匹配失败，`expect` 会抛出 `AssertionError`，当前用例以 `failed` 结束：它得出了错误的结果，计入 `0` 分的 `exact` 分数。没有记录自定义分数的用例通过时，会得到 `1` 分。
+
+其他错误，例如服务限流、连接中断或代码缺陷，会让用例以 `errored` 结束，表示没有得出结果。超时的用例以 `timeout` 结束，同样没有结果。这些用例不计入 `exact` 分数，而是降低覆盖率，即已结束的用例中得出结果的比例。运行汇总中的 `strictExactAverage` 保留了原来的口径：没有结果的用例按 `0` 分计算。阅读分数时请同时查看覆盖率：覆盖率低时，分数只反映了数据集的一部分。
+
+要表示结果错误，请使用 `expect` 或 `recordScore(0)`，不要直接抛出普通的 `Error`，否则会被视为“没有结果”。如果被测对象在困难输入上可能崩溃，而你希望把崩溃算作错误结果，可以在任务或用例上设置 `classifyError`：
+
+```ts
+import { isRetriableProviderError } from 'vieval/core/inference-executors'
+
+// 只有服务故障算作没有结果；其他错误都算作被测对象给出了错误结果。
+describeTask('read aloud', build, {
+  classifyError: error => isRetriableProviderError(error) ? 'errored' : 'failed',
+})
+```
 
 ::: code-group
 ```ts [evals/normalized-answer.eval.ts]
@@ -71,7 +84,7 @@ describeTask('retrieval', ({ caseOf }) => {
 
 任务汇总分数和报告中的用例记录并非同时写入。每次调用 `recordScore` 都会立即发出事件，所以用例失败前记录的分数仍可能出现在报告中。
 
-如果用例最终失败或超时，任务汇总会忽略这些自定义分数，并为该用例计入一个 `exact: 0`。用例结束时，只有报告中的用例记录还没有 `exact` 分数，Vieval 才会补写 `exact: 0`。因此，排查结果时应同时检查用例的 `state` 和分数记录。
+如果用例最终失败，任务汇总会忽略这些自定义分数，并为该用例计入一个 `exact: 0`；如果用例出错或超时，任务汇总不会把它计入 `exact` 分数。对于失败的用例，只有报告中的用例记录还没有 `exact` 分数时，Vieval 才会补写 `exact: 0`。`errored` 和 `timeout` 的记录不会补写分数，因此 `vieval report` 计算平均值时会跳过它们。因此，排查结果时应同时检查用例的 `state` 和分数记录。
 
 指标用于筛选、分组和诊断报告。单独记录指标不会让用例通过或失败，也不会提高任务汇总分数。
 
@@ -137,7 +150,7 @@ const [outcome] = await evaluateAssertions([
 
 得到 `outcome` 后，你可以调用 `recordScore(outcome.score, outcome.scoreKind)` 记录分数，在 `outcome.pass` 为 `false` 时抛出错误，也可以将评分理由记为指标。选择哪种方式取决于你希望它如何影响用例状态和任务汇总。
 
-如果你通过抛出错误使当前用例失败，任务汇总会为该用例计入 `exact: 0`。抛错前已经发出的分数事件仍可能保留在报告的用例记录中。
+如果你通过抛出 `AssertionError`（例如借助 `expect`）使当前用例失败，任务汇总会为该用例计入 `exact: 0`；抛出其他错误时，除非 `classifyError` 另有规定，用例会以 `errored` 结束。抛错前已经发出的分数事件仍可能保留在报告的用例记录中。
 
 ::: warning 模型评分会带来运行成本
 如果 `judge` 回调调用模型，就需要配置对应的模型服务和凭据，并承担请求延迟和费用。并发运行用例时，可能同时发出多次评分请求，因此应根据服务方的速率限制和配额设置并发上限。还应检查服务方如何处理数据，并决定哪些用例输入、模型输出、评分提示词、评分理由、指标和事件可以写入报告文件。

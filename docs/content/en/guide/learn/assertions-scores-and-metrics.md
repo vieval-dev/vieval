@@ -14,7 +14,20 @@ A case becomes useful evidence when it makes success observable. Start with dete
 
 ## Start with a deterministic assertion
 
-Vieval exports a Vitest-compatible `expect`. A failed matcher throws inside the case, so the case fails; a case that completes without a custom score contributes an `exact` score of `1`, while a failed case contributes `0`.
+Vieval exports a Vitest-compatible `expect`. A failed matcher throws an `AssertionError` inside the case, so the case ends `failed`: it produced a wrong result and contributes an `exact` score of `0`. A case that completes without a custom score contributes `1`.
+
+Any other error, such as a provider rate limit, a dropped connection, or a bug, ends the case `errored`: it produced no result. A timeout ends it `timeout`, which also has no result. These cases stay out of the `exact` score. Instead they lower the coverage, the share of settled cases that produced a result. The run summary keeps the older every-case score as `strictExactAverage`, where cases without a result count as `0`. Read the score together with its coverage: a high score over a low coverage measured only part of the dataset.
+
+To mark a wrong result, use `expect` or `recordScore(0)`. Do not throw a plain `Error`, which reads as "no result". If your test object can crash on hard inputs and a crash should count as a wrong result, set `classifyError` on the task or case:
+
+```ts
+import { isRetriableProviderError } from 'vieval/core/inference-executors'
+
+// Only provider failures produce no result; every other error is a wrong result of the test object.
+describeTask('read aloud', build, {
+  classifyError: error => isRetriableProviderError(error) ? 'errored' : 'failed',
+})
+```
 
 ```ts [evals/normalized-answer.eval.ts]
 import { describeTask, expect } from 'vieval'
@@ -65,7 +78,7 @@ describeTask('retrieval', ({ caseOf }) => {
 
 Scores must be finite and inside `0..1`. Within one case, another `recordScore` call with the same kind replaces the earlier value; use one final value per score family.
 
-Task-result aggregation and persisted report records have different timing. If a case later fails or times out, task-result aggregation ignores its custom score contributions and adds exact failure evidence. Each `recordScore` call also emits an event immediately, however, so a score emitted before the failure may remain in the persisted case record. The case-end event supplies an exact `0` only when that record does not already have an exact score. When diagnosing a report, read the case `state` together with its recorded scores.
+Task-result aggregation and persisted report records have different timing. If a case later fails, task-result aggregation ignores its custom score contributions and adds an exact `0`. If it errors or times out, task-result aggregation leaves it out of the exact score. Each `recordScore` call also emits an event immediately, however, so a score emitted before the failure may remain in the persisted case record. For a `failed` case, the case-end event supplies an exact `0` only when that record does not already have an exact score. An `errored` or `timeout` record gets no default exact score, so `vieval report` means leave it out. When diagnosing a report, read the case `state` together with its recorded scores.
 
 Metrics are evidence for filtering, grouping, and diagnosing reports. A metric alone never makes a case pass, fail, or receive a higher aggregate score.
 
@@ -123,7 +136,7 @@ const [outcome] = await evaluateAssertions([
 
 This example is deterministic and makes no model call. `expectRubric` does not select a model or invoke a provider by itself. A `judge` callback may use local logic, a human result, or model inference.
 
-The core assertion pipeline and the task DSL are currently separate public surfaces. `evaluateAssertions` returns outcomes; it does not automatically call the case callback context's `recordScore`, `recordMetric`, or `expect`. If you bridge an outcome manually, decide explicitly whether you are recording its numeric score, failing the case from `outcome.pass`, retaining its reason as a metric, or some combination. Throwing to fail a case makes the task result treat it as an exact failure; score events emitted before the throw may still appear in the persisted case record.
+The core assertion pipeline and the task DSL are currently separate public surfaces. `evaluateAssertions` returns outcomes; it does not automatically call the case callback context's `recordScore`, `recordMetric`, or `expect`. If you bridge an outcome manually, decide explicitly whether you are recording its numeric score, failing the case from `outcome.pass`, retaining its reason as a metric, or some combination. Throwing an `AssertionError` (for example through `expect`) makes the task result treat the case as an exact failure; throwing another error makes it `errored` unless `classifyError` says otherwise. Score events emitted before the throw may still appear in the persisted case record.
 
 ::: warning Model-backed judging has runtime consequences
 If your `judge` callback invokes a model, it needs the relevant provider configuration and credentials and adds latency and cost. Case concurrency can fan out judge requests, so apply limits that match provider capacity. Review the provider's data policy and choose deliberately which case inputs, outputs, judge prompts, reasons, metrics, or events you retain in report artifacts.

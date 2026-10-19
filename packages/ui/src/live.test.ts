@@ -156,7 +156,7 @@ describe('--with-viewer: in-process run on the event bus', () => {
       expect(task.matrix?.run).toEqual({ model: 'model-a', repeat: '1' })
       expect(task.roundCount).toBe(2)
       const byName = Object.fromEntries(task.cases.map(node => [node.name, node]))
-      expect(byName['flaky/attempt'].rounds.map(round => [round.roundIndex, round.state, round.roundIndexInferred])).toEqual([[0, 'failed', false], [1, 'passed', false]])
+      expect(byName['flaky/attempt'].rounds.map(round => [round.roundIndex, round.state, round.roundIndexInferred])).toEqual([[0, 'errored', false], [1, 'passed', false]])
       expect(byName['flaky/retry'].rounds.map(round => round.tries.map(entry => `${entry.retryIndex}:${entry.state}`))).toEqual([['0:retried', '1:passed'], ['0:retried', '1:passed']])
       expect(byName['slow/artifacts'].scores).toEqual({ exact: 0.75 })
 

@@ -197,7 +197,8 @@ describe('runVievalCli auto attempt reports', () => {
     expect(flaky).toMatchObject({ attemptIndex: 1, autoAttempt: 1, retryCount: 0, state: 'passed' })
     expect(flaky?.metrics['osworld.evidence']).toBe('/episodes/flaky-task/r2')
     expect(flaky?.attempts?.map(attempt => [attempt.attemptIndex, attempt.state, attempt.errorMessage])).toEqual([
-      [0, 'failed', 'vm did not boot'],
+      // A VM that did not boot measured nothing, so the first attempt is `errored`.
+      [0, 'errored', 'vm did not boot'],
       [1, 'passed', undefined],
     ])
 

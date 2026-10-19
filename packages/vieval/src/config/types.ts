@@ -2,6 +2,7 @@ import type { RunScore } from '../core/runner'
 import type { ScheduledTask } from '../core/runner/schedule'
 import type { TaskExecutionContext } from '../core/runner/task-context'
 import type { Scheduler } from '../core/scheduler/types'
+import type { CaseCoverage } from '../core/scoring'
 import type { TelemetryRuntime } from '../core/telemetry'
 import type { RunEventEmitter } from '../events'
 
@@ -344,8 +345,9 @@ export type TaskAutoRetryIf = (error: unknown, retryIndex: number) => boolean
  *
  * Expects:
  * - consumers treat the value as the final state for the case
+ * - `failed` means a failed assertion (a wrong result); `errored` and `timeout` mean the case produced no result
  */
-export type TaskCaseState = 'failed' | 'passed' | 'timeout'
+export type TaskCaseState = 'errored' | 'failed' | 'passed' | 'timeout'
 
 /**
  * Pools a task declares for its own cases.
@@ -420,6 +422,13 @@ export interface TaskDefinition {
 }
 
 /**
+ * Decides whether an error thrown by a case is a wrong result (`failed`) or no result (`errored`).
+ *
+ * It does not see timeouts or run interrupts: a timeout is always `timeout`, and an interrupt is always `errored`.
+ */
+export type TaskErrorClassifier = (error: unknown) => 'errored' | 'failed'
+
+/**
  * Execution policy applied to task and case callbacks.
  *
  * Use when:
@@ -459,9 +468,19 @@ export interface TaskExecutionPolicy {
    * Retries only the failures it accepts, for example `isRetriableProviderError` of
    * `vieval/core/inference-executors`, so that a bug or a wrong assertion fails at once instead of running again.
    *
-   * @default every failure and timeout is retried
+   * @default only `errored` and `timeout` tries are retried; a failed assertion is a result, not a transient failure
    */
   autoRetryIf?: TaskAutoRetryIf
+  /**
+   * Decides which thrown errors are wrong results (`failed`) and which produced no result (`errored`).
+   * Errored cases stay out of the main score and lower the coverage instead.
+   *
+   * For example, a benchmark whose test object can crash on hard inputs may count every error except a provider
+   * failure as `failed`: `error => isRetriableProviderError(error) ? 'errored' : 'failed'`.
+   *
+   * @default an `AssertionError` (a failed `expect`) is `failed`; any other error is `errored`
+   */
+  classifyError?: TaskErrorClassifier
   /**
    * Timeout in milliseconds for one case execution.
    */
@@ -593,6 +612,10 @@ export interface TaskRunContext {
  * Output of one eval task execution.
  */
 export interface TaskRunOutput {
+  /**
+   * Measured and settled case counts of this task run. A task without cases leaves it out.
+   */
+  coverage?: CaseCoverage
   /**
    * Scores emitted by this task run.
    */
