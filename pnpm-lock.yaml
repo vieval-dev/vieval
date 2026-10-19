@@ -54,9 +54,6 @@ catalogs:
     '@pinia/colada':
       specifier: ^1.4.8
       version: 1.4.8
-    '@pnpm/find-workspace-dir':
-      specifier: ^1000.1.5
-      version: 1000.1.5
     '@proj-airi/unocss-preset-chromatic':
       specifier: ^1.1.5
       version: 1.1.5
@@ -577,9 +574,6 @@ importers:
       '@opentelemetry/api':
         specifier: 'catalog:'
         version: 1.9.1
-      '@pnpm/find-workspace-dir':
-        specifier: 'catalog:'
-        version: 1000.1.5
       '@vitest/expect':
         specifier: catalog:vitest
         version: 4.1.11
@@ -1691,18 +1685,6 @@ packages:
   '@pkgr/core@0.3.6':
     resolution: {integrity: sha512-SEeaJLb3qBNF/OaXnaR1NmmBbFYk1zC0ZH/52fATcRPLFg/p791YrcyFFy44Bo9sLaGuSuLp5Q6axbb/O+v/RA==}
     engines: {node: ^14.18.0 || >=16.0.0}
-
-  '@pnpm/constants@1001.3.1':
-    resolution: {integrity: sha512-2hf0s4pVrVEH8RvdJJ7YRKjQdiG8m0iAT26TTqXnCbK30kKwJW69VLmP5tED5zstmDRXcOeH5eRcrpkdwczQ9g==}
-    engines: {node: '>=18.12'}
-
-  '@pnpm/error@1000.1.0':
-    resolution: {integrity: sha512-Dqc2IJJPjUatwc9Letw+vG29rnaMrDGi5g6WCx1HiZYm0obXbTmLygeRafMbgf+sLKXrWE1shOeiayQuczBdoA==}
-    engines: {node: '>=18.12'}
-
-  '@pnpm/find-workspace-dir@1000.1.5':
-    resolution: {integrity: sha512-r1WzYXBD8cqlglOi4ilN9BphX74mJmH2hhiogzYbcNCHhtXnG7tw/9Iq54UGZ+cpDkgGHjL0xLwj9QLUoKJxmg==}
-    engines: {node: '>=18.12'}
 
   '@polka/url@1.0.0-next.29':
     resolution: {integrity: sha512-wwQAWhWSuHaag8c4q/KN/vCoeOJYshAIvMQwD4GpSb3OiZklFfvAgmj0VCBBImRpuF/aFgIRzllXlVX93Jevww==}
@@ -6457,17 +6439,6 @@ snapshots:
       vue: 3.5.43(typescript@6.0.3)
 
   '@pkgr/core@0.3.6': {}
-
-  '@pnpm/constants@1001.3.1': {}
-
-  '@pnpm/error@1000.1.0':
-    dependencies:
-      '@pnpm/constants': 1001.3.1
-
-  '@pnpm/find-workspace-dir@1000.1.5':
-    dependencies:
-      '@pnpm/error': 1000.1.0
-      find-up: 5.0.0
 
   '@polka/url@1.0.0-next.29': {}
 

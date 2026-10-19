@@ -16,8 +16,10 @@ pnpm -F @vieval/eval-agent-memory eval:run:mem9
 pnpm -F @vieval/eval-agent-memory eval:run:lobehub
 ```
 
-`eval:run` executes comparison mode via `vieval compare` and discovers workspaces from
-`eval/test-objects/*` declared in this workspace config.
+`vieval.config.ts` here is a comparison: it lists the test objects under `eval/test-objects/*` as workspaces.
+`eval:run` runs every test object in its own process into `.vieval/reports` next to this file, shares one LoCoMo case
+cache under `.vieval/cache`, and prints a leaderboard. `--workspace <id>` runs some of them, and `--with-viewer --open`
+shows the runs in the web viewer. Env files (`.env.test`, `.env.local`) at this directory configure every test object.
 
 ## LoCoMo Data Source
 

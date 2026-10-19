@@ -86,9 +86,13 @@ export interface RunEventScope {
 export const runEventEnvelopeSchema = v.object({
   attemptId: v.string(),
   caseId: v.optional(v.string()),
+  /** Comparison the run belongs to, when a comparison started it. */
+  comparisonId: v.optional(v.string()),
   data: v.unknown(),
   event: v.string(),
   experimentId: v.string(),
+  /** Id shared by every run of one `vieval run` invocation; added in schema version 2 without a bump, so optional. */
+  invocationId: v.optional(v.string()),
   projectId: v.optional(v.string()),
   runId: v.string(),
   schemaVersion: v.literal(RUN_EVENT_SCHEMA_VERSION),
@@ -158,6 +162,8 @@ export const projectEndedDataSchema = v.object({
 /** Payload of {@link taskQueued}. */
 export const taskQueuedDataSchema = v.object({
   displayName: v.string(),
+  /** Cases one run of the task executes, when known before it runs (`TaskDefinition.caseNames`, after `--case`). */
+  totalCases: v.optional(v.number()),
 })
 
 /** Payload of {@link taskStarted}. */

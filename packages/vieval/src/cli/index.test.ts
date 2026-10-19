@@ -48,7 +48,7 @@ describe('parseTopLevelCliArguments', () => {
   })
 
   it('throws for unsupported command', () => {
-    expect(() => parseTopLevelCliArguments(['list'])).toThrow('Unsupported vieval command "list". Expected "run", "compare", "report", or "viewer".')
+    expect(() => parseTopLevelCliArguments(['list'])).toThrow('Unsupported vieval command "list". Expected "run", "report", or "viewer".')
   })
 
   it('parses report command and forwards remaining argv', () => {
@@ -84,13 +84,6 @@ describe('parseTopLevelCliArguments', () => {
     expect(parseTopLevelCliArguments(['report', 'compare', '.vieval/reports/left', '.vieval/reports/right'])).toEqual({
       command: 'report',
       commandArgv: ['compare', '.vieval/reports/left', '.vieval/reports/right'],
-    })
-  })
-
-  it('parses compare command and forwards remaining argv', () => {
-    expect(parseTopLevelCliArguments(['compare', '--config', 'vieval.cmp.config.ts'])).toEqual({
-      command: 'compare',
-      commandArgv: ['--config', 'vieval.cmp.config.ts'],
     })
   })
 

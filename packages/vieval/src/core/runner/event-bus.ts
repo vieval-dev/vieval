@@ -23,7 +23,11 @@ export interface RunEventBus extends RunEventEmitter {
  */
 export interface RunEventIdentity {
   attemptId: string
+  /** Comparison the run belongs to, when a comparison started it. */
+  comparisonId?: string
   experimentId: string
+  /** Id shared by every run of one `vieval run` invocation. */
+  invocationId?: string
   runId: string
   workspaceId: string
 }
@@ -68,9 +72,11 @@ export function createRunEventBus(identity: RunEventIdentity): RunEventBus {
         const envelope: RunEventEnvelope<TData> = {
           attemptId: identity.attemptId,
           caseId: scope.caseId,
+          ...(identity.comparisonId == null ? {} : { comparisonId: identity.comparisonId }),
           data,
           event: definition.id,
           experimentId: identity.experimentId,
+          ...(identity.invocationId == null ? {} : { invocationId: identity.invocationId }),
           projectId: scope.projectId,
           runId: identity.runId,
           schemaVersion: RUN_EVENT_SCHEMA_VERSION,

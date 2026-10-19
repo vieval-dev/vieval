@@ -6,6 +6,15 @@ import { createVitest } from 'vitest/node'
 
 import { beginModuleRegistration, consumeModuleRegistrations, endModuleRegistration } from '../dsl/registry'
 
+// NOTICE:
+// Eval files register their tasks as a side effect of `describeTask`, and the DSL registry attributes each
+// registration to the one module marked active in the process (`dsl/registry.ts`). `vieval run` prepares projects
+// concurrently, so two imports could be pending at once and one file's tasks landed under another file.
+// Imports are therefore chained process-wide: a module's registrations are consumed before the next module starts.
+// Removal condition: registrations carry their own module identity (for example a per-import registry handed to
+// the module), so no process-wide active module is needed.
+let registrationChain: Promise<unknown> = Promise.resolve()
+
 /**
  * Loads eval modules and returns a normalized eval-module map.
  *
@@ -36,39 +45,41 @@ export async function loadEvalModulesWithVitestRuntime(
   try {
     for (const evalFilePath of evalFilePaths) {
       const moduleHref = pathToFileURL(evalFilePath).href
-      beginModuleRegistration(moduleHref)
-
-      try {
-        const moduleValue = await runtime.import<{ default?: EvalDefinition }>(moduleHref)
-        const registeredDefinitions = consumeModuleRegistrations(moduleHref)
-        const defaultDefinition = moduleValue.default
-
-        const definitions = [
-          ...registeredDefinitions,
-          ...(defaultDefinition == null ? [] : [defaultDefinition]),
-        ]
-
-        const deduplicatedDefinitions = definitions.filter((definition, index) => {
-          const key = `${definition.name}::${definition.description}::${definition.task?.id ?? ''}`
-          return definitions.findIndex(candidate => `${candidate.name}::${candidate.description}::${candidate.task?.id ?? ''}` === key) === index
-        })
-
-        if (deduplicatedDefinitions.length === 0) {
-          continue
+      const { moduleValue, registeredDefinitions } = await withExclusiveRegistration(async () => {
+        beginModuleRegistration(moduleHref)
+        try {
+          const moduleValue = await runtime.import<{ default?: EvalDefinition }>(moduleHref)
+          return { moduleValue, registeredDefinitions: consumeModuleRegistrations(moduleHref) }
         }
-
-        for (const [definitionIndex, definition] of deduplicatedDefinitions.entries()) {
-          const moduleKey = definitionIndex === 0
-            ? moduleHref
-            : `${moduleHref}#registration-${definitionIndex + 1}`
-
-          loadedModules[moduleKey] = {
-            default: definition,
-          }
+        finally {
+          endModuleRegistration()
         }
+      })
+
+      const defaultDefinition = moduleValue.default
+
+      const definitions = [
+        ...registeredDefinitions,
+        ...(defaultDefinition == null ? [] : [defaultDefinition]),
+      ]
+
+      const deduplicatedDefinitions = definitions.filter((definition, index) => {
+        const key = `${definition.name}::${definition.description}::${definition.task?.id ?? ''}`
+        return definitions.findIndex(candidate => `${candidate.name}::${candidate.description}::${candidate.task?.id ?? ''}` === key) === index
+      })
+
+      if (deduplicatedDefinitions.length === 0) {
+        continue
       }
-      finally {
-        endModuleRegistration()
+
+      for (const [definitionIndex, definition] of deduplicatedDefinitions.entries()) {
+        const moduleKey = definitionIndex === 0
+          ? moduleHref
+          : `${moduleHref}#registration-${definitionIndex + 1}`
+
+        loadedModules[moduleKey] = {
+          default: definition,
+        }
       }
     }
   }
@@ -77,4 +88,10 @@ export async function loadEvalModulesWithVitestRuntime(
   }
 
   return loadedModules
+}
+
+function withExclusiveRegistration<T>(load: () => Promise<T>): Promise<T> {
+  const result = registrationChain.then(load)
+  registrationChain = result.catch(() => {})
+  return result
 }

@@ -93,6 +93,9 @@ describe('buildCaseTable', () => {
 
     expect(table.categories).toEqual(['state', 'group', 'gui_only', 'harness'])
     expect(table.rows.map(row => row.categories.gui_only)).toEqual(['true', 'true', 'true', 'false'])
+    // Values most frequent first; states in their usual order whatever their counts.
+    expect([...table.valueCounts.gui_only!]).toEqual([['true', 3], ['false', 1]])
+    expect([...table.valueCounts.state!.keys()]).toEqual(['passed', 'failed', 'running'])
     expect(table.rows.map(row => row.categories.group)).toEqual(['chrome', 'chrome', 'gimp', 'gimp'])
   })
 })

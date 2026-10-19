@@ -41,7 +41,7 @@ describe('createSummaryReporter', () => {
    * @example
    * it('shows a running task progress row and task/case counters', () => {})
    */
-  it('shows planned and running counters plus elapsed and estimated timing in active task rows', () => {
+  it('shows planned and running counters plus elapsed and time left in active task rows', () => {
     let now = 1_000
     const reporter = createSummaryReporter({
       getColumns: () => 120,
@@ -89,7 +89,7 @@ describe('createSummaryReporter', () => {
      */
     expect(activeRow).toContain('1 case running')
     expect(activeRow).toContain('elapsed')
-    expect(activeRow).toContain('estimated')
+    expect(activeRow).toContain('left')
     /**
      * @example
      * expect(tasksRow).toContain('(2)')
@@ -97,7 +97,6 @@ describe('createSummaryReporter', () => {
     expect(tasksRow).toContain('(2)')
     expect(tasksRow).toContain('1 running')
     expect(tasksRow).toContain('1 planned')
-    expect(tasksRow).toContain('elapsed')
     /**
      * @example
      * expect(casesRow).toContain('1 passed')
@@ -105,7 +104,6 @@ describe('createSummaryReporter', () => {
     expect(casesRow).toContain('1 passed')
     expect(casesRow).toContain('2 planned')
     expect(casesRow).toContain('1 running')
-    expect(casesRow).toContain('estimated')
     /**
      * @example
      * expect(casesRow).toContain('(4)')
@@ -145,7 +143,7 @@ describe('createSummaryReporter', () => {
     const activeRow = findRow(reporter.getWindowRows(), 'eta-pending.eval.ts')
 
     expect(activeRow).toContain('elapsed')
-    expect(activeRow).not.toContain('estimated')
+    expect(activeRow).not.toContain('left')
   })
 
   /**
@@ -367,9 +365,9 @@ describe('createSummaryReporter', () => {
 
   /**
    * @example
-   * it('uses a wall-clock timestamp for Start at and a monotonic clock for Duration', () => {})
+   * it('uses a wall-clock timestamp for the start and a monotonic clock for the elapsed time', () => {})
    */
-  it('uses a wall-clock timestamp for Start at and a monotonic clock for Duration', () => {
+  it('uses a wall-clock timestamp for the start and a monotonic clock for the elapsed time', () => {
     let now = 1_234
     const reporter = createSummaryReporter({
       getColumns: () => 120,
@@ -388,17 +386,17 @@ describe('createSummaryReporter', () => {
 
     /**
      * @example
-     * expect(findRow(rows, 'Start at')).toContain('01:02:03')
+     * expect(findRow(rows, 'Time')).toContain('started 01:02:03')
      */
-    expect(findRow(rows, 'Start at')).toContain('01:02:03')
+    expect(findRow(rows, 'Time')).toContain('started 01:02:03')
     /**
      * @example
-     * expect(findRow(rows, 'Duration')).toContain('1 second')
+     * expect(findRow(rows, 'Time')).toContain('elapsed 1 second')
      */
-    expect(findRow(rows, 'Duration')).toContain('1 second')
+    expect(findRow(rows, 'Time')).toContain('elapsed 1 second')
   })
 
-  it('renders planned, running, terminal counts, elapsed, and estimated duration in footer rows', () => {
+  it('renders planned, running, terminal counts, elapsed, and time left in footer rows', () => {
     let now = 5_000
     const reporter = createSummaryReporter({
       getColumns: () => 120,
@@ -426,7 +424,114 @@ describe('createSummaryReporter', () => {
     expect(rows).toContain('planned')
     expect(rows).toContain('running')
     expect(rows).toContain('elapsed')
-    expect(rows).toContain('estimated')
+    expect(rows).toContain('left')
+  })
+
+  // ROOT CAUSE:
+  //
+  // In airi `tts-speech-formula`, two `zh` tasks held task slots while the run-wide case pool was full. They showed
+  // `0/0, 0 cases running (elapsed 3 minutes 10 seconds)`, and `Cases (402)` left out their 134 cases, so the run
+  // estimate said about 25 s were left when about 180 cases still had to run.
+  //
+  // This happened because a task's case total reached the reporter only with its first `case.started`, and the
+  // task's elapsed time started at `task.started`.
+  //
+  // We fixed this by sending `totalCases` with `task.queued` (`describeTask` knows its cases when the module loads),
+  // starting a task's clock at its first case, and showing a task without a running case as waiting.
+  it('counts the cases of tasks still waiting for a case slot and shows them as waiting', () => {
+    let now = 0
+    const reporter = createTestReporter(() => now)
+
+    reporter.onRunStart({ totalTasks: 2 })
+    reporter.onTaskQueued({ displayName: 'ja', projectName: 'raw', taskId: 'ja', totalCases: 67 })
+    reporter.onTaskQueued({ displayName: 'zh', projectName: 'raw', taskId: 'zh', totalCases: 67 })
+    reporter.onTaskStart({ taskId: 'ja' })
+    reporter.onTaskStart({ taskId: 'zh' })
+    reporter.onCaseStart({ caseId: 'case-1', caseName: 'case #1', taskId: 'ja' })
+
+    now = 190_000
+    const rows = reporter.getWindowRows()
+
+    expect(findRow(rows, 'Cases')).toContain('(134)')
+    expect(findRow(rows, ' zh')).toContain('0/67, waiting for a case slot')
+    expect(findRow(rows, ' zh')).not.toContain('elapsed')
+  })
+
+  it('estimates time left and the end time from the recent case throughput', () => {
+    let now = 0
+    const reporter = createSummaryReporter({
+      getColumns: () => 120,
+      getNow: () => now,
+      getWallClockNow: () => new Date(2026, 9, 19, 7, 49, 58).getTime() + now,
+      isTTY: true,
+      slowThresholdMs: 300,
+      writeError: () => {},
+      writeOutput: () => {},
+    })
+
+    reporter.onRunStart({ totalTasks: 1 })
+    reporter.onTaskQueued({ displayName: 'ja', projectName: 'raw', taskId: 'ja', totalCases: 10 })
+    reporter.onTaskStart({ taskId: 'ja' })
+    for (let index = 1; index <= 4; index += 1) {
+      reporter.onCaseStart({ caseId: `case-${index}`, caseName: `case #${index}`, taskId: 'ja' })
+      now = index * 10_000
+      reporter.onCaseEnd({ caseId: `case-${index}`, state: 'passed', taskId: 'ja' })
+    }
+
+    // 4 cases in 40 s, 6 left: about 60 s.
+    const time = findRow(reporter.getWindowRows(), 'Time')
+
+    expect(time).toContain('elapsed 40 seconds')
+    expect(time).toContain('~1 minute left')
+    expect(time).toContain('ETA 07:51:38')
+  })
+
+  it('shows no time left while a queued task has not declared its cases', () => {
+    let now = 0
+    const reporter = createTestReporter(() => now)
+
+    reporter.onRunStart({ totalTasks: 2 })
+    reporter.onTaskQueued({ displayName: 'known', projectName: 'p', taskId: 'known', totalCases: 4 })
+    reporter.onTaskQueued({ displayName: 'custom', projectName: 'p', taskId: 'custom' })
+    reporter.onTaskStart({ taskId: 'known' })
+    for (let index = 1; index <= 3; index += 1) {
+      reporter.onCaseStart({ caseId: `case-${index}`, caseName: `case #${index}`, taskId: 'known' })
+      now = index * 1_000
+      reporter.onCaseEnd({ caseId: `case-${index}`, state: 'passed', taskId: 'known' })
+    }
+    const rows = reporter.getWindowRows()
+
+    expect(findRow(rows, 'Cases')).toContain('(4+)')
+    expect(findRow(rows, 'Time')).toContain('~? left')
+  })
+
+  it('shows a projects row when the run has more than one project', () => {
+    const reporter = createTestReporter(() => 0)
+
+    reporter.onRunStart({ totalTasks: 3 })
+    reporter.onTaskQueued({ displayName: 'a', projectName: 'alpha', taskId: 'a', totalCases: 1 })
+    reporter.onTaskQueued({ displayName: 'b', projectName: 'beta', taskId: 'b', totalCases: 1 })
+    reporter.onTaskQueued({ displayName: 'c', projectName: 'gamma', taskId: 'c', totalCases: 1 })
+    reporter.onTaskStart({ taskId: 'a' })
+    reporter.onTaskEnd({ state: 'passed', taskId: 'a' })
+    reporter.onTaskStart({ taskId: 'b' })
+    reporter.onCaseStart({ caseId: 'case-1', caseName: 'case 1', taskId: 'b' })
+
+    const projects = findRow(reporter.getWindowRows(), 'Projects')
+
+    expect(projects).toContain('1 planned')
+    expect(projects).toContain('1 running')
+    expect(projects).toContain('1 passed')
+    expect(projects).toContain('(3)')
+  })
+
+  it('leaves out the projects row for a single project', () => {
+    const reporter = createTestReporter(() => 0)
+
+    reporter.onRunStart({ totalTasks: 1 })
+    reporter.onTaskQueued({ displayName: 'a', projectName: 'alpha', taskId: 'a', totalCases: 1 })
+
+    expect(reporter.getWindowRows().map(stripAnsi).join('\n')).not.toContain('Projects')
   })
 
   /**
@@ -534,9 +639,10 @@ describe('createSummaryReporter', () => {
     expect(findRow(rows, 'observed.eval.ts')).toContain('1/2')
     /**
      * @example
-     * expect(findRow(rows, 'Cases')).toContain('(2)')
+     * expect(findRow(rows, 'Cases')).toContain('(2+)')
      */
-    expect(findRow(rows, 'Cases')).toContain('(2)')
+    // Without a declared total, the cases seen so far are a lower bound.
+    expect(findRow(rows, 'Cases')).toContain('(2+)')
 
     reporter.onTaskQueued({
       displayName: 'observed.eval.ts',
@@ -606,14 +712,14 @@ describe('createSummaryReporter', () => {
     expect(compactRows.some(row => row.includes('Tasks'))).toBe(true)
     /**
      * @example
-     * expect(compactRows.some(row => row.includes('Duration'))).toBe(true)
+     * expect(compactRows.some(row => row.includes('Time'))).toBe(true)
      */
-    expect(compactRows.some(row => row.includes('Duration'))).toBe(true)
+    expect(compactRows.some(row => row.includes('Time'))).toBe(true)
     /**
      * @example
-     * expect(tinyRows[0]).toContain('Duration')
+     * expect(tinyRows[0]).toContain('Time')
      */
-    expect(tinyRows[0]).toContain('Duration')
+    expect(tinyRows[0]).toContain('Time')
     /**
      * @example
      * expect(tinyRows).toHaveLength(2)
@@ -657,9 +763,9 @@ describe('createSummaryReporter', () => {
     expect(rows).toHaveLength(14)
     /**
      * @example
-     * expect(rows.join('\n')).toContain('15 more running rows hidden')
+     * expect(rows.join('\n')).toContain('14 more running rows hidden')
      */
-    expect(rows.join('\n')).toContain('15 more running rows hidden')
+    expect(rows.join('\n')).toContain('14 more running rows hidden')
     /**
      * @example
      * expect(rows.join('\n')).toContain('Tasks')
@@ -667,9 +773,9 @@ describe('createSummaryReporter', () => {
     expect(rows.join('\n')).toContain('Tasks')
     /**
      * @example
-     * expect(rows.join('\n')).toContain('Duration')
+     * expect(rows.join('\n')).toContain('Time')
      */
-    expect(rows.join('\n')).toContain('Duration')
+    expect(rows.join('\n')).toContain('Time')
     /**
      * @example
      * expect(concurrencyRow).toContain('20 cases running')

@@ -708,22 +708,25 @@ export function describeTask(
     description,
     name,
     task: defineTask({
+      caseNames: registeredCases.map(taskCase => taskCase.name),
       concurrency: options.concurrency,
       executionPolicy: taskExecutionPolicy,
       id: name,
       async run(context): Promise<TaskRunOutput> {
-        if (registeredCases.length === 0) {
+        // `--case` runs a subset; each case keeps the index (and so the case id) it has in the full task.
+        const runCases = registeredCases.flatMap((taskCase, index) => context.selectsCase == null || context.selectsCase(taskCase.name) ? [{ index, taskCase }] : [])
+        if (runCases.length === 0) {
           return {
             scores: [{ kind: 'exact', score: 1 }],
           }
         }
 
-        const totalCases = registeredCases.length
+        const totalCases = runCases.length
         const scoreBucketsByKind: Record<RunScoreKind, number[]> = {
           exact: [],
           judge: [],
         }
-        const hasAutoAttempt = registeredCases.some(taskCase => resolveCaseExecutionPolicy(taskCase, taskExecutionPolicy).autoAttempt > 0)
+        const hasAutoAttempt = runCases.some(({ taskCase }) => resolveCaseExecutionPolicy(taskCase, taskExecutionPolicy).autoAttempt > 0)
         // Outside `vieval run` there is no project or run scheduler, so the task pool is the broadest one.
         const taskScheduler = (context.scheduler ?? createScheduler()).child({
           concurrency: { case: options.concurrency?.case },
@@ -748,7 +751,7 @@ export function describeTask(
 
         if (!hasAutoAttempt) {
           await Promise.all(
-            registeredCases.map(async (taskCase, index) => {
+            runCases.map(async ({ index, taskCase }) => {
               await scheduleCase(taskCase, index, 0, async () => {
                 const outcome = await executeRegisteredCase(context, taskCase, index, totalCases, taskExecutionPolicy, undefined)
                 // Not started because the run was interrupted.
@@ -771,7 +774,7 @@ export function describeTask(
               autoAttempt: resolveCaseExecutionPolicy(taskCase, taskExecutionPolicy).autoAttempt,
             })
             const attemptOutcomes = await Promise.all(
-              registeredCases.map(async (taskCase, index) => await scheduleCase(
+              runCases.map(async ({ index, taskCase }) => await scheduleCase(
                 taskCase,
                 index,
                 attemptIndex,
@@ -779,22 +782,23 @@ export function describeTask(
               )),
             )
 
-            attemptOutcomes.forEach((outcome, index) => {
-              const taskCase = registeredCases[index]
-              if (taskCase == null || outcome == null) {
+            attemptOutcomes.forEach((outcome, position) => {
+              const runCase = runCases[position]
+              if (runCase == null || outcome == null) {
                 return
               }
 
+              const { index, taskCase } = runCase
               emitCaseOutcome(context, taskCase, outcome, index, totalCases, autoAttemptOf(taskCase))
               collectCaseOutcomeScores(outcome, scoreBucketsByKind)
             })
 
-            const shouldContinue = context.signal?.aborted !== true && attemptOutcomes.some((outcome, index) => {
+            const shouldContinue = context.signal?.aborted !== true && attemptOutcomes.some((outcome, position) => {
               if (outcome == null || outcome.state === 'passed') {
                 return false
               }
 
-              const taskCase = registeredCases[index]
+              const taskCase = runCases[position]?.taskCase
               if (taskCase == null) {
                 return false
               }

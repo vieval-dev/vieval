@@ -103,6 +103,7 @@ describe('parseCliArguments', () => {
   it('parses config, json, and repeated project flags', () => {
     expect(parseCliArguments(['--config', 'vieval.config.ts', '--json', '--project', 'alpha', '--project', 'beta'])).toEqual({
       attempt: undefined,
+      case: [],
       caseConcurrency: undefined,
       configFilePath: 'vieval.config.ts',
       experiment: undefined,
@@ -111,65 +112,49 @@ describe('parseCliArguments', () => {
       projectConcurrency: undefined,
       report: true,
       reportOut: undefined,
+      task: [],
       taskConcurrency: undefined,
-      workspace: undefined,
+      workspace: [],
+      workspaceConcurrency: undefined,
     })
   })
 
   it('supports equals form flags and ignores the run command token', () => {
-    expect(parseCliArguments(['run', '--config=vieval.config.ts', '--project=alpha'])).toEqual({
-      attempt: undefined,
-      caseConcurrency: undefined,
+    expect(parseCliArguments(['run', '--config=vieval.config.ts', '--project=alpha'])).toMatchObject({
       configFilePath: 'vieval.config.ts',
-      experiment: undefined,
       json: false,
       project: ['alpha'],
-      projectConcurrency: undefined,
-      report: true,
-      reportOut: undefined,
-      taskConcurrency: undefined,
-      workspace: undefined,
     })
   })
 
   it('normalizes forwarded argv prefixed with --', () => {
-    expect(parseCliArguments(['--', '--json', '--project', 'alpha'])).toEqual({
-      attempt: undefined,
-      caseConcurrency: undefined,
-      configFilePath: undefined,
-      experiment: undefined,
+    expect(parseCliArguments(['--', '--json', '--project', 'alpha'])).toMatchObject({
       json: true,
       project: ['alpha'],
-      projectConcurrency: undefined,
-      report: true,
-      reportOut: undefined,
-      taskConcurrency: undefined,
-      workspace: undefined,
+    })
+  })
+
+  it('parses repeated workspace, task, and case selectors', () => {
+    expect(parseCliArguments(['run', '--workspace', 'raw', '--workspace', 'llm', '--task', 'zh', '--case', 'case #1', '--case', 'case #2*'])).toMatchObject({
+      case: ['case #1', 'case #2*'],
+      task: ['zh'],
+      workspace: ['raw', 'llm'],
     })
   })
 
   it('parses report identity and output flags', () => {
     expect(parseCliArguments([
-      '--workspace',
-      'packages/vieval',
       '--experiment',
       'baseline-v2',
       '--attempt',
       'attempt-03',
       '--report-out',
       '.vieval/reports',
-    ])).toEqual({
+    ])).toMatchObject({
       attempt: 'attempt-03',
-      caseConcurrency: undefined,
-      configFilePath: undefined,
       experiment: 'baseline-v2',
-      json: false,
-      project: [],
-      projectConcurrency: undefined,
       report: true,
       reportOut: '.vieval/reports',
-      taskConcurrency: undefined,
-      workspace: 'packages/vieval',
     })
   })
 
@@ -188,6 +173,8 @@ describe('parseCliArguments', () => {
   it('parses concurrency caps from eval run CLI flags', () => {
     expect(parseCliArguments([
       'run',
+      '--workspace-concurrency',
+      '2',
       '--project-concurrency',
       '3',
       '--task-concurrency',
@@ -198,13 +185,23 @@ describe('parseCliArguments', () => {
       caseConcurrency: 6,
       projectConcurrency: 3,
       taskConcurrency: 4,
+      workspaceConcurrency: 2,
+    })
+  })
+
+  it('parses what a comparison tells the process it starts for one workspace', () => {
+    expect(parseCliArguments(['run', '--comparison-child', '--workspace-id', 'raw', '--invocation', 'invocation-1', '--comparison-id', 'tts', '--cache-root', '/c', '--cache-scope', 'tts', '--cache-namespace', 'v1']).comparisonChild).toEqual({
+      cache: { namespace: 'v1', root: '/c', scope: 'tts' },
+      comparisonId: 'tts',
+      invocationId: 'invocation-1',
+      workspaceId: 'raw',
     })
   })
 })
 
 describe('parseCliArguments viewer flags', () => {
   it('leaves the viewer off unless --with-viewer is passed', () => {
-    expect(parseCliArguments(['run', '--viewer-port', '4000']).viewer).toBeUndefined()
+    expect(parseCliArguments(['run', '--port', '4000']).viewer).toBeUndefined()
   })
 
   it('parses --with-viewer with defaults', () => {
@@ -215,8 +212,8 @@ describe('parseCliArguments viewer flags', () => {
     })
   })
 
-  it('parses viewer port, host, and open flags', () => {
-    expect(parseCliArguments(['run', '--with-viewer', '--viewer-port', '4000', '--viewer-host', '0.0.0.0', '--viewer-open']).viewer).toEqual({
+  it('parses viewer port, host, and open flags with the names `vieval viewer` uses', () => {
+    expect(parseCliArguments(['run', '--with-viewer', '--port', '4000', '--host', '0.0.0.0', '--open']).viewer).toEqual({
       host: '0.0.0.0',
       open: true,
       port: 4000,
@@ -224,8 +221,8 @@ describe('parseCliArguments viewer flags', () => {
   })
 
   it('rejects an invalid viewer port', () => {
-    expect(() => parseCliArguments(['run', '--with-viewer', '--viewer-port', '70000'])).toThrow(
-      'Invalid --viewer-port "70000". Expected an integer from 0 to 65535.',
+    expect(() => parseCliArguments(['run', '--with-viewer', '--port', '70000'])).toThrow(
+      'Invalid --port "70000". Expected an integer from 0 to 65535.',
     )
   })
 })
@@ -259,7 +256,7 @@ describe('runEvalRunCli --with-viewer', () => {
       '--config',
       join(projectDirectory, 'vieval.config.ts'),
       '--with-viewer',
-      '--viewer-port',
+      '--port',
       '4321',
       '--attempt',
       'attempt-viewer',

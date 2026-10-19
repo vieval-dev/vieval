@@ -27,6 +27,10 @@ import { formatHumanDuration } from './format-duration'
 // Changes: no direct WindowRenderer ownership in this task, explicit queued/running/finished task state machine, task/case counters, stable task sorting, and `getWindowRows()` for upcoming CLI wiring.
 
 const POINTER = '❯'
+/** Finished cases the throughput is measured over; enough to smooth single slow cases, small enough to follow a change of pace. */
+const THROUGHPUT_WINDOW_CASES = 50
+/** Finished cases needed before the time left is shown; fewer give an estimate that jumps around. */
+const MIN_CASES_FOR_ESTIMATE = 3
 const TREE_NODE_END = '└'
 const TREE_NODE_LINE = '│'
 const TREE_NODE_MIDDLE = '├'
@@ -130,6 +134,10 @@ export interface SummaryReporterTaskQueuedPayload extends CliReporterTaskQueuedP
    * Total number of cases expected for the task.
    */
   totalCases?: number
+  /**
+   * Workspace of the task, when a comparison shows several workspaces in one window.
+   */
+  workspaceName?: string
 }
 
 /**
@@ -165,11 +173,6 @@ interface ActiveTaskView {
   task: TaskRuntimeState
 }
 
-interface ProgressTimingState {
-  elapsedDurationMs: number
-  estimatedDurationMs?: number
-}
-
 interface SummaryReporterCounterState {
   completed: number
   failed: number
@@ -183,21 +186,27 @@ type SummaryTaskLifecycleState = 'finished' | 'queued' | 'running'
 
 interface TaskRuntimeState {
   caseOrderCounter: number
+  /** The case total came from `task.queued` (`TaskDefinition.caseNames`) or a started case, not only from observation. */
+  caseTotalKnown: boolean
   completedCases: number
   displayName: string
   projectName: string | undefined
   queueOrder: number
   runningCases: Map<string, ActiveCaseState>
   settledCaseIds: Set<string>
+  /** When the task's first case started; a task holding a task slot while it waits for a case slot has none. */
   startedAt: number | undefined
   state: SummaryTaskLifecycleState
   taskId: string
   taskResult: CliReporterTaskState | undefined
   totalCases: number
+  workspaceName: string | undefined
 }
 
 class SummaryReporterStateMachine implements SummaryReporter {
   private readonly caseCounters = createCounterState()
+  /** Finish times of the most recent cases, oldest first, for the throughput behind the time-left estimate. */
+  private readonly caseEndTimes: number[] = []
   /**
    * Case output; finished blocks are held until the run ends so they do not scroll past the live window.
    */
@@ -294,6 +303,10 @@ class SummaryReporterStateMachine implements SummaryReporter {
     task.completedCases += 1
     this.syncTaskTotalCases(task)
     this.caseCounters.completed += 1
+    this.caseEndTimes.push(this.options.getNow())
+    if (this.caseEndTimes.length > THROUGHPUT_WINDOW_CASES) {
+      this.caseEndTimes.shift()
+    }
 
     if (payload.state === 'passed') {
       this.caseCounters.passed += 1
@@ -417,6 +430,7 @@ class SummaryReporterStateMachine implements SummaryReporter {
     this.queueOrderCounter = 0
     resetCounterState(this.taskCounters, payload.totalTasks)
     resetCounterState(this.caseCounters, 0)
+    this.caseEndTimes.length = 0
     this.startedAtMs = this.options.getNow()
     this.startTime = formatTimeString(new Date(this.options.getWallClockNow()))
   }
@@ -481,7 +495,11 @@ class SummaryReporterStateMachine implements SummaryReporter {
 
     task.displayName = payload.displayName ?? task.displayName
     task.projectName = payload.projectName ?? task.projectName
+    task.workspaceName = payload.workspaceName ?? task.workspaceName
     this.caseOutput.onTaskQueued({ displayName: task.displayName, projectName: task.projectName, taskId: task.taskId })
+    if (payload.totalCases != null) {
+      task.caseTotalKnown = true
+    }
     this.syncTaskTotalCases(task, payload.totalCases)
   }
 
@@ -505,7 +523,6 @@ class SummaryReporterStateMachine implements SummaryReporter {
     }
 
     task.state = 'running'
-    task.startedAt ??= this.options.getNow()
   }
 
   /**
@@ -531,8 +548,10 @@ class SummaryReporterStateMachine implements SummaryReporter {
     for (const { slowCases, task } of activeTasks) {
       const suffix = task.state === 'queued'
         ? c.dim(' [queued]')
-        : formatTaskProgressSuffix(task, now)
-      const badge = formatProjectBadge(task.projectName, this.options.isTTY)
+        : task.startedAt == null
+          ? c.dim(` 0/${formatTaskTotal(task)}, waiting for a case slot`)
+          : formatTaskProgressSuffix(task, now)
+      const badge = formatProjectBadge(task.workspaceName == null ? task.projectName : `${task.workspaceName}/${task.projectName ?? ''}`, this.options.isTTY)
       rows.push(c.bold(c.yellow(` ${POINTER} `)) + badge + task.displayName + c.dim(suffix))
 
       for (const [index, activeCase] of slowCases.entries()) {
@@ -582,31 +601,53 @@ class SummaryReporterStateMachine implements SummaryReporter {
     const runElapsedDurationMs = Math.max(0, now - this.startedAtMs)
     const taskRunningCount = countRunningTasks(this.tasks.values())
     const caseRunningCount = countRunningCases(this.tasks.values())
+    const totalsKnown = [...this.tasks.values()].every(task => task.caseTotalKnown || task.state === 'finished')
+    const projects = summarizeGroups(this.tasks.values(), task => `${task.workspaceName ?? ''}/${task.projectName ?? ''}`)
+    const workspaces = summarizeGroups(this.tasks.values(), task => task.workspaceName ?? '')
 
     return [
-      padSummaryTitle('Tasks') + formatCounterState(
-        this.taskCounters,
-        taskRunningCount,
-        {
-          elapsedDurationMs: runElapsedDurationMs,
-          estimatedDurationMs: estimateTotalDurationMs(this.taskCounters.completed, this.taskCounters.total, runElapsedDurationMs),
-        },
-      ),
-      padSummaryTitle('Cases') + formatCounterState(
-        this.caseCounters,
-        caseRunningCount,
-        {
-          elapsedDurationMs: runElapsedDurationMs,
-          estimatedDurationMs: estimateTotalDurationMs(this.caseCounters.completed, this.caseCounters.total, runElapsedDurationMs),
-        },
-      ),
+      ...(workspaces.total > 1
+        ? [padSummaryTitle('Workspaces') + formatCounterState(workspaces, workspaces.running, true)]
+        : []),
+      ...(projects.total > 1
+        ? [padSummaryTitle('Projects') + formatCounterState(projects, projects.running, true)]
+        : []),
+      // A comparison learns about tasks while its workspaces start, so the total is at least the tasks seen.
+      padSummaryTitle('Tasks') + formatCounterState({ ...this.taskCounters, total: Math.max(this.taskCounters.total, this.tasks.size) }, taskRunningCount, true),
+      padSummaryTitle('Cases') + formatCounterState(this.caseCounters, caseRunningCount, totalsKnown),
       padSummaryTitle('Concurrency') + formatActiveConcurrencyState({
         caseRunningCount,
         taskRunningCount,
       }),
-      padSummaryTitle('Start at') + this.startTime,
-      padSummaryTitle('Duration') + formatHumanDuration(runElapsedDurationMs),
+      padSummaryTitle('Time') + formatRunTiming({
+        elapsedDurationMs: runElapsedDurationMs,
+        leftDurationMs: totalsKnown ? this.estimateCasesLeftMs(now) : undefined,
+        startTime: this.startTime,
+        wallClockNow: this.options.getWallClockNow(),
+      }),
     ]
+  }
+
+  /**
+   * Time until every planned case has finished, from the recent case throughput.
+   *
+   * Throughput is taken over the last {@link THROUGHPUT_WINDOW_CASES} finished cases rather than the whole run, so a slow
+   * start (model warm-up, module loading) or a change of concurrency stops skewing the estimate once enough cases ended.
+   */
+  private estimateCasesLeftMs(now: number): number | undefined {
+    const left = this.caseCounters.total - this.caseCounters.completed
+    if (left <= 0) {
+      return 0
+    }
+    if (this.caseEndTimes.length < MIN_CASES_FOR_ESTIMATE) {
+      return undefined
+    }
+
+    // With a full window, measure from the oldest kept finish; before that, from the run start.
+    const windowStart = this.caseEndTimes.length === THROUGHPUT_WINDOW_CASES ? this.caseEndTimes[0]! : this.startedAtMs
+    const windowCases = this.caseEndTimes.length === THROUGHPUT_WINDOW_CASES ? this.caseEndTimes.length - 1 : this.caseEndTimes.length
+    const windowMs = Math.max(1, now - windowStart)
+    return Math.round((left * windowMs) / Math.max(1, windowCases))
   }
 
   private getOrCreateTaskState(taskId: string): TaskRuntimeState {
@@ -618,6 +659,7 @@ class SummaryReporterStateMachine implements SummaryReporter {
 
     const created: TaskRuntimeState = {
       caseOrderCounter: 0,
+      caseTotalKnown: false,
       completedCases: 0,
       displayName: taskId,
       projectName: undefined,
@@ -629,6 +671,7 @@ class SummaryReporterStateMachine implements SummaryReporter {
       taskId,
       taskResult: undefined,
       totalCases: 0,
+      workspaceName: undefined,
     }
 
     this.queueOrderCounter += 1
@@ -786,29 +829,14 @@ function createCounterState(): SummaryReporterCounterState {
   }
 }
 
-function estimateTaskDurationMs(task: TaskRuntimeState, now: number): number | undefined {
-  if (task.startedAt == null) {
+/** Time left for one task from its own average case duration since its first case started. */
+function estimateTaskLeftMs(task: TaskRuntimeState, now: number): number | undefined {
+  if (task.startedAt == null || task.completedCases === 0 || !task.caseTotalKnown) {
     return undefined
   }
 
-  return estimateTotalDurationMs(
-    task.completedCases,
-    task.totalCases,
-    Math.max(0, now - task.startedAt),
-  )
-}
-
-function estimateTotalDurationMs(
-  completedCount: number,
-  totalCount: number,
-  elapsedDurationMs: number,
-): number | undefined {
-  if (completedCount === 0 || totalCount === 0) {
-    return undefined
-  }
-
-  const averageDurationMs = elapsedDurationMs / completedCount
-  return Math.round(averageDurationMs * totalCount)
+  const averageDurationMs = Math.max(0, now - task.startedAt) / task.completedCases
+  return Math.round(averageDurationMs * Math.max(0, task.totalCases - task.completedCases))
 }
 
 function formatActiveConcurrencyState(options: {
@@ -828,7 +856,7 @@ function formatActiveConcurrencyState(options: {
 function formatCounterState(
   counter: SummaryReporterCounterState,
   runningCount: number,
-  timing: ProgressTimingState,
+  totalKnown: boolean,
 ): string {
   const plannedCount = Math.max(0, counter.total - counter.completed - runningCount)
 
@@ -839,7 +867,7 @@ function formatCounterState(
     counter.failed > 0 ? c.bold(c.red(`${counter.failed} failed`)) : c.dim(`${counter.failed} failed`),
     counter.timeout > 0 ? c.bold(c.yellow(`${counter.timeout} timeout`)) : c.dim(`${counter.timeout} timeout`),
     counter.skipped > 0 ? c.yellow(`${counter.skipped} skipped`) : c.dim(`${counter.skipped} skipped`),
-  ].join(c.dim(' | ')) + c.gray(` (${counter.total})`) + formatTimingSuffix(timing)
+  ].join(c.dim(' | ')) + c.gray(` (${counter.total}${totalKnown ? '' : '+'})`)
 }
 
 function formatDuration(durationMs: number): string {
@@ -871,33 +899,53 @@ function formatRetrySuffix(activeCase: ActiveCaseState): string {
   return c.dim(` retry ${activeCase.retryIndex}/${activeCase.autoRetry}`)
 }
 
+/**
+ * Formats the run's one timing row: start, elapsed, and, once the estimate is known, time left and the end time.
+ *
+ * Before:
+ * - `{ elapsed: 190_000, left: 100_000, start: '07:49:58', now: 07:53:08 }`
+ * - `{ elapsed: 5_000, left: undefined, ... }`
+ *
+ * After:
+ * - `started 07:49:58 · elapsed 3 minutes 10 seconds · ~1 minute 40 seconds left · ETA 07:54:48`
+ * - `started 07:49:58 · elapsed 5 seconds · ~? left`
+ */
+function formatRunTiming(options: { elapsedDurationMs: number, leftDurationMs: number | undefined, startTime: string, wallClockNow: number }): string {
+  const parts = [`started ${options.startTime}`, `elapsed ${formatHumanDuration(options.elapsedDurationMs)}`]
+  if (options.leftDurationMs == null) {
+    parts.push('~? left')
+  }
+  else {
+    parts.push(`~${formatHumanDuration(options.leftDurationMs)} left`, `ETA ${formatTimeString(new Date(options.wallClockNow + options.leftDurationMs))}`)
+  }
+  return parts.join(c.dim(' · '))
+}
+
 function formatTaskProgressSuffix(task: TaskRuntimeState, now: number): string {
   const elapsedDurationMs = task.startedAt == null
     ? 0
     : Math.max(0, now - task.startedAt)
+  const leftDurationMs = estimateTaskLeftMs(task, now)
+  const timing = [`elapsed ${formatHumanDuration(elapsedDurationMs)}`, ...(leftDurationMs == null ? [] : [`~${formatHumanDuration(leftDurationMs)} left`])]
 
-  return ` ${task.completedCases}/${task.totalCases}, ${task.runningCases.size} ${pluralize('case', task.runningCases.size)} running${formatTimingSuffix({
-    elapsedDurationMs,
-    estimatedDurationMs: estimateTaskDurationMs(task, now),
-  })}`
+  return ` ${task.completedCases}/${formatTaskTotal(task)}, ${task.runningCases.size} ${pluralize('case', task.runningCases.size)} running (${timing.join(', ')})`
+}
+
+function formatTaskTotal(task: TaskRuntimeState): string {
+  if (task.caseTotalKnown) {
+    return String(task.totalCases)
+  }
+  // Only cases seen so far: more may come.
+  return task.totalCases > 0 ? `${task.totalCases}+` : '?'
 }
 
 function formatTimeString(date: Date): string {
   return date.toTimeString().split(' ')[0] ?? ''
 }
 
-function formatTimingSuffix(timing: ProgressTimingState): string {
-  const parts = [`elapsed ${formatHumanDuration(timing.elapsedDurationMs)}`]
-
-  if (timing.estimatedDurationMs != null) {
-    parts.push(`estimated ${formatHumanDuration(timing.estimatedDurationMs)}`)
-  }
-
-  return ` (${parts.join(', ')})`
-}
-
 function padSummaryTitle(label: string): string {
-  return `${c.dim(label.padEnd(8))} `
+  // Wide enough for the longest label ("Concurrency"), so every row starts its values in one column.
+  return `${c.dim(label.padEnd(11))} `
 }
 
 function pluralize(noun: string, count: number): string {
@@ -911,6 +959,35 @@ function resetCounterState(counter: SummaryReporterCounterState, total: number):
   counter.skipped = 0
   counter.timeout = 0
   counter.total = total
+}
+
+/**
+ * Counters of projects or workspaces derived from task states: a group runs while any of its tasks runs, and fails
+ * when any of its tasks failed. Groups are named by `task.queued`, so one with no scheduled task is not counted.
+ */
+function summarizeGroups(tasks: Iterable<TaskRuntimeState>, groupOf: (task: TaskRuntimeState) => string): SummaryReporterCounterState & { running: number } {
+  const byProject = Map.groupBy([...tasks], groupOf)
+  const counter = { ...createCounterState(), running: 0, total: byProject.size }
+  for (const projectTasks of byProject.values()) {
+    if (projectTasks.some(task => task.state === 'running')) {
+      counter.running += 1
+      continue
+    }
+    if (!projectTasks.every(task => task.state === 'finished')) {
+      continue
+    }
+    counter.completed += 1
+    if (projectTasks.some(task => task.taskResult === 'failed')) {
+      counter.failed += 1
+    }
+    else if (projectTasks.every(task => task.taskResult === 'skipped')) {
+      counter.skipped += 1
+    }
+    else {
+      counter.passed += 1
+    }
+  }
+  return counter
 }
 
 function sumTaskCaseTotals(tasks: Iterable<TaskRuntimeState>): number {

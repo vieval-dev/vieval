@@ -2,7 +2,6 @@ import process from 'node:process'
 
 import meow from 'meow'
 
-import { runCompareCliOrExit } from './compare'
 import { runEvalRunCli } from './eval-run'
 import { runReportAnalyzeCli } from './report-analyze'
 import { runReportCompareCli } from './report-case-compare'
@@ -19,7 +18,7 @@ export { parseViewerCliArguments, runViewerCli } from './viewer'
 export type { RunReadyContext, RunReadyDisposer, RunReadyHook, StartViewerOptions, ViewerHost, ViewerModule } from './viewer-host'
 export { importViewer, VIEWER_PACKAGE_NAME } from './viewer-host'
 
-type Command = 'compare' | 'report' | 'run' | 'viewer'
+type Command = 'report' | 'run' | 'viewer'
 
 interface ParsedTopLevelCliArguments {
   command: 'help' | Command
@@ -33,15 +32,14 @@ const topLevelHelpText = `
     $ vieval <command> [options]
 
   Commands
-    run            Discover and execute eval projects
-    compare        Compare multiple workspaces/methods on one benchmark
+    run            Run a workspace (lists projects) or a comparison (lists workspaces)
     report         Analyze and index generated report artifacts
     viewer         Browse reports (and runs still being written) in the web viewer
 
   Examples
     $ vieval run
     $ vieval run --config vieval.config.ts --project chess --json --report-out .vieval/reports
-    $ vieval compare --config vieval.config.ts --comparison agent-memory
+    $ vieval run --config evals/agent-memory/vieval.config.ts --workspace mem9 --with-viewer --open
     $ vieval report analyze .vieval/reports/my-run
     $ vieval report index .vieval/reports --output .vieval/reports/index/runs.jsonl
     $ vieval viewer .vieval/reports
@@ -78,9 +76,9 @@ export function parseTopLevelCliArguments(argv: readonly string[]): ParsedTopLev
     }
   }
 
-  if (command !== 'run' && command !== 'report' && command !== 'compare' && command !== 'viewer') {
+  if (command !== 'run' && command !== 'report' && command !== 'viewer') {
     const receivedCommand = command ?? '(none)'
-    throw new Error(`Unsupported vieval command "${receivedCommand}". Expected "run", "compare", "report", or "viewer".`)
+    throw new Error(`Unsupported vieval command "${receivedCommand}". Expected "run", "report", or "viewer".`)
   }
 
   return {
@@ -96,7 +94,7 @@ export function parseTopLevelCliArguments(argv: readonly string[]): ParsedTopLev
  *
  * published executable (`../bin/vieval`)
  *   -> {@link runTopLevelCli}
- *     -> {@link runEvalRunCli} / report CLI / compare CLI / {@link runViewerCli}
+ *     -> {@link runEvalRunCli} / report CLI / {@link runViewerCli}
  *
  * Use when:
  * - the executable or tests need import-safe CLI orchestration
@@ -140,11 +138,6 @@ export async function runTopLevelCli(argv: readonly string[]): Promise<void> {
     }
 
     throw new Error(`Unsupported vieval report command "${reportSubcommand ?? '(none)'}". Expected "analyze", "index", "cases", or "compare".`)
-  }
-
-  if (parsed.command === 'compare') {
-    await runCompareCliOrExit(parsed.commandArgv)
-    return
   }
 
   if (parsed.command === 'viewer') {

@@ -35,6 +35,8 @@ export interface CaseTable {
   /** Numeric metrics whose largest value is far above the median; charts draw them on a symlog scale. */
   heavyTailed: Set<string>
   rows: CaseRow[]
+  /** Cases per value of each category axis, most frequent first (`state` in its usual order, passed first). */
+  valueCounts: Record<string, Map<string, number>>
 }
 
 /** Metrics folded into one representative because they carry the same signal. */
@@ -45,6 +47,8 @@ export interface MetricGroup {
   representative: string
 }
 
+/** Case states in the order the charts list them: outcomes first, then cases that did not finish. */
+const STATE_ORDER = ['passed', 'failed', 'timeout', 'skipped', 'running', 'unfinished']
 /** Correlation above which two metrics count as the same signal (token totals that grow with every step, …). */
 const SAME_SIGNAL_R = 0.95
 /** Categories with more values than this are identifiers (hashes, paths), not a breakdown worth an axis. */
@@ -183,17 +187,26 @@ export function buildCaseTable(cases: readonly CaseNode[], metrics: MetricsRespo
 
   const categories: string[] = []
   const duplicates: CaseTable['duplicates'] = []
+  const valueCounts: CaseTable['valueCounts'] = {}
   for (const name of new Set(rows.flatMap(row => Object.keys(row.categories)))) {
-    const distinct = new Set(rows.map(row => row.categories[name]).filter(value => value != null)).size
-    if (name !== 'state' && (distinct < 2 || distinct > MAX_CATEGORY_VALUES))
+    const counts = new Map<string, number>()
+    for (const row of rows) {
+      const value = row.categories[name]
+      if (value != null)
+        counts.set(value, (counts.get(value) ?? 0) + 1)
+    }
+    if (name !== 'state' && (counts.size < 2 || counts.size > MAX_CATEGORY_VALUES))
       continue
     const same = categories.find(other => sameSplit(rows, other, name))
-    if (same == null)
-      categories.push(name)
-    else
+    if (same != null) {
       duplicates.push({ name, of: same })
+      continue
+    }
+    categories.push(name)
+    const order = name === 'state' ? (value: string) => STATE_ORDER.indexOf(value) : (value: string) => -counts.get(value)!
+    valueCounts[name] = new Map([...counts].sort(([a], [b]) => order(a) - order(b)))
   }
-  return { categories, constants, duplicates, groups, heavyTailed, rows }
+  return { categories, constants, duplicates, groups, heavyTailed, rows, valueCounts }
 }
 
 /**
@@ -317,6 +330,20 @@ function sameSplit(rows: readonly CaseRow[], left: string, right: string): boole
 
 /** Scores are the outcome itself, so ranking them by how they separate the outcome would explain nothing. */
 const OUTCOME_METRICS = new Set(['exact', 'judge'])
+
+/**
+ * Stable offset in `-0.5..0.5` for one case, so a dot keeps its spot inside a band (or a line its place on a category
+ * axis) across redraws instead of jumping on every update. `salt` gives a case independent offsets per direction.
+ *
+ * Use when:
+ * - spreading many cases that share one value (a category, the free direction of a strip) so they stay countable
+ */
+export function caseOffset(key: string, salt = 0): number {
+  let hash = (salt + 1) * 2654435761
+  for (let index = 0; index < key.length; index++)
+    hash = Math.imul(hash ^ key.charCodeAt(index), 2654435761)
+  return ((hash >>> 0) % 1000) / 1000 - 0.5
+}
 
 /**
  * Ranks numeric metrics by how well they separate failed from passed cases.

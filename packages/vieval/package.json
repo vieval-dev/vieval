@@ -89,7 +89,6 @@
     "@moeru/eventa": "catalog:",
     "@moeru/std": "catalog:",
     "@opentelemetry/api": "catalog:",
-    "@pnpm/find-workspace-dir": "catalog:",
     "@vitest/expect": "catalog:vitest",
     "@xsai-ext/providers": "catalog:",
     "@xsai/generate-text": "catalog:",
