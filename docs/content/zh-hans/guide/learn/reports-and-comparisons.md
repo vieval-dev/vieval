@@ -89,6 +89,16 @@ vieval report analyze <报告目录>
 
 `analyze` 读取运行摘要和事件。它可以按工作区、项目、实验、尝试、运行、事件、错误文本，以及运行或评测矩阵的选中值筛选，再按工作区和实验汇总结果。`--task-state` 和 `--case-state` 目前接受 `passed`、`failed` 或 `skipped`；`--case-state` 暂不接受 `timeout`。`--attempt-index <n>` 只保留至少有一个用例运行过第 `n` 次自动尝试的运行。JSON、JSONL 和 CSV 输出中的每个运行行和实验分组都包含 `autoAttemptedCases`（运行过多次尝试的用例数；后续尝试会重新运行任务的全部用例）和 `maxAttemptIndex`（没有自动尝试时为 `null`）。`--format table|json|jsonl|csv` 用于选择标准输出格式。
 
+::: code-group
+
+```bash [终端 — 列出尝试]
+vieval report attempts --config vieval.config.ts
+```
+
+:::
+
+`attempts` 按时间从新到旧列出报告目录中的尝试：每个实验和尝试一行，显示涉及的工作区、通过、失败和没有结果的用例数，以及覆盖率。"←" 标记 `vieval run --resume` 不指定标识时会继续的那次尝试；备注列显示该尝试继续自哪次尝试、是否被中断，以及没来得及写入摘要就被终止的运行。可以传入报告目录，或用 `--config` 列出配置文件旁边的报告；用 `--experiment` 和 `--workspace` 筛选，用 `--format table|json` 选择输出格式。
+
 ## 比较两组已有报告
 
 比较命令的第一个目录是基线，第二个目录是候选方案：

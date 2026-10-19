@@ -145,6 +145,33 @@ describe('runComparison', () => {
     expect(comparisonExitCode(output)).toBe(1)
   }, 60_000)
 
+  /**
+   * @example
+   * a comparison where one workspace errored, then `--resume`: every workspace continues the same
+   * attempt, and only the cases without a result run again.
+   */
+  it('resumes the cases without a result of every workspace, continuing one attempt', async () => {
+    const directory = await createComparisonFixture({ workspaces: [{ name: 'raw' }, { env: { FAIL: '1' }, name: 'rule' }] })
+    const configFilePath = join(directory, 'vieval.config.ts')
+    const first = await runComparison({ attempt: 'attempt-first', configFilePath, reporter: quietReporter, resolveCommand: sourceCommand, workspace: ['raw', 'rule-env'] })
+    expect(first.workspaces.map(workspace => workspace.output?.projects[0]?.caseSummary?.errored)).toEqual([0, 2])
+
+    // The provider of `rule-env` recovered. A new config file, because this process already imported the first one
+    // (jiti caches it); its directory, comparison id, and so report root and experiment stay the same.
+    const recoveredConfigFilePath = join(directory, 'vieval.recovered.config.ts')
+    await writeFile(recoveredConfigFilePath, (await readFile(configFilePath, 'utf-8')).replace('"FAIL":"1"', '"FAIL":"0"'), 'utf-8')
+    const resumed = await runComparison({ attempt: 'attempt-resumed', configFilePath: recoveredConfigFilePath, reporter: quietReporter, resolveCommand: sourceCommand, resume: 'latest', workspace: ['raw', 'rule-env'] })
+
+    const [raw, rule] = resumed.workspaces
+    // `raw` had a result for every case, so its only task was skipped.
+    expect(raw!.output!.projects[0]!.taskCount).toBe(0)
+    expect(rule!.output!.projects[0]!.caseSummary).toMatchObject({ errored: 0, passed: 2, total: 2 })
+    for (const workspace of resumed.workspaces) {
+      expect(workspace.output!.resumedFrom).toBe('attempt-first')
+    }
+    expect(comparisonExitCode(resumed)).toBe(0)
+  }, 60_000)
+
   it('fails when a task selector matches nothing in any workspace', async () => {
     const directory = await createComparisonFixture({ workspaces: [{ name: 'raw' }, { name: 'rule' }] })
 

@@ -169,6 +169,24 @@ export async function resolveRunSummaryPaths(reportPath: string): Promise<string
 }
 
 /**
+ * Normalizes one identity id (workspace, experiment, attempt) into a safe report path segment.
+ *
+ * Before:
+ * - " attempt 2026/10/19 ", "", "matrix:model=a"
+ *
+ * After:
+ * - "attempt-2026-10-19", "default", "matrix-model-a"
+ */
+export function sanitizeIdentitySegment(value: string): string {
+  const normalized = value.trim()
+  if (normalized.length === 0) {
+    return 'default'
+  }
+
+  return normalized.replace(/[^\w.-]+/g, '-')
+}
+
+/**
  * Creates a compact summary row for one run artifact.
  *
  * Use when:
@@ -254,15 +272,6 @@ export async function writeRunReportArtifacts(
   await writeFile(resolve(reportDirectory, 'otlp', 'metrics.json'), `${JSON.stringify(otlp.metrics, null, 2)}\n`, 'utf-8')
 
   return reportDirectory
-}
-
-function sanitizeIdentitySegment(value: string): string {
-  const normalized = value.trim()
-  if (normalized.length === 0) {
-    return 'default'
-  }
-
-  return normalized.replace(/[^\w.-]+/g, '-')
 }
 
 /**

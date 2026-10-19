@@ -1,3 +1,5 @@
+import type { ResumeHintInput } from './resume'
+import type { CliProjectSummary } from './run'
 import type { RunReadyHook, ViewerHost, ViewerModule } from './viewer-host'
 
 import process from 'node:process'
@@ -13,6 +15,7 @@ import packageJSON from '../../package.json'
 import { comparisonExitCode, formatComparisonOutput, openComparisonChannel, readComparisonEnvOverrides, runComparison } from './comparison'
 import { resolveVievalConfigMode } from './config'
 import { exitCodeFromSignal } from './interrupt'
+import { formatResumeHint, LATEST_ATTEMPT } from './resume'
 import { formatVievalCliRunOutput, hasRunFailures, runVievalCli } from './run'
 import { DEFAULT_VIEWER_HOST, DEFAULT_VIEWER_PORT, importViewer } from './viewer-host'
 
@@ -41,6 +44,7 @@ interface ParsedCliArguments {
   projectConcurrency?: number
   report: boolean
   reportOut?: string
+  resume?: string
   task: string[]
   taskConcurrency?: number
   viewer?: ParsedViewerArguments
@@ -79,6 +83,7 @@ const evalRunHelpText = `
     --config     Config file path (default: nearest vieval.config.*)
     --experiment Experiment id used in report artifacts
     --attempt    Attempt id used in report artifacts
+    --resume [id]  Continue an attempt (default: the latest): run, as a new attempt, its cases without a result
     --workspace-concurrency Most workspaces of a comparison running at once (default: all)
     --project-concurrency   Most projects running at once (default: 1 without a task or case pool, else unbounded)
     --task-concurrency      Most tasks running at once in the whole run
@@ -137,6 +142,7 @@ export function parseCliArguments(argv: readonly string[]): ParsedCliArguments {
       // meow turns `--no-report` into `report: false`.
       report: { default: true, type: 'boolean' },
       reportOut: { type: 'string' },
+      resume: { type: 'string' },
       task: { isMultiple: true, type: 'string' },
       taskConcurrency: { type: 'number' },
       withViewer: { default: false, type: 'boolean' },
@@ -169,6 +175,8 @@ export function parseCliArguments(argv: readonly string[]): ParsedCliArguments {
     projectConcurrency: flags.projectConcurrency,
     report: flags.report,
     reportOut: flags.reportOut,
+    // `--resume` alone continues the latest attempt.
+    resume: flags.resume === '' ? LATEST_ATTEMPT : flags.resume,
     task: flags.task ?? [],
     taskConcurrency: flags.taskConcurrency,
     ...(flags.withViewer
@@ -254,12 +262,20 @@ export async function runEvalRunCli(argv: readonly string[], runtime: EvalRunCli
         projectConcurrency: parsed.projectConcurrency,
         report: parsed.report,
         reportOut: parsed.reportOut,
+        resume: parsed.resume,
         task: parsed.task,
         taskConcurrency: parsed.taskConcurrency,
         workspace: parsed.workspace,
         workspaceConcurrency: parsed.workspaceConcurrency,
       })
       process.stdout.write(`${parsed.json ? JSON.stringify(output, null, 2) : formatComparisonOutput(output)}\n`)
+      const workspaceOutputs = output.workspaces.flatMap(workspace => workspace.output == null ? [] : [workspace.output])
+      writeResumeHint(parsed, {
+        attemptId: output.attemptId,
+        interruptSignal: output.interruptSignal,
+        noResult: countNoResult(workspaceOutputs.flatMap(workspaceOutput => workspaceOutput.projects)),
+        unfinishedWorkspaces: output.workspaces.length - workspaceOutputs.length,
+      })
       process.exitCode = comparisonExitCode(output)
     }
     else {
@@ -276,12 +292,20 @@ export async function runEvalRunCli(argv: readonly string[], runtime: EvalRunCli
         projectConcurrency: parsed.projectConcurrency,
         report: parsed.report,
         reportOut: parsed.reportOut,
+        resume: parsed.resume,
         task: parsed.task,
         taskConcurrency: parsed.taskConcurrency,
         ...(viewer == null ? {} : { onRunReady: viewer.onRunReady }),
       })
 
       process.stdout.write(`${parsed.json ? JSON.stringify(output, null, 2) : formatVievalCliRunOutput(output)}\n`)
+      if (output.attemptId != null) {
+        writeResumeHint(parsed, {
+          attemptId: output.attemptId,
+          interruptSignal: output.interruptSignal,
+          noResult: countNoResult(output.projects),
+        })
+      }
       // An interrupted run exits like a process ended by that signal, so shells and CI see the interrupt.
       if (output.interruptSignal != null) {
         process.exitCode = exitCodeFromSignal(output.interruptSignal)
@@ -298,6 +322,14 @@ export async function runEvalRunCli(argv: readonly string[], runtime: EvalRunCli
   const host = viewer?.getHost()
   if (host != null) {
     await serveUntilClosed(host)
+  }
+}
+
+/** Counts the cases of finished projects that ended without a result. */
+function countNoResult(projects: readonly CliProjectSummary[]): { errored: number, timeout: number } {
+  return {
+    errored: projects.reduce((sum, project) => sum + (project.caseSummary?.errored ?? 0), 0),
+    timeout: projects.reduce((sum, project) => sum + (project.caseSummary?.timeout ?? 0), 0),
   }
 }
 
@@ -389,6 +421,7 @@ async function runComparisonChild(parsed: ParsedCliArguments, child: ParsedCompa
       report: parsed.report,
       reporter: { isTTY: false, writeOutput: () => {} },
       reportOut: parsed.reportOut,
+      resume: parsed.resume,
       // The comparison checks that its selectors match in at least one workspace.
       selectorsMayMatchNothing: true,
       ...(child.cache == null ? {} : { sharedCache: child.cache }),
@@ -429,4 +462,33 @@ function writeCliError(error: unknown): void {
   const errorMessage = errorMessageFrom(error) ?? 'Unknown CLI failure.'
   process.stderr.write(`[${packageJSON.name}] ${errorMessage}\n`)
   process.exitCode = 1
+}
+
+/**
+ * Prints the command that resumes the cases without a result, so a user who pressed Ctrl+C or hit provider errors
+ * can copy it instead of looking up the attempt id. JSON output stays machine-readable, so it gets no hint.
+ */
+function writeResumeHint(
+  parsed: ParsedCliArguments,
+  ended: Pick<ResumeHintInput, 'attemptId' | 'interruptSignal' | 'noResult' | 'unfinishedWorkspaces'>,
+): void {
+  if (parsed.json) {
+    return
+  }
+  const hint = formatResumeHint({
+    ...ended,
+    cwd: process.cwd(),
+    reportEnabled: parsed.report,
+    selection: {
+      case: parsed.case,
+      configFilePath: parsed.configFilePath,
+      experiment: parsed.experiment,
+      project: parsed.project,
+      task: parsed.task,
+      workspace: parsed.workspace,
+    },
+  })
+  if (hint != null) {
+    process.stdout.write(`\n${hint}\n`)
+  }
 }

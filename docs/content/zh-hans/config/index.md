@@ -39,6 +39,7 @@ Vieval 会从执行命令时的工作目录开始逐级向上查找最近的 `vi
 - `--workspace`（仅用于比较）、`--project`、`--task` 和 `--case` 选择要运行的工作区、项目、任务和用例。
 - `--workspace-concurrency`、`--project-concurrency`、`--task-concurrency` 和 `--case-concurrency` 设置整个运行的并发上限，不会调高配置中写明的值。
 - `--experiment` 和 `--attempt` 设置报告中的标识。
+- `--resume [attemptId]` 继续之前的某次尝试（默认最近一次）：作为一次新的尝试，只运行其中没有结果的用例。
 - `--json` 改变标准输出格式，`--report-out` 修改报告根目录，`--no-report` 关闭报告。
 
 这些参数只影响对应命令，不能用于随意覆盖配置文件中的其他字段。

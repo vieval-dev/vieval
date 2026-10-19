@@ -71,6 +71,12 @@ vieval report analyze <report-directory>
 
 `analyze` reads run summaries and events, filters runs, and rolls them up by workspace and experiment. Its filters include workspace, project, experiment, attempt, run, event or error text, and run/eval matrix selectors. `--task-state` and `--case-state` currently accept `passed`, `failed`, or `skipped`; `timeout` is not currently accepted by `--case-state`. `--attempt-index <n>` keeps runs where at least one case ran automatic attempt `n`. Each run row and experiment group in JSON, JSONL, and CSV output includes `autoAttemptedCases` (cases that ran in more than one attempt; an additional attempt reruns every case of the task) and `maxAttemptIndex` (`null` without automatic attempts). `--format table|json|jsonl|csv` controls stdout.
 
+```bash [Terminal — list attempts]
+vieval report attempts --config vieval.config.ts
+```
+
+`attempts` lists the attempts in a report root, newest first: per experiment and attempt, the workspaces, the passed, failed, and no-result case counts, and the coverage. "←" marks the attempt that `vieval run --resume` continues without an id; notes show which attempt an attempt resumed, interrupts, and runs killed before they wrote a summary. Pass a report root, or `--config` to list the reports next to it; filter with `--experiment` and `--workspace`, and choose `--format table|json`.
+
 ## Compare two existing report sets
 
 The report comparison command requires a left baseline and a right candidate:

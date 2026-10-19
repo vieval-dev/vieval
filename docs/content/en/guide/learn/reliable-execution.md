@@ -146,6 +146,28 @@ Attempts measure nondeterministic reliability because every completed attempt co
 
 `timeout` is measured separately for each case try. When it expires, Vieval marks that try as `timeout`, aborts the case's `signal`, and may proceed to a configured retry or later attempt. Cancellation is cooperative: pass the signal to downstream operations. Code that ignores it may continue external side effects after Vieval has stopped accepting its scores and metrics.
 
+### Resume an attempt
+
+Retries happen inside one attempt. When a provider stays down for longer, many cases end `errored` or `timeout`. Fix
+the cause, then run only those cases again as a new attempt:
+
+```sh
+vieval run --config vieval.config.ts --resume
+```
+
+`--resume [attemptId]` reads the cases of that attempt of the same experiment from the reports; without an id, it
+resumes the latest one. It runs every case without a result: errored, timed out, or never run because the attempt was interrupted. Cases that passed
+or failed keep their result and do not run again; a task whose cases all have a result is skipped. The latest attempt is the
+attempt directory of the experiment that changed last. In a comparison, it is resolved once, so every workspace
+resumes the same attempt. The new run records the resumed attempt as `resumedFrom` in `run-summary.json`.
+
+When a run ends interrupted or with cases without a result, `vieval run` prints the resume command for that attempt
+by id, with the same `--config`, `--workspace`, `--project`, `--task`, and `--case` selectors, ready to copy. To find
+an attempt later, run `vieval report attempts`.
+
+Finished steps that the task cached return from the cache, so resuming sends only the calls that failed. Resuming
+needs reports, because it reads the earlier attempt from them, and a new `--attempt` id (the default is a new timestamp).
+
 ## Cache deterministic setup artifacts
 
 Task callbacks receive a filesystem-backed cache through `context.cache`. It is an explicit file API, not automatic memoization:

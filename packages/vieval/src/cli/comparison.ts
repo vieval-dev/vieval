@@ -26,7 +26,8 @@ import packageJSON from '../../package.json'
 import { runEnded, runStarted } from '../events'
 import { detectCliConfigMode, loadRawVievalConfig, supportedConfigFileNames } from './config'
 import { exitCodeFromSignal, listenForInterrupt } from './interrupt'
-import { resolveRunReportDirectory } from './report-artifacts'
+import { resolveRunReportDirectory, sanitizeIdentitySegment } from './report-artifacts'
+import { resolveResumedAttemptId } from './resume'
 import { createRunReporter, forwardRunEventToReporter, hasRunFailures } from './run'
 
 /**
@@ -133,6 +134,11 @@ export interface RunComparisonOptions {
    * @default node with the bin of the `vieval` the workspace resolves (see {@link resolveWorkspaceVieval})
    */
   resolveCommand?: (workspace: ComparisonWorkspace) => string[]
+  /**
+   * Attempt of the comparison to continue, or `latest`: every workspace runs, as a new attempt, only its cases
+   * without a result there. `latest` is resolved once across all workspaces, so they all continue the same attempt.
+   */
+  resume?: string
   task?: string[]
   taskConcurrency?: number
   workspace?: string[]
@@ -202,7 +208,7 @@ export async function loadComparison(options: { configFilePath?: string, cwd?: s
 
   const config = loaded.config as CliComparisonConfig
   const directory = dirname(loaded.configFilePath)
-  const id = sanitizeSegment(config.id ?? basename(directory))
+  const id = sanitizeIdentitySegment(config.id ?? basename(directory))
   const excludes = config.workspaces.filter((entry): entry is string => typeof entry === 'string' && entry.startsWith('!')).map(entry => entry.slice(1))
   const workspaces: ComparisonWorkspace[] = []
 
@@ -228,7 +234,7 @@ export async function loadComparison(options: { configFilePath?: string, cwd?: s
       workspaces.push({
         configFilePath,
         env: { ...config.env, ...explicit?.env },
-        id: sanitizeSegment(explicit?.id ?? basename(root)),
+        id: sanitizeIdentitySegment(explicit?.id ?? basename(root)),
         root,
       })
     }
@@ -345,9 +351,20 @@ export async function runComparison(options: RunComparisonOptions = {}): Promise
   // Resolve every command first, so a workspace without vieval fails the comparison before anything runs.
   const commands = new Map(workspaces.map(workspace => [workspace.id, resolveCommand(workspace)]))
   const invocationId = `invocation-${Date.now()}-${randomUUID().slice(0, 8)}`
-  const experimentId = sanitizeSegment(options.experiment ?? comparison.id)
-  const attemptId = sanitizeSegment(options.attempt ?? `attempt-${new Date().toISOString().replace(/[:.]/g, '-')}`)
+  const experimentId = sanitizeIdentitySegment(options.experiment ?? comparison.id)
+  const attemptId = sanitizeIdentitySegment(options.attempt ?? `attempt-${new Date().toISOString().replace(/[:.]/g, '-')}`)
   const reportRoot = options.report === false ? null : resolve(options.reportOut ?? join(dirname(comparison.configFilePath), '.vieval', 'reports'))
+  if (options.resume != null && reportRoot == null) {
+    throw new Error('--resume reads the earlier attempt from the reports, so it cannot run with --no-report.')
+  }
+  const resumedAttemptId = options.resume == null || reportRoot == null
+    ? undefined
+    : await resolveResumedAttemptId({
+        experimentId,
+        reportRoot,
+        requested: options.resume,
+        workspaceIds: workspaces.map(workspace => sanitizeIdentitySegment(workspace.id)),
+      })
   await options.onStart?.({ reportRoot })
 
   const reporter = createRunReporter(options.reporter)
@@ -389,6 +406,7 @@ export async function runComparison(options: RunComparisonOptions = {}): Promise
     experimentId,
     '--attempt',
     attemptId,
+    ...(resumedAttemptId == null ? [] : ['--resume', resumedAttemptId]),
     ...(reportRoot == null ? ['--no-report'] : ['--report-out', reportRoot]),
     ...(comparison.cache == null ? [] : ['--cache-root', comparison.cache.root, '--cache-scope', comparison.cache.scope, '--cache-namespace', comparison.cache.namespace]),
     ...(options.project ?? []).flatMap(name => ['--project', name]),
@@ -558,11 +576,6 @@ async function runWorkspaceProcess(options: {
  * After:
  * - `eval-test-objects-raw-formula-speech-raw`
  */
-function sanitizeSegment(value: string): string {
-  const normalized = value.trim().replace(/[^\w.-]+/g, '-')
-  return normalized.length === 0 ? 'default' : normalized
-}
-
 function selectWorkspaces(workspaces: readonly ComparisonWorkspace[], selectors: readonly string[]): ComparisonWorkspace[] {
   if (selectors.length === 0) {
     return [...workspaces]
