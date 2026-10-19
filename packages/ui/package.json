@@ -1,7 +1,7 @@
 {
   "name": "@vieval/ui",
   "type": "module",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Web viewer server and API for vieval runs: live event bus, live tail of events.jsonl, and finished reports.",
   "author": {
     "name": "Vieval Team",
