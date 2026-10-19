@@ -257,7 +257,7 @@ describe('viewer API on the OSWorld report root (real data)', () => {
 
     const timeline = expectSchema(timelineResponseSchema, await json(`/api/runs/${ARCHIVED}/timeline`))
     expect(timeline.entries).toHaveLength(18)
-    expect(timeline.rounds[0].rounds).toEqual([{ endedAt: '2026-10-11T19:31:24.492Z', failed: 7, passed: 11, roundIndex: 0, running: 0, startedAt: '2026-10-11T19:14:05.993Z' }])
+    expect(timeline.rounds[0].rounds).toEqual([{ endedAt: '2026-10-11T19:31:24.492Z', errored: 0, failed: 7, passed: 11, roundIndex: 0, running: 0, startedAt: '2026-10-11T19:14:05.993Z' }])
 
     const events = expectSchema(eventsResponseSchema, await json(`/api/runs/${ARCHIVED}/events?after=250&limit=3`))
     expect(events.events.map(envelope => envelope.seq)).toEqual([251, 252, 253])

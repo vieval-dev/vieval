@@ -7,7 +7,10 @@ import { computed } from 'vue'
 import { formatCount } from '../format'
 
 /**
- * The one indicator of case outcomes in the viewer: a thin stacked bar of passed / failed / running / other cases.
+ * The one indicator of case outcomes in the viewer: a thin stacked bar of passed / failed / no result / running /
+ * not run cases. Cases with a result come first; cases without one (`errored`, `timeout`) wear the hatched amber of
+ * `--mark-errored`, so red always means a wrong result. Colors come from the `--mark-*` / `--ink-*` tokens, so the
+ * colorblind-safe mode recolors the bar.
  *
  * The bar never carries text next to it; the numbers are one hover away, depending on where it sits:
  * - `hover` (cards): hovering or focusing the bar thickens it and shows each segment's count right above that
@@ -34,10 +37,10 @@ const parts = computed(() => {
   const other = Math.max(0, total - passed - failed - errored - running - timeout - skipped) + skipped
   const sum = Math.max(1, total)
   return [
-    { class: 'bg-green-600 dark:bg-green-500', label: 'passed', text: 'text-green-700 dark:text-green-400', value: passed },
-    // TODO: give cases without a result (`errored`, `timeout`) their own amber, hatched segment.
-    { class: 'bg-red-600 dark:bg-red-500', label: 'failed', text: 'text-red-700 dark:text-red-400', value: failed + errored + timeout },
-    { class: 'bg-blue-500 vv-pulse', label: 'running', text: 'text-blue-700 dark:text-blue-400', value: running },
+    { class: '[background-color:var(--mark-passed)]', label: 'passed', text: '[color:var(--ink-passed)]', value: passed },
+    { class: '[background-color:var(--mark-failed)]', label: 'failed', text: '[color:var(--ink-failed)]', value: failed },
+    { class: '[background-color:var(--mark-errored)] vv-hatch', label: 'no result', text: '[color:var(--ink-errored)]', value: errored + timeout },
+    { class: '[background-color:var(--mark-running)] vv-pulse', label: 'running', text: '[color:var(--ink-running)]', value: running },
     { class: 'bg-neutral-400 dark:bg-neutral-600', label: 'not run', text: 'muted', value: other },
   ].filter(part => part.value > 0).map(part => ({ ...part, width: `${(part.value / sum) * 100}%` }))
 })

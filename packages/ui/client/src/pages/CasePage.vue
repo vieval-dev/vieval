@@ -118,8 +118,9 @@ const running = computed(() => detail.data.value?.state === 'running')
     <template v-if="detail.data.value">
       <ViewTabs v-model="tab" :items="tabs" :href="value => href(tabRoute(value))" label="Case views">
         <div v-if="tab === 'overview'" :class="['flex flex-col gap-4']">
-          <div v-if="detail.data.value.errorMessage" role="alert" :class="['rounded state-failed px-3 py-2 text-sm whitespace-pre-wrap mono']">
-            {{ detail.data.value.errorMessage }}
+          <!-- A wrong result (failed assertion) is red; an error without a result is the amber of `errored`. -->
+          <div v-if="detail.data.value.errorMessage" role="alert" :class="['rounded px-3 py-2 text-sm whitespace-pre-wrap mono', detail.data.value.state === 'failed' ? 'state-failed' : 'state-interrupted']">
+            <span v-if="detail.data.value.errorName" :class="['font-semibold']">{{ detail.data.value.errorName }}: </span>{{ detail.data.value.errorMessage }}
           </div>
           <section class="card">
             <h2 :class="['card-title flex-wrap']">

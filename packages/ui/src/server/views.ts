@@ -224,7 +224,7 @@ export function buildTimeline(handle: RunHandle, filter: { caseId?: string, task
       }
       const taskRounds = roundsByTask.get(node.taskId) ?? new Map()
       roundsByTask.set(node.taskId, taskRounds)
-      const summary = taskRounds.get(round.roundIndex) ?? { failed: 0, passed: 0, roundIndex: round.roundIndex, running: 0, startedAt: round.startedAt }
+      const summary = taskRounds.get(round.roundIndex) ?? { errored: 0, failed: 0, passed: 0, roundIndex: round.roundIndex, running: 0, startedAt: round.startedAt }
       if (round.startedAt < summary.startedAt) {
         summary.startedAt = round.startedAt
       }
@@ -237,8 +237,11 @@ export function buildTimeline(handle: RunHandle, filter: { caseId?: string, task
       else if (round.state === 'running') {
         summary.running += 1
       }
-      else {
+      else if (round.state === 'failed') {
         summary.failed += 1
+      }
+      else {
+        summary.errored += 1
       }
       taskRounds.set(round.roundIndex, summary)
     }

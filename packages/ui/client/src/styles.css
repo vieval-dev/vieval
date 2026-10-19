@@ -9,13 +9,24 @@
   --series-6: #008300;
   --series-7: #4a3aa7;
   --series-8: #e34948;
-  /* Case states as chart marks (lines, dots); the same hues as the `state-*` badges. */
+  /*
+   * Case states as marks (bar segments, lines, dots) and as the ink of `state-*` badges, whose tinted background is
+   * mixed from the mark. A case without a result (`errored`, `timeout`, `unfinished`) wears the amber of `errored`;
+   * red is kept for wrong results. `[data-color-vision='safe']` below swaps every value for a colorblind-safe set.
+   */
   --mark-passed: #2f9e44;
   --mark-failed: #e03131;
-  --mark-timeout: #e8590c;
+  --mark-errored: #f59f00;
+  --mark-timeout: var(--mark-errored);
   --mark-running: #1c7ed6;
   --mark-skipped: #868e96;
-  --mark-unfinished: #868e96;
+  --mark-unfinished: var(--mark-errored);
+  --ink-passed: #1b5e2a;
+  --ink-failed: #9b1c1c;
+  --ink-errored: #7a4a00;
+  --ink-running: #174ea6;
+  /* Stripes over the `errored` mark (`.vv-hatch`): "no data", and a second cue next to green for red-green CVD. */
+  --hatch-stripe: rgb(255 255 255 / 0.5);
   /* Five-step sequential ramp (dataviz reference blue) for coloring by a metric, low to high. */
   --seq-1: #b7d3f6;
   --seq-2: #6da7ec;
@@ -50,10 +61,13 @@
   --series-8: #e66767;
   --mark-passed: #51cf66;
   --mark-failed: #ff6b6b;
-  --mark-timeout: #ff922b;
+  --mark-errored: #fab005;
   --mark-running: #4dabf7;
-  --mark-skipped: #868e96;
-  --mark-unfinished: #868e96;
+  --ink-passed: #8ce99a;
+  --ink-failed: #ffa8a8;
+  --ink-errored: #ffd43b;
+  --ink-running: #a5d8ff;
+  --hatch-stripe: rgb(0 0 0 / 0.4);
   /* Dark pages run the ramp the other way: low values sink toward the ground, high values stand out. */
   --seq-1: #184f95;
   --seq-2: #2a78d6;
@@ -63,6 +77,32 @@
   --chart-grid: #333332;
   --chart-text: #c3c2b7;
   color-scheme: dark;
+}
+/*
+ * Colorblind-safe state colors (picked in the theme color popover, `useColorVision`), after the Okabe-Ito palette:
+ * blue for passed, vermillion for failed, orange-yellow for no result, reddish purple for running. Every pair stays
+ * apart for protan, deutan, and tritan vision (OKLab ΔE ≥ 8.5 on light pages, checked with the dataviz palette
+ * validator), and every ink reads at ≥ 6:1 on its badge tint. The theme hue (`primary-*`) is not affected.
+ */
+:root[data-color-vision='safe'] {
+  --mark-passed: #0072b2;
+  --mark-failed: #d55e00;
+  --mark-errored: #e69f00;
+  --mark-running: #cc79a7;
+  --ink-passed: #00507d;
+  --ink-failed: #8f3e00;
+  --ink-errored: #6e4a00;
+  --ink-running: #8a3c68;
+}
+:root.dark[data-color-vision='safe'] {
+  --mark-passed: #2f8ccf;
+  --mark-failed: #d5551c;
+  --mark-errored: #c99a00;
+  --mark-running: #b8689a;
+  --ink-passed: #8cc8f0;
+  --ink-failed: #f5a46e;
+  --ink-errored: #f2cf66;
+  --ink-running: #e8aed0;
 }
 html, body, #app { height: 100%; }
 /* The font family comes from the UnoCSS theme (`font.sans` in `uno.config.ts`) through the reset of `html`. */
@@ -74,6 +114,8 @@ body {
 :root.dark body { background: #0a0a0a; color: #f5f5f5; }
 @keyframes vv-pulse { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
 .vv-pulse { animation: vv-pulse 1.4s ease-in-out infinite; }
+/* Diagonal stripes over a mark of cases without a result; thin enough to read on a 6 px bar. */
+.vv-hatch { background-image: repeating-linear-gradient(135deg, var(--hatch-stripe) 0 1.5px, transparent 1.5px 4px); }
 @keyframes vv-flash { from { background-color: oklch(62% var(--chromatic-chroma) var(--chromatic-hue) / .25) } to { background-color: transparent } }
 .vv-flash { animation: vv-flash 1.2s ease-out; }
 /* Shine of `ProgressBar`, the same sweep as airi's `Progress` (`packages/ui/src/components/misc/progress.vue`). */

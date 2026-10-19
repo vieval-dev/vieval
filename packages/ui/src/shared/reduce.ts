@@ -141,6 +141,7 @@ const MAX_HISTORY_POINTS = 240
 interface MutableRound {
   endedAt?: string
   errorMessage?: string
+  errorName?: string
   output?: unknown
   roundIndex: number
   roundIndexInferred: boolean
@@ -486,6 +487,10 @@ export function createRunReducer(): RunReducer {
     const errorMessage = asString(data.errorMessage)
     if (errorMessage != null) {
       round.errorMessage = errorMessage
+    }
+    const errorName = asString(data.errorName)
+    if (errorName != null) {
+      round.errorName = errorName
     }
     if (data.output !== undefined) {
       round.output = data.output
@@ -887,6 +892,7 @@ export function toCaseNode(reduced: ReducedCase, options: { evidenceLinkCount: n
     durationMs: endedAt == null ? undefined : Date.parse(endedAt) - Date.parse(firstStartedAt),
     endedAt,
     errorMessage: lastRound?.errorMessage,
+    errorName: lastRound?.errorName,
     evidenceLinkCount: options.evidenceLinkCount,
     index: reduced.index,
     key: reduced.key,
@@ -1020,6 +1026,7 @@ function toRound(round: MutableRound, terminated: boolean): CaseRound {
   return {
     endedAt: round.endedAt,
     errorMessage: round.errorMessage,
+    errorName: round.errorName,
     roundIndex: round.roundIndex,
     roundIndexInferred: round.roundIndexInferred,
     scores: { ...round.scores },

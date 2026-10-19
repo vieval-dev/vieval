@@ -121,9 +121,10 @@ const position = computed(() => ({
                 </td>
                 <td :class="['td mono text-xs']">
                   <span :class="['inline-flex items-center gap-1.5']">
-                    <span :class="['inline-flex items-center gap-0.5', 'text-green-700 dark:text-green-400']">{{ round.passed }}<span class="i-mingcute-check-line" aria-label="passed" /></span>
-                    <span :class="['inline-flex items-center gap-0.5', 'text-red-700 dark:text-red-400']">{{ round.failed }}<span class="i-mingcute-close-line" aria-label="failed" /></span>
-                    <span v-if="round.running" :class="['inline-flex items-center gap-0.5', 'text-blue-700 dark:text-blue-400']">{{ round.running }}<span class="i-mingcute-loading-line" aria-label="running" /></span>
+                    <span :class="['inline-flex items-center gap-0.5', '[color:var(--ink-passed)]']">{{ round.passed }}<span class="i-mingcute-check-line" aria-label="passed" /></span>
+                    <span :class="['inline-flex items-center gap-0.5', '[color:var(--ink-failed)]']">{{ round.failed }}<span class="i-mingcute-close-line" aria-label="failed" /></span>
+                    <span v-if="round.errored" :class="['inline-flex items-center gap-0.5', '[color:var(--ink-errored)]']">{{ round.errored }}<span class="i-mingcute-alert-octagon-line" aria-label="no result" /></span>
+                    <span v-if="round.running" :class="['inline-flex items-center gap-0.5', '[color:var(--ink-running)]']">{{ round.running }}<span class="i-mingcute-loading-line" aria-label="running" /></span>
                   </span>
                 </td>
                 <td :class="['td mono text-xs muted']">
@@ -160,7 +161,7 @@ const position = computed(() => ({
                   <span v-if="(cases[item.index]!.rounds.at(-1)?.tries.length ?? 1) > 1" class="badge state-interrupted">{{ cases[item.index]!.rounds.at(-1)!.tries.length - 1 }} {{ cases[item.index]!.rounds.at(-1)!.tries.length === 2 ? 'retry' : 'retries' }}</span>
                 </span>
                 <!-- Phones: under the name (third grid column), aligned with it. -->
-                <span :class="['text-xs muted mono ml-auto whitespace-nowrap', 'max-md:(col-start-3 ml-0)']"><template v-if="cases[item.index]!.state === 'running'"><span class="text-blue-700 dark:text-blue-300">running {{ formatDuration(Math.max(0, now - Date.parse(cases[item.index]!.rounds.at(-1)?.startedAt ?? cases[item.index]!.startedAt))) }}</span></template><template v-else>exact {{ formatScore(cases[item.index]!.scores.exact) }} · {{ formatDuration(cases[item.index]!.durationMs) }}</template></span>
+                <span :class="['text-xs muted mono ml-auto whitespace-nowrap', 'max-md:(col-start-3 ml-0)']"><template v-if="cases[item.index]!.state === 'running'"><span class="[color:var(--ink-running)]">running {{ formatDuration(Math.max(0, now - Date.parse(cases[item.index]!.rounds.at(-1)?.startedAt ?? cases[item.index]!.startedAt))) }}</span></template><template v-else>exact {{ formatScore(cases[item.index]!.scores.exact) }} · {{ formatDuration(cases[item.index]!.durationMs) }}</template></span>
               </a>
             </div>
           </div>

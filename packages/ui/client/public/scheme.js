@@ -8,3 +8,8 @@ if (scheme === 'dark' || ((scheme == null || scheme === 'auto') && matchMedia('(
 // `useThemeHue` updates the variable afterwards.
 const hue = Number.parseFloat(localStorage.getItem('vieval-viewer:hue') ?? '')
 document.documentElement.style.setProperty('--chromatic-hue', String(Number.isFinite(hue) ? Math.min(360, Math.max(0, hue)) : 55))
+
+// Applies the saved colorblind-safe state colors before the first paint, so bars do not flash green and red first.
+// `src/theme.ts` owns the key (keep in sync); `useColorVision` updates the attribute afterwards.
+if (localStorage.getItem('vieval-viewer:color-vision') === 'safe')
+  document.documentElement.dataset.colorVision = 'safe'
