@@ -202,10 +202,16 @@ export const caseStartedDataSchema = v.object({
 export const caseEndedDataSchema = v.object({
   ...caseAutoAttemptEntries,
   errorMessage: v.optional(v.string()),
+  /** `name` of the thrown error, for example `AssertionError` or `APICallError`, so readers can group failures. */
+  errorName: v.optional(v.string()),
   index: v.number(),
   name: v.string(),
   output: v.optional(v.unknown()),
-  state: v.picklist(['failed', 'passed', 'skipped', 'timeout']),
+  /**
+   * `failed` is a failed assertion (a wrong result); `errored` and `timeout` produced no result.
+   * Adding `errored` and `errorName` kept the schema version: both are additions, so every older report still parses.
+   */
+  state: v.picklist(['errored', 'failed', 'passed', 'skipped', 'timeout']),
   total: v.number(),
 })
 

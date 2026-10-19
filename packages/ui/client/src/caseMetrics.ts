@@ -48,7 +48,7 @@ export interface MetricGroup {
 }
 
 /** Case states in the order the charts list them: outcomes first, then cases that did not finish. */
-const STATE_ORDER = ['passed', 'failed', 'timeout', 'skipped', 'running', 'unfinished']
+const STATE_ORDER = ['passed', 'failed', 'errored', 'timeout', 'skipped', 'running', 'unfinished']
 /** Correlation above which two metrics count as the same signal (token totals that grow with every step, …). */
 const SAME_SIGNAL_R = 0.95
 /** Categories with more values than this are identifiers (hashes, paths), not a breakdown worth an axis. */
@@ -352,7 +352,7 @@ export function caseOffset(key: string, salt = 0): number {
  * - choosing which axes to show first, so the chart opens on the metrics most likely to explain failures
  *
  * Expects:
- * - finished cases (`passed`, `failed`, `timeout`); running and skipped cases are left out
+ * - finished cases (`passed`, `failed`, `errored`, `timeout`); running and skipped cases are left out
  *
  * Returns:
  * - one entry per non-constant metric with at least one passed and one failed value, except the score metrics;
@@ -360,7 +360,7 @@ export function caseOffset(key: string, salt = 0): number {
  */
 export function separationOf(table: CaseTable): Map<string, MetricSeparation> {
   const result = new Map<string, MetricSeparation>()
-  const finished = table.rows.filter(row => row.state === 'passed' || row.state === 'failed' || row.state === 'timeout')
+  const finished = table.rows.filter(row => row.state === 'passed' || row.state === 'failed' || row.state === 'errored' || row.state === 'timeout')
   for (const name of table.groups.flatMap(group => [group.representative, ...group.members.map(member => member.name)])) {
     if (OUTCOME_METRICS.has(name))
       continue

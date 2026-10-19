@@ -238,7 +238,9 @@ export class CaseOutputCollector {
     const collapsedCount = lines.length - shownLines.length
     const duration = formatHumanDuration(entry.durationMs ?? Math.max(0, this.options.getNow() - entry.startedAt))
     const message = entry.errorMessage == null ? '' : `: ${entry.errorMessage}`
+    // A case without a result (`errored`, `timeout`) is yellow; red is kept for wrong results.
     const status = {
+      errored: color(c.yellow, `Errored in ${duration}${message}`),
       failed: color(c.red, `Failed in ${duration}${message}`),
       late: color(c.yellow, 'Wrote more output after the case ended'),
       passed: color(c.magentaBright, `Done in ${duration}`),

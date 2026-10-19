@@ -79,13 +79,14 @@ export const RUNS_KEY = ['runs'] as const
  */
 export function sumCounts(runs: readonly RunListItem[]): CaseCounts {
   return runs.reduce<CaseCounts>((sum, run) => ({
+    errored: sum.errored + run.counts.errored,
     failed: sum.failed + run.counts.failed,
     passed: sum.passed + run.counts.passed,
     running: sum.running + run.counts.running,
     skipped: sum.skipped + run.counts.skipped,
     timeout: sum.timeout + run.counts.timeout,
     total: sum.total + run.counts.total,
-  }), { failed: 0, passed: 0, running: 0, skipped: 0, timeout: 0, total: 0 })
+  }), { errored: 0, failed: 0, passed: 0, running: 0, skipped: 0, timeout: 0, total: 0 })
 }
 
 /**

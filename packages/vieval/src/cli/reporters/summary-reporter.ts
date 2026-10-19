@@ -175,6 +175,8 @@ interface ActiveTaskView {
 
 interface SummaryReporterCounterState {
   completed: number
+  /** Cases that ended without a result because they threw something other than an assertion. */
+  errored: number
   failed: number
   passed: number
   skipped: number
@@ -320,6 +322,11 @@ class SummaryReporterStateMachine implements SummaryReporter {
 
     if (payload.state === 'timeout') {
       this.caseCounters.timeout += 1
+      return
+    }
+
+    if (payload.state === 'errored') {
+      this.caseCounters.errored += 1
       return
     }
 
@@ -821,6 +828,7 @@ function createBoundedActiveBlock(activeRows: readonly string[], maxRows: number
 function createCounterState(): SummaryReporterCounterState {
   return {
     completed: 0,
+    errored: 0,
     failed: 0,
     passed: 0,
     skipped: 0,
@@ -865,6 +873,8 @@ function formatCounterState(
     runningCount > 0 ? c.bold(c.yellow(`${runningCount} running`)) : c.dim(`${runningCount} running`),
     c.bold(c.green(`${counter.passed} passed`)),
     counter.failed > 0 ? c.bold(c.red(`${counter.failed} failed`)) : c.dim(`${counter.failed} failed`),
+    // Only cases can error, so the task line leaves the count out until one does.
+    ...(counter.errored > 0 ? [c.bold(c.yellow(`${counter.errored} errored`))] : []),
     counter.timeout > 0 ? c.bold(c.yellow(`${counter.timeout} timeout`)) : c.dim(`${counter.timeout} timeout`),
     counter.skipped > 0 ? c.yellow(`${counter.skipped} skipped`) : c.dim(`${counter.skipped} skipped`),
   ].join(c.dim(' | ')) + c.gray(` (${counter.total}${totalKnown ? '' : '+'})`)
@@ -954,6 +964,7 @@ function pluralize(noun: string, count: number): string {
 
 function resetCounterState(counter: SummaryReporterCounterState, total: number): void {
   counter.completed = 0
+  counter.errored = 0
   counter.failed = 0
   counter.passed = 0
   counter.skipped = 0

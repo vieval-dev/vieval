@@ -60,7 +60,7 @@ function matches(state: string, name: string): boolean {
   if (filter.value === 'all')
     return true
   if (filter.value === 'failed')
-    return state === 'failed' || state === 'timeout' || state === 'unfinished'
+    return state === 'failed' || state === 'errored' || state === 'timeout' || state === 'unfinished'
   return state === filter.value
 }
 

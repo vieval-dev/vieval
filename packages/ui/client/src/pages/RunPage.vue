@@ -65,13 +65,14 @@ const loadLogs = computed(() => {
 })
 /**
  * Exact score and case counts of the whole run from the live snapshot, so they move with the run (the catalog entry
- * of the run is read once per page). The score follows the task scores: every settled round of every case counts.
+ * of the run is read once per page). The score follows the task scores: every settled round of every case with a
+ * result counts; rounds without one lower the coverage instead.
  */
 const score = computed(() => {
   const snapshot = live.snapshot.value
   if (snapshot == null)
     return undefined
-  const counts = { failed: 0, passed: 0, running: 0, skipped: 0, timeout: 0, total: 0 }
+  const counts = { errored: 0, failed: 0, passed: 0, running: 0, skipped: 0, timeout: 0, total: 0 }
   for (const task of snapshot.tasks) {
     for (const key of Object.keys(counts) as (keyof typeof counts)[])
       counts[key] += task.caseCounts[key]

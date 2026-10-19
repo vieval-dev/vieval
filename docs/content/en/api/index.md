@@ -30,6 +30,7 @@ These are public integration surfaces for hosts that need to assemble or drive e
 | `vieval/cli` | Embed the import-safe top-level CLI parser and command dispatcher through `parseTopLevelCliArguments` and `runTopLevelCli`. |
 | `vieval/core/runner` | Assemble collection, scheduling, and execution directly with exports such as `collectEvalEntries`, `createRunnerSchedule`, and `runScheduledTasks`. |
 | `vieval/core/scheduler` | Admit projects, tasks, and cases through concurrency pools and middleware without the runner's collection APIs, using `createScheduler` and `Scheduler.child`. |
+| `vieval/core/scoring` | Score case outcomes with the same rule as tasks and the viewer, using `scoreCaseOutcomes`, `strictExactOf`, and `isMeasuredState`. It has no side effects, so browser code can import it. |
 | `vieval/core/processors/results` | Apply built-in result policies and inspect the gate through `processRunResults` and the `ResultGateDecision` type. |
 | `vieval/core/inference-executors` | Build custom inference integrations with exports such as `createProviderAdapter`, `createRetryPolicy`, and `createOpenAIFromEnv`. |
 

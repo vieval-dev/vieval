@@ -35,6 +35,10 @@
       "types": "./dist/core/scheduler/index.d.mts",
       "default": "./dist/core/scheduler/index.mjs"
     },
+    "./core/scoring": {
+      "types": "./dist/core/scoring/index.d.mts",
+      "default": "./dist/core/scoring/index.mjs"
+    },
     "./core/assertions": {
       "types": "./dist/core/assertions/index.d.mts",
       "default": "./dist/core/assertions/index.mjs"

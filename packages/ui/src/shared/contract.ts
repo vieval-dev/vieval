@@ -52,6 +52,9 @@ export const runIdentitySchema = v.object({
 })
 
 export const caseCountsSchema = v.object({
+  /** Cases that ended without a result: they threw something other than an assertion. */
+  errored: v.number(),
+  /** Cases with a failed assertion: a wrong result. */
   failed: v.number(),
   passed: v.number(),
   running: v.number(),
@@ -111,7 +114,7 @@ export const treeResponseSchema = v.object({
 // Execution tree: run → project → task → round → case → try
 // ---------------------------------------------------------------------------------------------------------------
 
-export const caseStateSchema = v.picklist(['running', 'passed', 'failed', 'skipped', 'timeout', 'unfinished'])
+export const caseStateSchema = v.picklist(['running', 'passed', 'failed', 'errored', 'skipped', 'timeout', 'unfinished'])
 
 export const tryNodeSchema = v.object({
   autoRetry: v.number(),

@@ -140,7 +140,8 @@ describe('runComparison', () => {
     expect(broken!.exitCode).toBe(1)
     expect(broken!.stderrTail.join('\n')).toContain('broken workspace config')
     expect(raw!.output!.projects[0]!.caseSummary).toMatchObject({ passed: 2 })
-    expect(failing!.output!.projects[0]!.caseSummary).toMatchObject({ failed: 2 })
+    // The failing fixture throws plain errors, so its cases produced no result; that still fails the comparison.
+    expect(failing!.output!.projects[0]!.caseSummary).toMatchObject({ errored: 2, failed: 0 })
     expect(comparisonExitCode(output)).toBe(1)
   }, 60_000)
 

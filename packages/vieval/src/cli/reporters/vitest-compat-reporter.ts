@@ -187,7 +187,8 @@ export async function subscribeVitestCompatReporters(options: {
         return
       }
       const taskCase = getOrCreateCase(taskId, caseId)
-      taskCase.state = data.state === 'timeout' ? 'failed' : data.state
+      // Vitest has no state for a case without a result, so `errored` and `timeout` both report as failed.
+      taskCase.state = data.state === 'timeout' || data.state === 'errored' ? 'failed' : data.state
       await emit(reporter => reporter.onTestCaseResult?.(taskCase))
     }),
     options.bus.on(taskEnded, async ({ data, projectId, taskId }) => {

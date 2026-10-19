@@ -162,8 +162,12 @@ export function formatComparisonOutput(output: ComparisonOutput): string {
     '',
     ...rows.map(({ project, workspace }, index) => {
       const cases = project.caseSummary
-      const failed = project.errorMessage != null || (cases != null && (cases.failed > 0 || cases.timeout > 0))
-      return ` ${failed ? c.red('✗') : c.green('✓')} ${String(index + 1).padStart(2)}. ${workspace.id}/${project.name}  hybrid ${score(project.result?.overall.hybridAverage)}  exact ${score(project.result?.overall.exactAverage)}  cases ${cases?.passed ?? 0}/${cases?.total ?? 0}${cases != null && cases.failed > 0 ? c.red(` (${cases.failed} failed)`) : ''}${project.errorMessage == null ? '' : c.red(`  ${project.errorMessage}`)}${workspace.output?.interruptSignal == null ? '' : c.yellow(`  interrupted by ${workspace.output.interruptSignal}`)}`
+      const unmeasured = (cases?.errored ?? 0) + (cases?.timeout ?? 0)
+      const failed = project.errorMessage != null || (cases != null && (cases.failed > 0 || unmeasured > 0))
+      // A score over few measured cases is not comparable, so the coverage stands next to it.
+      const coverage = project.result?.overall.coverage
+      const coverageLabel = coverage == null || coverage.total === 0 ? '' : `  coverage ${score(coverage.measured / coverage.total)}`
+      return ` ${failed ? c.red('✗') : c.green('✓')} ${String(index + 1).padStart(2)}. ${workspace.id}/${project.name}  hybrid ${score(project.result?.overall.hybridAverage)}  exact ${score(project.result?.overall.exactAverage)}${coverageLabel}  cases ${cases?.passed ?? 0}/${cases?.total ?? 0}${cases != null && cases.failed > 0 ? c.red(` (${cases.failed} failed)`) : ''}${unmeasured > 0 ? c.yellow(` (${unmeasured} without result)`) : ''}${project.errorMessage == null ? '' : c.red(`  ${project.errorMessage}`)}${workspace.output?.interruptSignal == null ? '' : c.yellow(`  interrupted by ${workspace.output.interruptSignal}`)}`
     }),
     ...output.workspaces.filter(workspace => workspace.output == null).flatMap(workspace => [
       ` ${c.red('✗')} ${workspace.id}  ${c.red(workspace.errorMessage ?? 'failed')}`,

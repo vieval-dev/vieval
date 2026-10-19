@@ -7,19 +7,24 @@ import { processRunResults } from './index'
 function createAggregatedResults(overrides: Partial<AggregatedRunResults> = {}): AggregatedRunResults {
   return {
     inferenceExecutors: [{
+      coverage: null,
       exactAverage: 0.8,
       hybridAverage: 0.8,
       inferenceExecutorId: 'openai:gpt-4.1-mini',
       judgeAverage: 0.8,
       runCount: 2,
+      strictExactAverage: 0.8,
     }],
     overall: {
+      coverage: null,
       exactAverage: 0.8,
       hybridAverage: 0.8,
       judgeAverage: 0.8,
       runCount: 2,
+      strictExactAverage: 0.8,
     },
     runs: [{
+      coverage: null,
       entryId: 'plugins/airi-plugin-game-chess/src/agent/evals/chess-commentary',
       exactAverage: 0.8,
       hybridAverage: 0.8,
@@ -27,7 +32,9 @@ function createAggregatedResults(overrides: Partial<AggregatedRunResults> = {}):
       inferenceExecutorId: 'openai:gpt-4.1-mini',
       judgeAverage: 0.8,
       matrix: createScheduledTaskMatrix(),
+      strictExactAverage: 0.8,
     }, {
+      coverage: null,
       entryId: 'plugins/airi-plugin-game-chess/src/agent/evals/chess-commentary',
       exactAverage: 0.7,
       hybridAverage: 0.7,
@@ -35,6 +42,7 @@ function createAggregatedResults(overrides: Partial<AggregatedRunResults> = {}):
       inferenceExecutorId: 'openai:gpt-4.1-mini',
       judgeAverage: 0.7,
       matrix: createScheduledTaskMatrix(),
+      strictExactAverage: 0.7,
     }],
     ...overrides,
   }
@@ -71,17 +79,21 @@ describe('processRunResults', () => {
   it('fails threshold policy when overall or inferenceExecutor hybrid scores are below limits', () => {
     const decision = processRunResults(createAggregatedResults({
       inferenceExecutors: [{
+        coverage: null,
         exactAverage: 0.55,
         hybridAverage: 0.55,
         inferenceExecutorId: 'openai:gpt-4.1-mini',
         judgeAverage: 0.55,
         runCount: 2,
+        strictExactAverage: 0.55,
       }],
       overall: {
+        coverage: null,
         exactAverage: 0.5,
         hybridAverage: 0.5,
         judgeAverage: 0.5,
         runCount: 2,
+        strictExactAverage: 0.5,
       },
     }), {
       threshold: {
@@ -100,6 +112,7 @@ describe('processRunResults', () => {
   it('fails hard-limit policy when failed runs exceed maxFailedRuns', () => {
     const decision = processRunResults(createAggregatedResults({
       runs: [{
+        coverage: null,
         entryId: 'plugins/airi-plugin-game-chess/src/agent/evals/chess-commentary',
         exactAverage: 0.3,
         hybridAverage: 0.3,
@@ -107,7 +120,9 @@ describe('processRunResults', () => {
         inferenceExecutorId: 'openai:gpt-4.1-mini',
         judgeAverage: 0.3,
         matrix: createScheduledTaskMatrix(),
+        strictExactAverage: 0.3,
       }, {
+        coverage: null,
         entryId: 'plugins/airi-plugin-game-chess/src/agent/evals/chess-commentary',
         exactAverage: 0.2,
         hybridAverage: 0.2,
@@ -115,6 +130,7 @@ describe('processRunResults', () => {
         inferenceExecutorId: 'openai:gpt-4.1-mini',
         judgeAverage: 0.2,
         matrix: createScheduledTaskMatrix(),
+        strictExactAverage: 0.2,
       }],
     }), {
       maxFailedRuns: {

@@ -12,6 +12,7 @@ export default defineConfig({
     'core/processors/results/index': 'src/core/processors/results/index.ts',
     'core/runner/index': 'src/core/runner/index.ts',
     'core/scheduler/index': 'src/core/scheduler/index.ts',
+    'core/scoring/index': 'src/core/scoring/index.ts',
     'events/index': 'src/events/index.ts',
     'expect': 'src/expect.ts',
     'index': 'src/index.ts',

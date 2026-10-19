@@ -37,7 +37,7 @@ const lanes = computed(() => {
     start,
   }
 })
-const stateColor = (state: string) => ({ failed: '#e34948', passed: '#008300', retried: '#eda100', running: '#2a78d6', timeout: '#e34948' } as Record<string, string>)[state] ?? '#a3a3a3'
+const stateColor = (state: string) => ({ errored: '#e34948', failed: '#e34948', passed: '#008300', retried: '#eda100', running: '#2a78d6', timeout: '#e34948' } as Record<string, string>)[state] ?? '#a3a3a3'
 </script>
 
 <template>

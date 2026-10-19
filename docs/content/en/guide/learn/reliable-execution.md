@@ -122,7 +122,7 @@ describeTask('provider health', () => {
 })
 ```
 
-`autoRetry: 2` permits two additional case tries after the initial failure. Retries stop at the first pass and remain part of the same attempt. The default delays are exponential: 500 ms before retry 1, then 1,000 ms before retry 2. `autoRetryDelay` can instead be a fixed non-negative number or a function of the retry index and the error of the failed try. `autoRetryIf` limits retries to the failures it accepts, so a wrong assertion fails at once instead of running again:
+`autoRetry: 2` permits two additional case tries after the initial failure. Retries stop at the first pass and remain part of the same attempt. By default only tries without a result (`errored` and `timeout`) run again; a failed assertion is a result, so it is not retried. The default delays are exponential: 500 ms before retry 1, then 1,000 ms before retry 2. `autoRetryDelay` can instead be a fixed non-negative number or a function of the retry index and the error of the failed try. `autoRetryIf` limits retries to the failures it accepts, so a wrong assertion fails at once instead of running again:
 
 ```ts
 import { isRetriableProviderError, readRetryAfter } from 'vieval/core/inference-executors'

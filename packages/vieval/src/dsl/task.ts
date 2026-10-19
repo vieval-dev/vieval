@@ -1,16 +1,18 @@
-import type { TaskConcurrencyConfig, TaskExecutionPolicy, TaskRunContext, TaskRunOutput } from '../config'
-import type { RunScoreKind } from '../core/runner'
+import type { TaskCaseState, TaskConcurrencyConfig, TaskExecutionPolicy, TaskRunContext, TaskRunOutput } from '../config'
+import type { RunScore, RunScoreKind } from '../core/runner'
 import type { Scheduler } from '../core/scheduler/types'
+import type { ScoredCaseOutcome } from '../core/scoring'
 import type { TelemetryAttributeValue } from '../core/telemetry'
 import type { RunEventDefinition, RunEventEmitter } from '../events'
 import type { RecordArtifactOptions } from './case-artifacts'
 import type { MetricAnnouncements, MetricDefinition, MetricMetadata } from './metrics'
 
-import { errorMessageFrom, sleep } from '@moeru/std'
+import { errorMessageFrom, errorNameFrom, sleep } from '@moeru/std'
 
 import { defineEval, defineTask } from '../config'
 import { runWithCaseOutput } from '../core/runner/case-output'
 import { createScheduler } from '../core/scheduler/runtime'
+import { scoreCaseOutcomes } from '../core/scoring'
 import { createNoopTelemetryRuntime } from '../core/telemetry'
 import { artifactRecorded, caseEnded, caseOutput, caseStarted, metricDefined, metricRecorded, scoreRecorded } from '../events'
 import { createCaseArtifacts } from './case-artifacts'
@@ -193,7 +195,7 @@ interface CaseExecutionOutcome {
   errorMessage?: string
   output?: unknown
   scoresByKind: Map<RunScoreKind, number>
-  state: 'failed' | 'passed' | 'timeout'
+  state: TaskCaseState
 }
 
 interface RegisteredCase<TInput> {
@@ -242,6 +244,14 @@ function canAttachMetricAsAttribute(value: TelemetryAttributeValue): value is bo
   return Array.isArray(value) && isTelemetryAttributeArray(value)
 }
 
+/**
+ * Sorts a thrown error into a wrong result or no result.
+ * `@vitest/expect` (behind the `expect` of vieval) throws chai's `AssertionError` for a failed matcher.
+ */
+function classifyCaseErrorByDefault(error: unknown): 'errored' | 'failed' {
+  return errorNameFrom(error) === 'AssertionError' ? 'failed' : 'errored'
+}
+
 function cloneCaseMatrix(matrix: TaskRunContext['task']['matrix']): TaskRunContext['task']['matrix'] {
   return {
     eval: {
@@ -253,27 +263,6 @@ function cloneCaseMatrix(matrix: TaskRunContext['task']['matrix']): TaskRunConte
     run: {
       ...matrix.run,
     },
-  }
-}
-
-function collectCaseOutcomeScores(
-  outcome: CaseExecutionOutcome,
-  scoreBucketsByKind: Record<RunScoreKind, number[]>,
-): void {
-  if (outcome.state !== 'passed') {
-    scoreBucketsByKind.exact.push(0)
-    return
-  }
-
-  if (outcome.scoresByKind.size === 0) {
-    scoreBucketsByKind.exact.push(1)
-    return
-  }
-
-  scoreBucketsByKind.exact.push(outcome.scoresByKind.get('exact') ?? 1)
-  const judgeScore = outcome.scoresByKind.get('judge')
-  if (judgeScore != null) {
-    scoreBucketsByKind.judge.push(judgeScore)
   }
 }
 
@@ -333,9 +322,11 @@ function emitCaseOutcome(
   totalCases: number,
   autoAttempt: CaseAutoAttempt | undefined,
 ): void {
+  const errorName = outcome.error == null ? undefined : errorNameFrom(outcome.error)
   emitSafely(context.events?.scope({ caseId: createCaseId(index, taskCase.name) }), caseEnded, {
     ...autoAttempt,
     ...(outcome.errorMessage == null ? {} : { errorMessage: outcome.errorMessage }),
+    ...(errorName == null ? {} : { errorName }),
     index,
     ...(outcome.output === undefined ? {} : { output: outcome.output }),
     name: taskCase.name,
@@ -401,13 +392,19 @@ async function executeRegisteredCase(
       name: taskCase.name,
       total: totalCases,
     })
-    lastOutcome = await runCaseOnce(context, taskCase, index, resolvedPolicy.timeout, autoAttempt)
+    lastOutcome = await runCaseOnce(context, taskCase, index, resolvedPolicy, autoAttempt)
     if (lastOutcome.state === 'passed') {
       return lastOutcome
     }
     // Asked only when a retry is left, so `retryIndex + 1` is always a retry that can start.
-    if (retryIndex < resolvedPolicy.autoRetry && resolvedPolicy.autoRetryIf?.(lastOutcome.error, retryIndex + 1) === false) {
-      return lastOutcome
+    // Without `autoRetryIf`, a failed assertion is a result and does not run again; use `autoAttempt` to measure flakiness.
+    if (retryIndex < resolvedPolicy.autoRetry) {
+      const retries = resolvedPolicy.autoRetryIf == null
+        ? lastOutcome.state !== 'failed'
+        : resolvedPolicy.autoRetryIf(lastOutcome.error, retryIndex + 1)
+      if (!retries) {
+        return lastOutcome
+      }
     }
   }
 
@@ -452,6 +449,7 @@ function normalizeExecutionPolicy(policy: TaskExecutionPolicy | undefined, label
     autoRetry: policy.autoRetry,
     autoRetryDelay: policy.autoRetryDelay,
     autoRetryIf: policy.autoRetryIf,
+    classifyError: policy.classifyError,
     timeout: policy.timeout,
   }
 
@@ -473,13 +471,21 @@ function resolveAutoRetryDelay(policy: TaskExecutionPolicy, retryIndex: number, 
 function resolveCaseExecutionPolicy(
   taskCase: RegisteredCase<unknown>,
   taskExecutionPolicy: TaskExecutionPolicy | undefined,
-): Pick<TaskExecutionPolicy, 'autoRetryDelay' | 'autoRetryIf' | 'timeout'> & Required<Pick<TaskExecutionPolicy, 'autoAttempt' | 'autoRetry'>> {
+): Pick<TaskExecutionPolicy, 'autoRetryDelay' | 'autoRetryIf' | 'timeout'> & Required<Pick<TaskExecutionPolicy, 'autoAttempt' | 'autoRetry' | 'classifyError'>> {
   return {
     autoAttempt: taskCase.executionPolicy?.autoAttempt ?? taskExecutionPolicy?.autoAttempt ?? 0,
     autoRetry: taskCase.executionPolicy?.autoRetry ?? taskExecutionPolicy?.autoRetry ?? 0,
     autoRetryDelay: taskCase.executionPolicy?.autoRetryDelay ?? taskExecutionPolicy?.autoRetryDelay,
     autoRetryIf: taskCase.executionPolicy?.autoRetryIf ?? taskExecutionPolicy?.autoRetryIf,
+    classifyError: taskCase.executionPolicy?.classifyError ?? taskExecutionPolicy?.classifyError ?? classifyCaseErrorByDefault,
     timeout: taskCase.executionPolicy?.timeout ?? taskExecutionPolicy?.timeout,
+  }
+}
+
+function toScoredCaseOutcome(outcome: CaseExecutionOutcome): ScoredCaseOutcome {
+  return {
+    scores: { exact: outcome.scoresByKind.get('exact'), judge: outcome.scoresByKind.get('judge') },
+    state: outcome.state,
   }
 }
 
@@ -505,9 +511,10 @@ async function runCaseOnce(
   context: TaskRunContext,
   taskCase: RegisteredCase<unknown>,
   index: number,
-  timeout: number | undefined,
+  policy: Pick<TaskExecutionPolicy, 'timeout'> & Required<Pick<TaskExecutionPolicy, 'classifyError'>>,
   autoAttempt: CaseAutoAttempt | undefined,
 ): Promise<CaseExecutionOutcome> {
+  const { classifyError, timeout } = policy
   const customScoresByKind = new Map<RunScoreKind, number>()
   const abortController = new AbortController()
   const telemetry = context.telemetry ?? createNoopTelemetryRuntime()
@@ -524,7 +531,7 @@ async function runCaseOnce(
     ? {
         errorMessage: errorMessageFrom(context.signal.reason) ?? 'Run interrupted.',
         scoresByKind: customScoresByKind,
-        state: 'failed',
+        state: 'errored',
       }
     : {
         output,
@@ -621,12 +628,21 @@ async function runCaseOnce(
   catch (error) {
     settled = true
     // Abort errors raised by the interrupt carry generic messages ("The operation was aborted"); the run's reason is clearer.
-    const interruptMessage = context.signal?.aborted === true ? errorMessageFrom(context.signal.reason) : undefined
+    const interrupted = context.signal?.aborted === true
+    const interruptMessage = interrupted ? errorMessageFrom(context.signal!.reason) : undefined
+    let state: TaskCaseState = 'errored'
+    if (timedOut) {
+      state = 'timeout'
+    }
+    // An interrupted run measured nothing, whatever the case threw while it stopped.
+    else if (!interrupted) {
+      state = classifyError(error)
+    }
     return {
       error,
       errorMessage: interruptMessage ?? errorMessageFrom(error) ?? (timedOut && timeout != null ? `Case timed out after ${timeout}ms.` : 'Unknown case failure.'),
       scoresByKind: customScoresByKind,
-      state: timedOut ? 'timeout' : 'failed',
+      state,
     }
   }
   finally {
@@ -731,10 +747,8 @@ export function describeTask(
         }
 
         const totalCases = runCases.length
-        const scoreBucketsByKind: Record<RunScoreKind, number[]> = {
-          exact: [],
-          judge: [],
-        }
+        // Every settled outcome of every attempt, scored together at the end.
+        const settledOutcomes: ScoredCaseOutcome[] = []
         const hasAutoAttempt = runCases.some(({ taskCase }) => resolveCaseExecutionPolicy(taskCase, taskExecutionPolicy).autoAttempt > 0)
         // Outside `vieval run` there is no project or run scheduler, so the task pool is the broadest one.
         const taskScheduler = (context.scheduler ?? createScheduler()).child({
@@ -768,7 +782,7 @@ export function describeTask(
                   return
                 }
                 emitCaseOutcome(context, taskCase, outcome, index, totalCases, undefined)
-                collectCaseOutcomeScores(outcome, scoreBucketsByKind)
+                settledOutcomes.push(toScoredCaseOutcome(outcome))
               })
             }),
           )
@@ -799,7 +813,7 @@ export function describeTask(
 
               const { index, taskCase } = runCase
               emitCaseOutcome(context, taskCase, outcome, index, totalCases, autoAttemptOf(taskCase))
-              collectCaseOutcomeScores(outcome, scoreBucketsByKind)
+              settledOutcomes.push(toScoredCaseOutcome(outcome))
             })
 
             const shouldContinue = context.signal?.aborted !== true && attemptOutcomes.some((outcome, position) => {
@@ -823,18 +837,17 @@ export function describeTask(
           }
         }
 
-        const scores = (Object.keys(scoreBucketsByKind) as RunScoreKind[])
-          .filter(kind => scoreBucketsByKind[kind].length > 0)
-          .map((kind) => {
-            const values = scoreBucketsByKind[kind]
-            const total = values.reduce((sum, value) => sum + value, 0)
-            return {
-              kind,
-              score: total / values.length,
-            }
-          })
+        const { coverage, exact, judge } = scoreCaseOutcomes(settledOutcomes)
+        const scores: RunScore[] = []
+        if (exact != null) {
+          scores.push({ kind: 'exact', score: exact })
+        }
+        if (judge != null) {
+          scores.push({ kind: 'judge', score: judge })
+        }
 
         return {
+          coverage,
           scores,
         }
       },

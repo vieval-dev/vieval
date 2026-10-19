@@ -100,19 +100,24 @@ describe('aggregateRunResults', () => {
     expect(summary.runs).toHaveLength(2)
     expect(summary.inferenceExecutors).toEqual([
       {
+        coverage: null,
         exactAverage: 7 / 12,
         hybridAverage: expect.any(Number),
         inferenceExecutorId: 'openai:gpt-4.1-mini',
         judgeAverage: 0.5,
         runCount: 2,
+        // Runs without coverage have no unmeasured cases, so the strict score equals the exact score.
+        strictExactAverage: 7 / 12,
       },
     ])
     expect(summary.inferenceExecutors[0]?.hybridAverage).toBeCloseTo(13 / 24)
     expect(summary.overall).toEqual({
+      coverage: null,
       exactAverage: 7 / 12,
       hybridAverage: expect.any(Number),
       judgeAverage: 0.5,
       runCount: 2,
+      strictExactAverage: 7 / 12,
     })
     expect(summary.overall.hybridAverage).toBeCloseTo(13 / 24)
   })
@@ -132,13 +137,59 @@ describe('aggregateRunResults', () => {
 
     expect(summary.inferenceExecutors).toEqual([
       {
+        coverage: null,
         exactAverage: null,
         hybridAverage: 0.8,
         inferenceExecutorId: 'openai:gpt-4.1',
         judgeAverage: 0.8,
         runCount: 1,
+        strictExactAverage: null,
       },
     ])
+  })
+
+  // ROOT CAUSE:
+  //
+  // In the `tts-speech-formula` comparison of 2026-10-19, the `llm` workspace graded 87.6% of its measured cases right,
+  // but 93 of its cases errored on provider 429s. Errored cases scored exact 0, so its exact score sank to the level
+  // of a workspace that measured every case and got far fewer right.
+  //
+  // collectCaseOutcomeScores: if (outcome.state !== 'passed') exact.push(0)
+  //
+  // We fixed this by scoring only measured cases in `exactAverage`, and reporting `coverage` and the old
+  // every-case score as `strictExactAverage` next to it.
+  /**
+   * @example
+   * one run measured 3 of 4 cases with exact 1 -> exact 1, coverage 3/4, strict exact 0.75.
+   */
+  it('scores measured cases in exactAverage and reports coverage and strict exact next to it', () => {
+    const summary = aggregateRunResults([
+      {
+        coverage: { measured: 3, total: 4 },
+        entryId: 'tasks/read-aloud/ko',
+        id: 'run-1',
+        inferenceExecutorId: 'default',
+        matrix: createScheduledTaskMatrix(),
+        scores: [{ kind: 'exact', score: 1 }],
+      },
+      {
+        coverage: { measured: 0, total: 2 },
+        entryId: 'tasks/read-aloud/zh',
+        id: 'run-2',
+        inferenceExecutorId: 'default',
+        matrix: createScheduledTaskMatrix(),
+        scores: [],
+      },
+    ])
+
+    expect(summary.runs[0]?.exactAverage).toBe(1)
+    expect(summary.runs[0]?.coverage).toEqual({ measured: 3, total: 4 })
+    expect(summary.runs[0]?.strictExactAverage).toBe(0.75)
+    expect(summary.runs[1]?.exactAverage).toBeNull()
+    expect(summary.runs[1]?.strictExactAverage).toBe(0)
+    expect(summary.overall.exactAverage).toBe(1)
+    expect(summary.overall.coverage).toEqual({ measured: 3, total: 6 })
+    expect(summary.overall.strictExactAverage).toBe(0.375)
   })
 
   it('throws a deterministic error for unknown score kinds', () => {

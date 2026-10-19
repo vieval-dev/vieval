@@ -16,8 +16,10 @@ import type { RunHandle } from './store'
 import { readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 
+import { hybridAverage } from 'vieval/core/scoring'
+
 import { sumInference } from '../shared/inference'
-import { average, buildProjectNodes, buildTaskNodes, caseKeyOf, currentPosition, estimateProgress, hybridAverage, scoreRounds, toCaseNode } from '../shared/reduce'
+import { average, buildProjectNodes, buildTaskNodes, caseKeyOf, currentPosition, estimateProgress, scoreRounds, toCaseNode } from '../shared/reduce'
 import { ViewerError } from './errors'
 import { classifyPreview, contentTypeFromName } from './files'
 

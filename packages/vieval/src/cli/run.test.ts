@@ -1159,6 +1159,7 @@ export default defineConfig({
       projects: [
         {
           caseSummary: {
+            errored: 0,
             failed: 0,
             passed: 1986,
             skipped: 0,
@@ -1175,10 +1176,12 @@ export default defineConfig({
           result: {
             inferenceExecutors: [],
             overall: {
+              coverage: null,
               exactAverage: 0.3851948392189298,
               hybridAverage: 0.3851948392189298,
               judgeAverage: null,
               runCount: 1,
+              strictExactAverage: 0.3851948392189298,
             },
             runs: [],
           },
@@ -1205,10 +1208,12 @@ export default defineConfig({
           result: {
             inferenceExecutors: [],
             overall: {
+              coverage: null,
               exactAverage: 1,
               hybridAverage: 1,
               judgeAverage: null,
               runCount: 1,
+              strictExactAverage: 1,
             },
             runs: [],
           },
@@ -1809,6 +1814,7 @@ describeTask('cli-case-concurrency', (task) => {
 
     expect(output.projects[0]?.executed).toBe(true)
     expect(output.projects[0]?.caseSummary).toEqual({
+      errored: 0,
       failed: 0,
       passed: 1,
       skipped: 0,
@@ -1827,6 +1833,7 @@ describeTask('cli-case-concurrency', (task) => {
 
     expect(output.projects[0]?.executed).toBe(true)
     expect(output.projects[0]?.caseSummary).toEqual({
+      errored: 0,
       failed: 0,
       passed: 1,
       skipped: 0,
@@ -1851,8 +1858,10 @@ describeTask('cli-case-concurrency', (task) => {
       })
 
       expect(output.projects[0]?.executed).toBe(true)
+      // The fixture's first attempt throws a plain error, so that case counts as `errored`.
       expect(output.projects[0]?.caseSummary).toEqual({
-        failed: 1,
+        errored: 1,
+        failed: 0,
         passed: 1,
         skipped: 0,
         timeout: 0,
@@ -1943,10 +1952,12 @@ describeTask('failed-case-task', () => {
           result: {
             inferenceExecutors: [],
             overall: {
+              coverage: null,
               exactAverage: 1,
               hybridAverage: 1,
               judgeAverage: null,
               runCount: 288,
+              strictExactAverage: 1,
             },
             runs: [],
           },

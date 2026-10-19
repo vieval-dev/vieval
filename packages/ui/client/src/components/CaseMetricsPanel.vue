@@ -269,7 +269,7 @@ watch([selected, filtering], () => {
 }, { immediate: true })
 
 function passRate(rows: readonly CaseRow[]): string {
-  const finished = rows.filter(row => row.state === 'passed' || row.state === 'failed' || row.state === 'timeout')
+  const finished = rows.filter(row => row.state === 'passed' || row.state === 'failed' || row.state === 'errored' || row.state === 'timeout')
   return finished.length === 0 ? '—' : `${((finished.filter(row => row.state === 'passed').length / finished.length) * 100).toFixed(1)}%`
 }
 const selectedRows = computed(() => table.value.rows.filter(row => selected.value.has(row.key)))
