@@ -1,5 +1,5 @@
 import type { EvalDefinition, EvalModule } from '../../config'
-import type { RunnerRuntimeContext } from './runtime-context'
+import type { RunnerRuntimeContext } from './collect'
 
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -7,7 +7,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import { asProjectRelativePath, collectEvalEntries } from './collect'
-import { createRunnerRuntimeContext } from './runtime-context'
 
 const packageDirectory = fileURLToPath(new URL('../../../', import.meta.url))
 let runtimeContext: RunnerRuntimeContext
@@ -25,11 +24,8 @@ function taskAgentFixtureEvalPath(fileName: string): string {
 }
 
 describe('collectEvalEntries', () => {
-  beforeAll(async () => {
-    runtimeContext = await createRunnerRuntimeContext({
-      cwd: import.meta.dirname,
-      fallbackProjectRootDirectory: packageDirectory,
-    })
+  beforeAll(() => {
+    runtimeContext = { projectRootDirectory: packageDirectory }
   })
 
   it('keeps cross-drive absolute path when relative conversion is not possible', () => {
@@ -147,6 +143,59 @@ describe('collectEvalEntries', () => {
         },
       },
     })
+  })
+
+  // ROOT CAUSE:
+  //
+  // `loadEvalModulesWithVitestRuntime` keys the second task of a file as `<href>#registration-2`, but the entry id
+  // was built from the file path alone, so both tasks got one id and one set of task ids. Their cases then
+  // overwrote each other in the reporter, the event log, and every report (airi `tts-speech-formula` split its four
+  // languages into four files to work around it).
+  //
+  // We fixed this by deriving the entry name from the task name and adding `#<name>` to the id when it differs
+  // from the file name.
+  it('gives each task of one eval file its own entry id and name', () => {
+    const href = pathToFileURL(fixtureEvalPath('speech.eval.ts')).href
+
+    const entries = collectEvalEntries(
+      {
+        [`${href}#registration-2`]: createModule({ description: 'English.', name: 'en' }),
+        [href]: createModule({ description: 'Chinese.', name: 'zh' }),
+      },
+      runtimeContext,
+    )
+
+    expect(entries.map(entry => entry.name)).toEqual(['en', 'zh'])
+    expect(entries[0]!.id).toMatch(/evals\/speech#en$/)
+    expect(entries[1]!.id).toMatch(/evals\/speech#zh$/)
+  })
+
+  it('keeps the file id for a task named like its file', () => {
+    const href = pathToFileURL(fixtureEvalPath('commentary.eval.ts')).href
+
+    const entries = collectEvalEntries({ [href]: createModule({ description: 'Commentary.', name: 'commentary' }) }, runtimeContext)
+
+    expect(entries[0]!.id).toMatch(/evals\/commentary$/)
+  })
+
+  it('rejects two tasks with one name in one eval file', () => {
+    const href = pathToFileURL(fixtureEvalPath('speech.eval.ts')).href
+
+    expect(() => collectEvalEntries(
+      {
+        [`${href}#registration-2`]: createModule({ description: 'Second.', name: 'zh' }),
+        [href]: createModule({ description: 'First.', name: 'zh' }),
+      },
+      runtimeContext,
+    )).toThrow('defines more than one task named "zh"')
+  })
+
+  it('collects eval files of every module format that discovery includes', () => {
+    const href = pathToFileURL(fixtureEvalPath('speech.eval.mts')).href
+
+    const entries = collectEvalEntries({ [href]: createModule({ description: 'Speech.', name: 'speech' }) }, runtimeContext)
+
+    expect(entries[0]!.id).toMatch(/evals\/speech$/)
   })
 
   it('filters invalid file entries without throwing', () => {

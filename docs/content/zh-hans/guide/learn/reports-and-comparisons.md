@@ -11,14 +11,13 @@ CLI 默认在终端中显示本次运行的摘要。如果需要在运行结束�
 
 ## 保存一次运行的报告
 
-`vieval run` 默认向标准输出写入便于阅读的摘要。`--json` 会把标准输出改为 JSON，但不会创建报告文件。要保存报告目录，请使用 `--report-out`。
+`vieval run` 默认向标准输出写入便于阅读的摘要，并把报告写入配置文件旁边的 `.vieval/reports`。`--report-out <path>` 修改报告根目录；`--no-report` 不写入任何报告，此时用例产物会写入一个临时目录，并在运行结束时删除。`--json` 只把标准输出改为 JSON，不改变写入哪些文件。
 
 ::: code-group
 
 ```bash [终端]
 vieval run \
   --config ./vieval.config.ts \
-  --workspace local \
   --experiment baseline \
   --attempt attempt-a \
   --report-out .vieval/reports
@@ -26,17 +25,17 @@ vieval run \
 
 :::
 
-上面的命令仍会显示可读摘要，并把报告写入 `.vieval/reports` 下的本次运行目录。如果脚本需要从标准输出读取运行结果和最终的 `reportDirectory`，可以再添加 `--json`。可读摘要不会显示报告目录路径。
+上面的命令仍会显示可读摘要，并把报告写入 `.vieval/reports` 下的运行目录。如果脚本需要从标准输出读取运行结果，可以再添加 `--json`：结果包含 `invocationId` 和 `projects` 列表，每个项目都有自己的 `runId` 和 `reportDirectory`。
 
-未使用 `--report-out` 时，JSON 结果中的 `reportDirectory` 为 `null`，后续的 `vieval report ...` 命令也无法读取这次运行的数据。
+使用 `--no-report` 时，每个项目的 `reportDirectory` 都为 `null`，后续的 `vieval report ...` 命令也无法读取这次运行的数据。
 
 ## 了解一次运行写入的内容
 
-Vieval 在报告根目录下按工作区、项目、实验、尝试和自动生成的运行 ID 保存每次运行。如果一次运行包含多个项目，项目目录名会使用 `multi-project`。
+每个项目都是一次独立的运行。Vieval 在报告根目录下按 `<工作区>/<项目>/<实验>/<尝试>/<运行>/` 保存每次运行。工作区目录名默认取工作区配置文件所在目录的名称；只有没有配置文件时才使用 `default-workspace`。同一次 `vieval run` 调用产生的各个运行共用 `experimentId`、`attemptId` 和 `invocationId`；由比较启动的运行还带有 `comparisonId`。
 
 | 文件 | 内容 |
 | --- | --- |
-| `run-summary.json` | 完整的 CLI 运行结果，包括各类 ID、项目状态、用例计数与失败信息、矩阵摘要和汇总分数。 |
+| `run-summary.json` | 恰好一个项目的运行结果，包括 `schemaVersion: 1`、`runId`、`reportDirectory`、各类 ID、项目状态、用例计数与失败信息、矩阵摘要和汇总分数。`vieval report` 命令遇到其他版本时会报错。 |
 | `events.jsonl` | 按发生顺序记录运行、任务、用例、分数、指标和自定义事件。 |
 | `cases.jsonl` | 每个「任务 ID + 用例 ID」组合的最终记录，包括状态、耗时、根据事件推算的重试次数、分数、指标以及可选的输入和输出。 |
 | `metrics-summary.json` | 从 `cases.jsonl` 计算出的分数数量、总和与平均值。 |
@@ -111,14 +110,59 @@ vieval report compare <基线报告目录> <候选方案报告目录>
 
 输出格式支持 `table` 和 `json`。
 
-为了对齐用例，命令默认依次尝试指标 `benchmark.case.id`、指标 `vieval.case.id`，最后使用记录中的 `caseId`。如果评测基准有其他稳定标识符，可以传入 `--case-key <key>`。显式指定的键必须存在于每条记录中；基线或候选方案中出现重复键时，命令会报错，不会自行选择其中一条记录。
+为了对齐用例，命令默认依次尝试指标 `benchmark.case.id`、指标 `vieval.case.id`，最后使用 `<taskId>::<caseName>`。如果评测基准有其他稳定标识符，可以传入 `--case-key <key>`。显式指定的键必须存在于每条记录中；基线或候选方案中出现重复键时，命令会报错，不会自行选择其中一条记录。
 
 `--case-key`、`--group-by` 和 `report cases` 的字段选择规则相同：先查找同名指标，再查找 `scores.<name>` 或分数名称，最后查找用例记录的直接字段。例如，`benchmark.category` 可以引用指标，`state` 可以引用用例状态字段。
 
-不要把该命令与顶层 `vieval compare` 混淆：
+`vieval report compare <基线报告目录> <候选方案报告目录>` 只比较已经保存的用例报告。如果要让同一评测基准的多种实现并排运行，请使用比较配置。
 
-- `vieval report compare <基线报告目录> <候选方案报告目录>` 读取并比较已经保存的用例报告。
-- `vieval compare --config ... --comparison ...` 读取比较模式配置，针对同一个评测基准运行所有已配置方案。Vieval 会把 `benchmark.sharedCaseNamespace` 用作各方案共同的缓存项目名（内部的 `cacheProjectName`），并可通过 `--output` 保存汇总后的比较结果。
+## 运行一次比较
+
+列出 `workspaces` 的配置就是一个比较。每一项可以是包含 `vieval.config.*` 的目录路径或 glob，可以用 `'!<glob>'` 排除目录，也可以写成 `{ root, id?, env? }`。工作区 ID 默认取目录名，ID 重复时会报错。比较配置中没有模型、插件和报告器，每个工作区都按自己的配置运行。
+
+::: code-group
+
+```ts [evals/agent-memory/vieval.config.ts]
+import { defineConfig, loadEnv } from 'vieval'
+
+export default defineConfig({
+  cache: { namespace: 'locomo-cases-v1' },
+  env: loadEnv('test', import.meta.dirname, ''),
+  id: 'agent-memory-semantic-approaches',
+  workspaces: ['eval/test-objects/*'],
+})
+```
+
+:::
+
+::: code-group
+
+```bash [终端]
+vieval run --config evals/agent-memory/vieval.config.ts
+```
+
+:::
+
+- 每个工作区都在独立进程中运行，使用该工作区自己解析到的 `vieval`。它的版本必须相同，因此工作区的依赖必须已经安装。
+- 默认所有工作区同时开始。可以用 `concurrency: { workspace }` 或 `--workspace-concurrency` 限制数量。
+- 比较配置的 `env`（以及单个条目的 `env`）优先于各工作区配置的 `env`，并在工作区插件运行之前生效。
+- `cache: { namespace }` 让所有工作区共用比较配置旁边的 `.vieval/cache/<比较 ID>/<namespace>/`。
+- 终端中只有一个实时窗口，显示所有工作区的 `Workspaces`、`Projects`、`Tasks`、`Cases`、`Concurrency` 和 `Time` 行。某个工作区失败不会中止其他工作区。
+- 运行结束后会输出排行榜：每个工作区的每个项目占一行，按混合分数（hybrid）排序；随后列出失败的工作区及其 stderr 的最后几行。
+- 只要有工作区失败或存在失败的用例，退出码就是 `1`。`--json` 会输出比较结果。
+- 报告写入比较配置旁边的 `.vieval/reports`。实验 ID 默认为比较 ID，所有工作区共用同一个尝试，因此比较中的每次运行都位于 `<工作区>/<项目>/<比较 ID>/<尝试>/` 下。
+- 使用 `--with-viewer` 时，只启动一个查看器，展示比较的报告根目录。
+
+选择器用于缩小运行范围。它们可以重复传入，值中包含 `*` 时按 glob 匹配：`--workspace <id>`（仅用于比较，用在工作区配置上会报错）、`--project <name>`、`--task <name>`（`describeTask` 名称或评测项 ID）和 `--case <name>`（用例名称）。选择器没有匹配到任何内容时会报错，并列出现有的选项；在比较中，`--project`、`--task` 和 `--case` 必须至少在一个工作区中有匹配。
+
+::: code-group
+
+```bash [终端]
+vieval run --config evals/agent-memory/vieval.config.ts --workspace mem9 --with-viewer --open
+vieval run --task zh --case 'case #1*'
+```
+
+:::
 
 ## 完成一次完整比较流程
 
@@ -131,7 +175,6 @@ vieval report compare <基线报告目录> <候选方案报告目录>
 ```bash [终端 — 运行并保存基线报告]
 vieval run \
   --config ./vieval.baseline.config.ts \
-  --workspace local \
   --experiment baseline \
   --attempt attempt-a \
   --report-out .vieval/reports/baseline
@@ -144,7 +187,6 @@ vieval run \
 ```bash [终端 — 运行并保存候选方案报告]
 vieval run \
   --config ./vieval.candidate.config.ts \
-  --workspace local \
   --experiment candidate \
   --attempt attempt-a \
   --report-out .vieval/reports/candidate
@@ -193,6 +235,6 @@ vieval report compare \
 
 最后一条命令要求每个用例都有唯一的 `benchmark.case.id`。如果无法保证这一点，并且默认标识符可以稳定对应同一个用例，请省略 `--case-key`。
 
-常见错误包括：把 `--json` 当作保存报告的选项；试图用报告命令读取没有通过 `--report-out` 保存的运行；或使用自动生成、可能重复的标识符对齐用例。只有当所选键在基线和候选方案中都表示同一个评测基准用例时，比较结果才有意义。
+常见错误包括：让报告命令读取错误的根目录（使用 `--report-out` 时，报告位于该路径下，而不是 `.vieval/reports`）；试图读取使用 `--no-report` 的运行；或使用自动生成、可能重复的标识符对齐用例。只有当所选键在基线和候选方案中都表示同一个评测基准用例时，比较结果才有意义。
 
 可以在[API](/zh-hans/api/)中查看公开入口，在[配置](/zh-hans/config/)中查看当前配置接口。

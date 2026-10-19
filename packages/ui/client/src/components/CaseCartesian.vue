@@ -7,6 +7,7 @@ import type { ParallelAxis } from './ParallelCoordinates.vue'
 import { axisBottom, axisLeft, brush, brushX, brushY, format, scaleBand, select } from 'd3'
 import { onMounted, useTemplateRef, watch } from 'vue'
 
+import { caseOffset } from '../caseMetrics'
 import { useElementWidth } from '../composables/useElementWidth'
 
 /**
@@ -175,7 +176,7 @@ function placement(axis: ParallelAxis | undefined, range: [number, number], salt
   if (axis == null) {
     const middle = (range[0] + range[1]) / 2
     const reach = Math.abs(range[1] - range[0]) * 0.4
-    return { place: row => middle + spread(row.key, salt) * 2 * reach }
+    return { place: row => middle + caseOffset(row.key, salt) * 2 * reach }
   }
   if (axis.kind === 'category') {
     const band = scaleBand(props.categoryValues[axis.name] ?? [], range).paddingInner(0.15).paddingOuter(0.05)
@@ -183,7 +184,7 @@ function placement(axis: ParallelAxis | undefined, range: [number, number], salt
       place: (row) => {
         const value = row.categories[axis.name]
         const start = value == null ? undefined : band(value)
-        return start == null ? null : start + band.bandwidth() / 2 + spread(row.key, salt) * band.bandwidth() * 0.85
+        return start == null ? null : start + band.bandwidth() / 2 + caseOffset(row.key, salt) * band.bandwidth() * 0.85
       },
       scale: band,
     }
@@ -199,17 +200,6 @@ function render(): void {
   svg.selectAll('*').remove()
   dots = drawDots(svg)
   paint()
-}
-
-/**
- * Stable offset in `-0.5..0.5` per case and salt, so a case keeps its spot inside a band (or the free direction of a
- * strip) across redraws instead of jumping on every update.
- */
-function spread(key: string, salt: number): number {
-  let hash = salt * 2654435761
-  for (let index = 0; index < key.length; index++)
-    hash = Math.imul(hash ^ key.charCodeAt(index), 2654435761)
-  return ((hash >>> 0) % 1000) / 1000 - 0.5
 }
 
 onMounted(render)

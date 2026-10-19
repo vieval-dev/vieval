@@ -27,6 +27,29 @@ describe('report compare', () => {
     expect(comparison.topRegressions).toHaveLength(0)
   })
 
+  // ROOT CAUSE:
+  //
+  // Without `--case-key` or a `benchmark.case.id` metric, cases were matched by `caseId` (`<index>:<name>`), which
+  // is unique only within one task. A run with several tasks or matrix rows has the same case ids in each of
+  // them, so the comparison threw "duplicate case key" for any multi-task run.
+  //
+  // We fixed this by falling back to the task id plus the case name.
+  it('matches same-named cases of different tasks separately by default', () => {
+    const record = (runId: string, taskId: string, exact: number) => ({ attemptId: 'a', caseId: '0:case #1', caseName: 'case #1', durationMs: 1, endedAt: 'e', experimentId: 'e', metrics: {}, projectName: 'p', retryCount: 0, runId, schemaVersion: 1 as const, scores: { exact }, startedAt: 's', state: 'passed' as const, taskId, workspaceId: 'w' })
+
+    const comparison = buildCaseComparison({
+      left: [record('left', 'zh::default::run=tts%3Dnone::eval=default', 0), record('left', 'en::default::run=tts%3Dnone::eval=default', 1)],
+      right: [record('right', 'zh::default::run=tts%3Dnone::eval=default', 1), record('right', 'en::default::run=tts%3Dnone::eval=default', 1)],
+      scoreKind: 'exact',
+    })
+
+    expect(comparison.cases.map(row => row.caseKey)).toEqual([
+      'en::default::run=tts%3Dnone::eval=default::case #1',
+      'zh::default::run=tts%3Dnone::eval=default::case #1',
+    ])
+    expect(comparison.cases[1]?.delta.score).toBe(1)
+  })
+
   /**
    * @example
    * it('reports added and removed cases') verifies unmatched case accounting.
@@ -116,7 +139,7 @@ describe('report compare', () => {
     expect(table).toContain('Top improvements')
     expect(table).toContain('Top regressions')
     expect(table).toContain('changedMetrics=prediction')
-    expect(table).toContain('Added cases added')
-    expect(table).toContain('Removed cases removed')
+    expect(table).toContain('Added cases t::Added')
+    expect(table).toContain('Removed cases t::Removed')
   })
 })

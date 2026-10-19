@@ -1,9 +1,9 @@
-import type { CliRunOutput } from './run'
+import type { RunSummaryFile } from './report-artifacts'
 
 import { Buffer } from 'node:buffer'
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { stripVTControlCharacters } from 'node:util'
 
@@ -347,6 +347,38 @@ export default defineConfig({
   return temporaryDirectory
 }
 
+/** Two projects (`alpha`, `beta`), each with one eval file that registers `zh` and `en` with three quick cases. */
+async function createLanguageProjectsFixture(): Promise<string> {
+  const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
+  const directory = await mkdtemp(join(tmpdir(), 'vieval-language-projects-'))
+  temporaryDirectories.push(directory)
+  for (const project of ['alpha', 'beta']) {
+    await mkdir(join(directory, project), { recursive: true })
+    await writeFile(join(directory, project, 'speech.eval.ts'), `
+import { describeTask } from '${vievalImportPath}'
+
+for (const language of ['zh', 'en']) {
+  describeTask(language, ({ casesFromInputs }) => {
+    casesFromInputs('case', [1, 2, 3], async () => {})
+  })
+}
+`, 'utf-8')
+  }
+  await writeFile(join(directory, 'vieval.config.ts'), `
+import { defineConfig } from '${vievalImportPath}'
+
+export default defineConfig({
+  scheduler: { concurrency: { case: 4 } },
+  models: [{ aliases: [], id: 'openai:gpt-4.1-mini', model: 'gpt-4.1-mini', inferenceExecutor: 'openai', inferenceExecutorId: 'openai:gpt-4.1-mini' }],
+  projects: [
+    { name: 'alpha', root: './alpha', include: ['*.eval.ts'] },
+    { name: 'beta', root: './beta', include: ['*.eval.ts'] },
+  ],
+})
+`, 'utf-8')
+  return directory
+}
+
 async function createRunMatrixDslProject(options: {
   projectName: string
   runMatrix: Record<string, string[]>
@@ -393,49 +425,6 @@ export default defineConfig({
       name: '${options.projectName}',
       root: '.',
       runMatrix: ${JSON.stringify({ extend: options.runMatrix })},
-    },
-  ],
-})
-`,
-    'utf-8',
-  )
-
-  return temporaryDirectory
-}
-
-async function createWorkspaceModeDslProject(): Promise<string> {
-  const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-workspace-project-'))
-  temporaryDirectories.push(temporaryDirectory)
-
-  const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
-  const workspaceDirectory = join(temporaryDirectory, 'workspaces', 'semantic-memory')
-  await mkdir(join(workspaceDirectory, 'evals'), { recursive: true })
-  await writeFile(
-    join(workspaceDirectory, 'evals', 'workspace-task.eval.ts'),
-    `
-import { caseOf, describeTask } from '${vievalImportPath}'
-
-describeTask('workspace-task', () => {
-  caseOf('workspace-case', () => {}, {
-    input: {
-      source: 'workspace-case',
-    },
-  })
-})
-`,
-    'utf-8',
-  )
-
-  await writeFile(
-    join(temporaryDirectory, 'vieval.config.ts'),
-    `
-import { defineConfig } from '${vievalImportPath}'
-
-export default defineConfig({
-  workspaces: [
-    {
-      id: 'semantic-memory',
-      root: './workspaces/semantic-memory',
     },
   ],
 })
@@ -522,25 +511,6 @@ describe('runVievalCli', () => {
       taskCount: 2,
     })
     expect(output.projects[0]?.matrixSummary).not.toBeNull()
-  })
-
-  it('runs workspace-mode config by discovering evals under each workspace root', async () => {
-    const projectDirectory = await createWorkspaceModeDslProject()
-
-    const output = await runVievalCli({
-      configFilePath: join(projectDirectory, 'vieval.config.ts'),
-      cwd: projectDirectory,
-    })
-
-    expect(output.projects).toHaveLength(1)
-    expect(output.projects[0]).toMatchObject({
-      discoveredEvalFileCount: 1,
-      entryCount: 1,
-      errorMessage: null,
-      executed: false,
-      name: 'semantic-memory',
-      taskCount: 1,
-    })
   })
 
   it('executes scheduled tasks when project defines executor', async () => {
@@ -638,24 +608,26 @@ describeTask('cache-runtime-task', () => {
       workspace: 'packages-vieval',
     })
 
-    expect(output.reportDirectory).toBeDefined()
-    expect(output.reportDirectory).toContain('/packages-vieval/example-pattern-byoa-bring-your-own-agent-exec/baseline/attempt-1/')
+    expect(output.projects[0]!.reportDirectory).toBeDefined()
+    expect(output.projects[0]!.reportDirectory).toContain('/packages-vieval/example-pattern-byoa-bring-your-own-agent-exec/baseline/attempt-1/')
 
-    const summaryText = await readFile(join(output.reportDirectory!, 'run-summary.json'), 'utf-8')
-    const eventsText = await readFile(join(output.reportDirectory!, 'events.jsonl'), 'utf-8')
-    const summary = JSON.parse(summaryText) as CliRunOutput
+    const summaryText = await readFile(join(output.projects[0]!.reportDirectory!, 'run-summary.json'), 'utf-8')
+    const eventsText = await readFile(join(output.projects[0]!.reportDirectory!, 'events.jsonl'), 'utf-8')
+    const summary = JSON.parse(summaryText) as RunSummaryFile
 
+    expect(summary.schemaVersion).toBe(1)
+    expect(summary.projects.map(project => project.name)).toEqual([output.projects[0]!.name])
     expect(summaryText).toContain('"workspaceId": "packages-vieval"')
     expect(summaryText).toContain('"experimentId": "baseline"')
     expect(summaryText).toContain('"attemptId": "attempt-1"')
-    expect(summary.reportDirectory).toBe(output.reportDirectory)
+    expect(summary.reportDirectory).toBe(output.projects[0]!.reportDirectory)
     expect(eventsText.length).toBeGreaterThan(0)
-    expect(await pathExists(join(output.reportDirectory!, 'cases.jsonl'))).toBe(true)
-    expect(await pathExists(join(output.reportDirectory!, 'metrics-summary.json'))).toBe(true)
-    expect(await pathExists(join(output.reportDirectory!, 'otlp', 'traces.json'))).toBe(true)
-    expect(await pathExists(join(output.reportDirectory!, 'otlp', 'logs.json'))).toBe(true)
-    expect(await pathExists(join(output.reportDirectory!, 'otlp', 'metrics.json'))).toBe(true)
-    expect(await pathExists(join(output.reportDirectory!, 'benchmark'))).toBe(true)
+    expect(await pathExists(join(output.projects[0]!.reportDirectory!, 'cases.jsonl'))).toBe(true)
+    expect(await pathExists(join(output.projects[0]!.reportDirectory!, 'metrics-summary.json'))).toBe(true)
+    expect(await pathExists(join(output.projects[0]!.reportDirectory!, 'otlp', 'traces.json'))).toBe(true)
+    expect(await pathExists(join(output.projects[0]!.reportDirectory!, 'otlp', 'logs.json'))).toBe(true)
+    expect(await pathExists(join(output.projects[0]!.reportDirectory!, 'otlp', 'metrics.json'))).toBe(true)
+    expect(await pathExists(join(output.projects[0]!.reportDirectory!, 'benchmark'))).toBe(true)
   })
 
   /**
@@ -702,9 +674,9 @@ describeTask('semantic-artifact-task', () => {
       workspace: 'semantic-workspace',
     })
 
-    const casesText = await readFile(join(output.reportDirectory!, 'cases.jsonl'), 'utf-8')
-    const metricsText = await readFile(join(output.reportDirectory!, 'metrics-summary.json'), 'utf-8')
-    const tracesText = await readFile(join(output.reportDirectory!, 'otlp', 'traces.json'), 'utf-8')
+    const casesText = await readFile(join(output.projects[0]!.reportDirectory!, 'cases.jsonl'), 'utf-8')
+    const metricsText = await readFile(join(output.projects[0]!.reportDirectory!, 'metrics-summary.json'), 'utf-8')
+    const tracesText = await readFile(join(output.projects[0]!.reportDirectory!, 'otlp', 'traces.json'), 'utf-8')
     const caseRecord = JSON.parse(casesText.trim()) as {
       input?: { question?: string, sampleId?: string }
       metrics?: Record<string, unknown>
@@ -783,9 +755,9 @@ describeTask('custom-telemetry-task', () => {
       workspace: 'ws-telemetry',
     })
 
-    expect(output.reportDirectory).toBeDefined()
+    expect(output.projects[0]!.reportDirectory).toBeDefined()
 
-    const eventsText = await readFile(join(output.reportDirectory!, 'events.jsonl'), 'utf-8')
+    const eventsText = await readFile(join(output.projects[0]!.reportDirectory!, 'events.jsonl'), 'utf-8')
     const events = eventsText
       .split('\n')
       .filter(line => line.trim().length > 0)
@@ -925,7 +897,7 @@ export default defineConfig({
         sawSummary: boolean
       }>
     })[telemetryRunEndStateKey]
-    const metricsText = await readFile(join(output.reportDirectory!, 'otlp', 'metrics.json'), 'utf-8')
+    const metricsText = await readFile(join(output.projects[0]!.reportDirectory!, 'otlp', 'metrics.json'), 'utf-8')
     const metricsArtifact = JSON.parse(metricsText) as {
       resourceMetrics?: Array<{
         scopeMetrics?: Array<{
@@ -940,13 +912,14 @@ export default defineConfig({
     }
     const exactMetric = metricsArtifact.resourceMetrics?.[0]?.scopeMetrics?.[0]?.metrics?.find(metric => metric.name === 'vieval.score.exact')
 
-    expect(output.reportDirectory).toBeDefined()
+    expect(output.projects[0]!.reportDirectory).toBeDefined()
     expect(output.projects[0]?.caseSummary?.passed).toBe(1)
     expect(exactMetric?.gauge?.dataPoints?.length).toBeGreaterThan(0)
     expect(openTelemetrySpanCalls).toEqual(expect.arrayContaining([
       {
         attributes: expect.objectContaining({
-          'vieval.run.id': output.runId,
+          // The `vieval.run` span covers the whole invocation; each project's run has its own id below it.
+          'vieval.invocation.id': output.invocationId,
           'vieval.workspace.id': 'otel-workspace',
         }),
         name: 'vieval.run',
@@ -954,7 +927,7 @@ export default defineConfig({
       {
         attributes: expect.objectContaining({
           'vieval.project.name': 'otel-project',
-          'vieval.run.id': output.runId,
+          'vieval.run.id': output.projects[0]!.runId,
         }),
         name: 'vieval.project',
       },
@@ -1527,6 +1500,114 @@ ${domainTask('vlc', 20)}
     expect(output.projects[0]?.caseSummary).toMatchObject({ passed: 6, total: 6 })
   })
 
+  // ROOT CAUSE:
+  //
+  // With only a run-wide case pool (for example `{ case: 8 }`), the second project of a workspace waited until the
+  // last, slowest case of the first project ended, while every other case slot stood idle.
+  // This happened because `resolveRunConcurrency` defaulted the run's `project` pool to 1 whatever else was
+  // declared, although the matching task default is already lifted by a run-wide task or case pool.
+  //
+  // We fixed this by applying the same rule to projects: one project at a time only when the run declares no task
+  // or case pool.
+  it('starts the next project while a slow case of the previous one still runs, filling the case pool', async () => {
+    const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
+    const state = createCaseConcurrencyRunState()
+    setCaseConcurrencyRunState(state)
+    const directory = await mkdtemp(join(tmpdir(), 'vieval-project-fill-'))
+    temporaryDirectories.push(directory)
+    // Cases with an even input block until released; odd inputs end at once.
+    const task = (name: string, inputs: number[]) => `
+import { describeTask } from '${vievalImportPath}'
+
+describeTask('${name}', (task) => {
+  task.casesFromInputs('${name}', ${JSON.stringify(inputs)}, async (context) => {
+    const state = globalThis.${caseConcurrencyRunStateKey}
+    state.active += 1
+    state.peak = Math.max(state.peak, state.active)
+    state.started.push(context.matrix.inputs)
+    if (context.matrix.inputs % 2 === 1) {
+      state.active -= 1
+      return
+    }
+    await new Promise<void>(resolve => state.releases.push(() => {
+      state.active -= 1
+      resolve()
+    }))
+  })
+})
+`
+    for (const [project, inputs] of [['alpha', [1, 2]], ['beta', [10]]] as const) {
+      await mkdir(join(directory, project), { recursive: true })
+      await writeFile(join(directory, project, `${project}.eval.ts`), task(project, [...inputs]), 'utf-8')
+    }
+    await writeFile(join(directory, 'vieval.config.ts'), `
+import { defineConfig } from '${vievalImportPath}'
+
+export default defineConfig({
+  scheduler: { concurrency: { case: 2 } },
+  models: [{ aliases: [], id: 'openai:gpt-4.1-mini', model: 'gpt-4.1-mini', inferenceExecutor: 'openai', inferenceExecutorId: 'openai:gpt-4.1-mini' }],
+  projects: [
+    { name: 'alpha', root: './alpha', include: ['*.eval.ts'] },
+    { name: 'beta', root: './beta', include: ['*.eval.ts'] },
+  ],
+})
+`, 'utf-8')
+
+    const runPromise = runVievalCli({ configFilePath: join(directory, 'vieval.config.ts'), cwd: directory, report: false })
+
+    // alpha's quick case ends, its slow case keeps one slot: beta must take the other.
+    await waitForExpectation(() => {
+      expect(state.started).toContain(10)
+    }, 200)
+    expect(state.started).toEqual(expect.arrayContaining([1, 2, 10]))
+    expect(state.releases).toHaveLength(2)
+
+    state.releases.splice(0).forEach(release => release())
+    const output = await runPromise
+
+    expect(state.peak).toBe(2)
+    expect(output.projects.map(project => project.caseSummary?.passed)).toEqual([2, 1])
+  })
+
+  it('runs each project as its own run with its own report directory, sharing the invocation identity', async () => {
+    const directory = await createLanguageProjectsFixture()
+
+    const output = await runVievalCli({ attempt: 'attempt-a', configFilePath: join(directory, 'vieval.config.ts'), cwd: directory, experiment: 'exp-a' })
+
+    const [alpha, beta] = output.projects
+    // Without `workspace`, the workspace is named after the directory of its config.
+    expect(alpha!.reportDirectory).toContain(join(basename(directory), 'alpha', 'exp-a', 'attempt-a', alpha!.runId!))
+    expect(beta!.reportDirectory).toContain(join(basename(directory), 'beta', 'exp-a', 'attempt-a', beta!.runId!))
+    expect(alpha!.runId).not.toBe(beta!.runId)
+    for (const project of output.projects) {
+      const summary = JSON.parse(await readFile(join(project.reportDirectory!, 'run-summary.json'), 'utf-8')) as RunSummaryFile
+      const firstEvent = JSON.parse((await readFile(join(project.reportDirectory!, 'events.jsonl'), 'utf-8')).split('\n')[0]!) as { invocationId: string, runId: string }
+      expect(summary.projects.map(item => item.name)).toEqual([project.name])
+      expect(summary.invocationId).toBe(output.invocationId)
+      expect(firstEvent.invocationId).toBe(output.invocationId)
+      expect(firstEvent.runId).toBe(project.runId)
+    }
+  })
+
+  it('runs only the tasks and cases selected by name or glob', async () => {
+    const directory = await createLanguageProjectsFixture()
+
+    const output = await runVievalCli({ case: ['case #2', 'case #3*'], configFilePath: join(directory, 'vieval.config.ts'), cwd: directory, project: ['alpha'], report: false, task: ['zh'] })
+
+    expect(output.projects.map(project => project.name)).toEqual(['alpha'])
+    expect(output.projects[0]!.taskCount).toBe(1)
+    expect(output.projects[0]!.caseSummary).toMatchObject({ passed: 2, total: 2 })
+  })
+
+  it('fails before running anything when a project, task, or case selector matches nothing', async () => {
+    const directory = await createLanguageProjectsFixture()
+    const configFilePath = join(directory, 'vieval.config.ts')
+
+    await expect(runVievalCli({ configFilePath, cwd: directory, project: ['gamma'], report: false })).rejects.toThrow('No project matches "gamma". Projects: alpha, beta.')
+    await expect(runVievalCli({ configFilePath, cwd: directory, report: false, task: ['fr'] })).rejects.toThrow('No task matches "fr". Tasks: en, zh.')
+    await expect(runVievalCli({ case: ['case #9'], configFilePath, cwd: directory, report: false })).rejects.toThrow('No case matches "case #9".')
+  })
+
   it('runs the concurrency-cases-from-inputs fixture as an executable example', async () => {
     const output = await runVievalCli({
       configFilePath: join(concurrencyCasesFromInputsProjectDirectory, 'vieval.config.ts'),
@@ -1695,8 +1776,8 @@ describeTask('cli-case-concurrency', (task) => {
     expect(firstOutput.experimentId).toBe(secondOutput.experimentId)
     expect(firstOutput.experimentId).toContain('scenario-candidate')
 
-    const summaryText = await readFile(join(firstOutput.reportDirectory!, 'run-summary.json'), 'utf-8')
-    const eventsText = await readFile(join(firstOutput.reportDirectory!, 'events.jsonl'), 'utf-8')
+    const summaryText = await readFile(join(firstOutput.projects[0]!.reportDirectory!, 'run-summary.json'), 'utf-8')
+    const eventsText = await readFile(join(firstOutput.projects[0]!.reportDirectory!, 'events.jsonl'), 'utf-8')
     const eventRecord = eventsText
       .split('\n')
       .filter(line => line.trim().length > 0)
@@ -2062,7 +2143,7 @@ export default defineConfig({
     expect(terminalOutput).toContain('planned')
     expect(terminalOutput).toContain('running')
     expect(terminalOutput).toContain('elapsed')
-    expect(terminalOutput).toContain('estimated')
+    expect(terminalOutput).toContain('left')
   })
 
   /**
@@ -2169,7 +2250,7 @@ describeTask('custom-live-task', () => {
     expect(terminalOutput).toContain('0/1')
     expect(terminalOutput).toContain('Cases')
     expect(terminalOutput).toContain('1 passed')
-    expect(terminalOutput).toContain('estimated')
+    expect(terminalOutput).toContain('left')
   })
 
   /**
@@ -2435,7 +2516,9 @@ export default defineConfig({
     expect(output.projects[0]?.executed).toBe(true)
     expect(output.projects[0]?.result).not.toBeNull()
     expect(output.projects[1]?.executed).toBe(false)
-    expect(formatVievalCliRunOutput(output)).toContain('Tasks     1 executed / 2 scheduled')
+    // `skipped-project` has two eval files with one task each. This expected "2 scheduled" before the
+    // registration race in `module-runtime.ts` was fixed: one of its files lost its task to the other project.
+    expect(formatVievalCliRunOutput(output)).toContain('Tasks     1 executed / 3 scheduled')
   })
 
   /**
@@ -2493,11 +2576,11 @@ describeTask('output-task', () => {
     // Removal condition: this scenario moves to a CLI subprocess test with the real global console.
     /**
      * @example
-     * expect(stdoutWrites.toSorted()).toEqual(['|output-project| output > alpha\n│ alpha line 1\n│ alpha warning\n└─ Done in 0ms\n', ...])
+     * expect(stdoutWrites.toSorted()).toEqual(['|output-project| output-task > alpha\n│ alpha line 1\n│ alpha warning\n└─ Done in 0ms\n', ...])
      */
     expect(stdoutWrites.toSorted()).toEqual([
-      '|output-project| output > alpha\n│ alpha line 1\n│ alpha warning\n└─ Done in 0ms\n',
-      '|output-project| output > beta\n│ beta line 1\n│ beta warning\n└─ Done in 0ms\n',
+      '|output-project| output-task > alpha\n│ alpha line 1\n│ alpha warning\n└─ Done in 0ms\n',
+      '|output-project| output-task > beta\n│ beta line 1\n│ beta warning\n└─ Done in 0ms\n',
     ])
     /**
      * @example
@@ -2540,7 +2623,7 @@ describeTask('artifact-task', () => {
       experiment: 'artifact-experiment',
       workspace: 'artifact-workspace',
     })
-    const reportDirectory = join(projectDirectory, '.vieval', 'reports', 'artifact-workspace', 'artifact-project', 'artifact-experiment', 'attempt-artifacts', output.runId!)
+    const reportDirectory = join(projectDirectory, '.vieval', 'reports', 'artifact-workspace', 'artifact-project', 'artifact-experiment', 'attempt-artifacts', output.projects[0]!.runId!)
     const events = (await readFile(join(reportDirectory, 'events.jsonl'), 'utf-8'))
       .trim()
       .split('\n')
@@ -2551,9 +2634,9 @@ describeTask('artifact-task', () => {
 
     /**
      * @example
-     * expect(output.reportDirectory).toBe(reportDirectory)
+     * expect(output.projects[0]!.reportDirectory).toBe(reportDirectory)
      */
-    expect(output.reportDirectory).toBe(reportDirectory)
+    expect(output.projects[0]!.reportDirectory).toBe(reportDirectory)
     /**
      * @example
      * expect(events.map(event => event.seq)).toEqual([1, 2, 3, ...])
@@ -2571,9 +2654,9 @@ describeTask('artifact-task', () => {
     ])
     /**
      * @example
-     * expect(ids).toEqual({ attemptId: 'attempt-artifacts', caseId: '0:artifact-case', runId: output.runId, taskId: expect.any(String) })
+     * expect(ids).toEqual({ attemptId: 'attempt-artifacts', caseId: '0:artifact-case', runId: output.projects[0]!.runId, taskId: expect.any(String) })
      */
-    expect(ids).toEqual({ attemptId: 'attempt-artifacts', caseId: '0:artifact-case', runId: output.runId, taskId: expect.any(String) })
+    expect(ids).toEqual({ attemptId: 'attempt-artifacts', caseId: '0:artifact-case', runId: output.projects[0]!.runId, taskId: expect.any(String) })
   })
 
   /**
@@ -2609,9 +2692,9 @@ describeTask('no-report-task', () => {
 
     /**
      * @example
-     * expect(output.reportDirectory).toBeNull()
+     * expect(output.projects[0]!.reportDirectory).toBeNull()
      */
-    expect(output.reportDirectory).toBeNull()
+    expect(output.projects[0]!.reportDirectory).toBeNull()
     expect(await pathExists(join(projectDirectory, '.vieval', 'reports'))).toBe(false)
     /**
      * @example
@@ -2650,10 +2733,10 @@ describeTask('report-out-task', () => {
 
     /**
      * @example
-     * expect(output.reportDirectory?.startsWith(reportOut)).toBe(true)
+     * expect(output.projects[0]!.reportDirectory?.startsWith(reportOut)).toBe(true)
      */
-    expect(output.reportDirectory?.startsWith(reportOut)).toBe(true)
-    expect(await pathExists(join(output.reportDirectory!, 'events.jsonl'))).toBe(true)
+    expect(output.projects[0]!.reportDirectory?.startsWith(reportOut)).toBe(true)
+    expect(await pathExists(join(output.projects[0]!.reportDirectory!, 'events.jsonl'))).toBe(true)
     expect(await pathExists(join(projectDirectory, '.vieval', 'reports'))).toBe(false)
   })
 

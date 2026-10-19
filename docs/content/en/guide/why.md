@@ -18,7 +18,7 @@ Vieval owns that evaluation lifecycle: discovery, matrix expansion, scheduling, 
 
 ## One run serves people and tools
 
-During a run, the CLI provides human-readable progress and summaries. Pass `--json` to print machine-readable output, or `--report-out <directory>` to write report artifacts that analysis, comparison, and automation can inspect. These output modes use the same discovery, scheduling, and execution path as the interactive CLI.
+During a run, the CLI provides human-readable progress and summaries, and writes report artifacts that analysis, comparison, and automation can inspect (by default to `.vieval/reports` next to the config; `--report-out <directory>` changes the root and `--no-report` turns them off). Pass `--json` to print machine-readable output. These output modes use the same discovery, scheduling, and execution path as the interactive CLI.
 
 ## A good fit
 
@@ -27,7 +27,7 @@ Vieval is a good fit when:
 - evaluations belong in a TypeScript repository and should be reviewed with product changes;
 - the same task needs to run across model, scenario, rubric, or dataset variations;
 - local runs and automation need consistent scheduling and evidence;
-- case-level assertions, scores, and metrics need to remain available through explicitly written report artifacts.
+- case-level assertions, scores, and metrics need to remain available through report artifacts.
 
 ## Not a good fit
 

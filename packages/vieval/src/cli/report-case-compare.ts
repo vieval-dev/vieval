@@ -19,7 +19,7 @@ export interface BuildCaseComparisonArgs extends CaseComparisonOptions {
 }
 
 export interface CaseComparisonOptions {
-  /** Optional key used to match cases. Defaults to `benchmark.case.id`, then `caseId`. */
+  /** Optional key used to match cases. Defaults to `benchmark.case.id`, then `vieval.case.id`, then task id plus case name. */
   caseKey?: string
   /** Optional key used to group matched case deltas. */
   groupBy?: string
@@ -216,11 +216,11 @@ export function formatCaseComparisonTable(output: CaseComparisonOutput): string 
   }
 
   if (output.added.length > 0) {
-    lines.push(`Added cases ${output.added.map(record => record.caseId).join(',')}`)
+    lines.push(`Added cases ${output.added.map(record => `${record.taskId}::${record.caseName}`).join(',')}`)
   }
 
   if (output.removed.length > 0) {
-    lines.push(`Removed cases ${output.removed.map(record => record.caseId).join(',')}`)
+    lines.push(`Removed cases ${output.removed.map(record => `${record.taskId}::${record.caseName}`).join(',')}`)
   }
 
   return lines.join('\n')
@@ -433,7 +433,11 @@ function resolveCaseKey(record: CaseRecord, caseKey: string | undefined): string
   }
 
   const vievalCaseId = getCaseSelectorValue(record, 'vieval.case.id')
-  return vievalCaseId.exists
-    ? String(vievalCaseId.value)
-    : record.caseId
+  if (vievalCaseId.exists) {
+    return String(vievalCaseId.value)
+  }
+
+  // A case id is only unique within its task, and it carries the case's index, which differs when two runs list
+  // cases in another order. The task id plus the case name names one case across tasks, matrix rows, and runs.
+  return `${record.taskId}::${record.caseName}`
 }

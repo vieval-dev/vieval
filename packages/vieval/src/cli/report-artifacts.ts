@@ -30,9 +30,29 @@ export interface ReportRunArtifact {
   events: ReportRunEvent[]
   eventsCount: number
   reportDirectory: string
-  summary: CliRunOutput
+  summary: RunSummaryFile
   summaryFilePath: string
 }
+
+/**
+ * Content of one run's `run-summary.json`: the invocation output narrowed to the run's one project, plus the run's
+ * own id and directory.
+ */
+export interface RunSummaryFile extends CliRunOutput {
+  /** Directory of this run's report. */
+  reportDirectory: string
+  /** Id of this run (one project of the invocation). */
+  runId: string
+  /**
+   * Version of this file's shape; readers reject versions they do not know.
+   *
+   * 1: one project per run, `invocationId` shared by the runs of one invocation.
+   */
+  schemaVersion: typeof RUN_SUMMARY_SCHEMA_VERSION
+}
+
+/** Current version of {@link RunSummaryFile}. */
+export const RUN_SUMMARY_SCHEMA_VERSION = 1
 
 /**
  * One line of `events.jsonl`.
@@ -79,7 +99,10 @@ export async function readReportArtifacts(reportPath: string): Promise<ReportRun
  */
 export function readReportRunArtifact(summaryFilePath: string): ReportRunArtifact {
   const reportDirectory = resolve(summaryFilePath, '..')
-  const summary = JSON.parse(readFileSync(summaryFilePath, 'utf-8')) as CliRunOutput
+  const summary = JSON.parse(readFileSync(summaryFilePath, 'utf-8')) as RunSummaryFile
+  if (summary.schemaVersion !== RUN_SUMMARY_SCHEMA_VERSION) {
+    throw new Error(`Unsupported run summary "${summaryFilePath}": schema version ${String(summary.schemaVersion ?? 'none')}, this vieval reads ${RUN_SUMMARY_SCHEMA_VERSION}. Use the vieval version that wrote it.`)
+  }
   const events = readReportEvents(resolve(reportDirectory, 'events.jsonl'))
 
   return {
@@ -95,24 +118,21 @@ export function readReportRunArtifact(summaryFilePath: string): ReportRunArtifac
  * Resolves the directory that holds one run's report artifacts.
  *
  * Use when:
- * - the run starts and needs a stable place for its live event log and case artifacts
- *
- * Expects:
- * - `projectNames` are the projects selected for the run, known before execution starts
+ * - a project's run starts and needs a stable place for its live event log and case artifacts
  *
  * Returns:
- * - `<reportRoot>/<workspace>/<project>/<experiment>/<attempt>/<run>`, where the project segment is the
- *   only selected project name, or `multi-project` when several projects run together
+ * - `<reportRoot>/<workspace>/<project>/<experiment>/<attempt>/<run>`; every project runs as its own run, so the
+ *   project segment is always that project's name
  */
 export function resolveRunReportDirectory(
   reportRoot: string,
   identity: ReportArtifactIdentity,
-  projectNames: readonly string[],
+  projectName: string,
 ): string {
   return resolve(
     reportRoot,
     identity.workspaceId,
-    deriveReportProjectId(projectNames),
+    sanitizeIdentitySegment(projectName),
     identity.experimentId,
     identity.attemptId,
     identity.runId,
@@ -188,7 +208,7 @@ export function summarizeReportRunArtifact(artifact: ReportRunArtifact): ReportR
  *
  * Expects:
  * - `reportDirectory` comes from {@link resolveRunReportDirectory} and already holds `events.jsonl`
- * - `output` already contains run identity fields
+ * - `output` holds the invocation identity and exactly the one project of this run
  *
  * Returns:
  * - the report directory path
@@ -198,11 +218,13 @@ export async function writeRunReportArtifacts(
   identity: ReportArtifactIdentity,
   reportDirectory: string,
 ): Promise<string> {
-  const projectId = deriveReportProjectId(output.projects.map(project => project.name))
+  const projectName = output.projects[0]?.name ?? 'default-project'
   const events = readReportEvents(resolve(reportDirectory, 'events.jsonl'))
-  const persistedOutput: CliRunOutput = {
+  const persistedOutput: RunSummaryFile = {
     ...output,
     reportDirectory,
+    runId: identity.runId,
+    schemaVersion: RUN_SUMMARY_SCHEMA_VERSION,
   }
 
   await mkdir(reportDirectory, { recursive: true })
@@ -214,7 +236,7 @@ export async function writeRunReportArtifacts(
 
   const caseRecords = buildCaseRecords({
     events,
-    projectName: projectId,
+    projectName,
   })
   const metricsSummary = buildMetricsSummary(caseRecords, [])
   const otlp = buildLocalOtlpProjection({ identity, records: caseRecords })
@@ -232,15 +254,6 @@ export async function writeRunReportArtifacts(
   await writeFile(resolve(reportDirectory, 'otlp', 'metrics.json'), `${JSON.stringify(otlp.metrics, null, 2)}\n`, 'utf-8')
 
   return reportDirectory
-}
-
-function deriveReportProjectId(projectNames: readonly string[]): string {
-  const uniqueProjectNames = [...new Set(projectNames)]
-  if (uniqueProjectNames.length === 1) {
-    return sanitizeIdentitySegment(uniqueProjectNames[0] ?? 'default-project')
-  }
-
-  return 'multi-project'
 }
 
 function sanitizeIdentitySegment(value: string): string {

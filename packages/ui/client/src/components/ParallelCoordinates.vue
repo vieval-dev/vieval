@@ -6,7 +6,7 @@ import type { CaseFilters, CaseRow } from '../caseMetrics'
 import { axisLeft, brushY, drag, format, line, scalePoint, select } from 'd3'
 import { onMounted, shallowRef, useTemplateRef, watch } from 'vue'
 
-import { shortMetricName } from '../caseMetrics'
+import { caseOffset, shortMetricName } from '../caseMetrics'
 import { useElementWidth } from '../composables/useElementWidth'
 
 /** One vertical axis: a numeric metric (brushable) or a category (values are picked by clicking their label). */
@@ -58,6 +58,9 @@ const height = 360
 const margin = { bottom: 16, left: 96, right: 72, top: 40 }
 const tick = format('~s')
 
+/** Category values fan out this much (stable per case), so a hundred cases of one group do not draw one stroke. */
+const CATEGORY_FAN_PX = 13
+
 let paths: Selection<SVGPathElement, CaseRow, SVGGElement, unknown> | undefined
 // Draws the pinned case over everything; set by each render, since it needs that render's scales.
 let drawFocus: (() => void) | undefined
@@ -88,7 +91,7 @@ function drawLines(svg: Selection<SVGSVGElement, unknown, null, undefined>) {
     if (axis.kind === 'category') {
       const value = row.categories[axis.name]
       const at = value == null ? undefined : (scales.get(axis.name) as ReturnType<typeof scalePoint<string>>)(value)
-      return at == null ? null : at + jitter(row.key)
+      return at == null ? null : at + caseOffset(row.key) * CATEGORY_FAN_PX
     }
     const value = row.numbers[axis.name]
     return value == null ? null : (scales.get(axis.name) as ScaleContinuousNumeric<number, number>)(value)
@@ -236,14 +239,6 @@ function flashNewAxes(): void {
   const view = root.value
   if (view != null && (first.left < view.scrollLeft || first.left + first.width > view.scrollLeft + view.clientWidth))
     view.scrollTo({ behavior: 'smooth', left: Math.max(0, first.left - (view.clientWidth - first.width) / 2) })
-}
-
-/** Category values fan out a little (stable per case), so a hundred cases of one group do not draw one stroke. */
-function jitter(key: string): number {
-  let hash = 0
-  for (let index = 0; index < key.length; index++)
-    hash = (hash * 31 + key.charCodeAt(index)) | 0
-  return ((Math.abs(hash) % 17) - 8) * 0.8
 }
 
 function paint(): void {

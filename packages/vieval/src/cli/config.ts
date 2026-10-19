@@ -14,99 +14,110 @@ import { pathToFileURL } from 'node:url'
 
 import { errorMessageFrom } from '@moeru/std'
 import { createDefineConfig, loadConfig } from 'c12'
+import { glob } from 'tinyglobby'
 import { loadEnv as loadViteEnv } from 'vite'
 
 const matrixLayerKeys = new Set(['disable', 'extend', 'override'])
 const ambiguousMatrixDefinitionErrorMessage = 'Ambiguous matrix definition: cannot mix reserved layer keys (disable, extend, override) with matrix axis keys.'
 const require = createRequire(import.meta.url)
 
-/**
- * Benchmark identity and shared cache namespace.
- */
-export interface CliComparisonBenchmarkConfig {
-  /**
-   * Benchmark identifier used in report artifacts.
-   */
-  id: string
-  /**
-   * Shared cache namespace reused across method runs.
-   */
-  sharedCaseNamespace: string
-}
+/** Config file names, in lookup order: a directory with one of them is a workspace or a comparison. */
+export const supportedConfigFileNames = [
+  'vieval.config.ts',
+  'vieval.config.mts',
+  'vieval.config.cts',
+  'vieval.config.js',
+  'vieval.config.mjs',
+  'vieval.config.cjs',
+  'vieval.config.json',
+] as const
 
 /**
- * One comparison entry loaded by `vieval compare`.
+ * Comparison config: the outermost level, which runs several workspaces side by side and compares them.
+ *
+ * A comparison holds no evaluation settings (models, plugins, reporters): each workspace runs in its own process
+ * with its own config and dependencies, so only what the comparison owns is set here.
  */
 export interface CliComparisonConfig {
   /**
-   * Benchmark metadata for reporting and shared cache coordination.
+   * Cache shared by every workspace, under `.vieval/cache/<comparison id>/<namespace>/` next to this config.
+   *
+   * Without it, each project keeps caching under its own root.
+   *
+   * @default undefined
    */
-  benchmark: CliComparisonBenchmarkConfig
+  cache?: {
+    /** Namespace that names what the shared entries are valid for, for example `formula-speech-v1`. */
+    namespace: string
+  }
   /**
-   * Optional workspace exclude glob(s), also relative to config directory.
+   * How many workspaces run at once.
    */
-  excludesWorkspaces?: string | string[]
+  concurrency?: {
+    /**
+     * Most workspaces running at once. Each workspace keeps its own task and case pools.
+     *
+     * @default every workspace at once
+     */
+    workspace?: number
+  }
   /**
-   * Comparison id selected by `--comparison`.
+   * Env given to every workspace. It wins over each workspace config's own `env`, and is applied before the
+   * workspace's plugins run, so plugins that read `config.env` (model API keys) see it.
+   *
+   * @default {}
    */
-  id: string
+  env?: NodeJS.ProcessEnv
   /**
-   * Optional workspace glob(s) discovered relative to config directory.
+   * Comparison id stamped on every run.
+   *
+   * @default the name of the directory of this config file
    */
-  includesWorkspaces?: string | string[]
-  /**
-   * Optional explicit method list.
-   */
-  methods?: CliComparisonMethodConfig[]
-}
-
-/**
- * One explicit comparison method descriptor.
- */
-export interface CliComparisonMethodConfig {
-  /**
-   * Optional explicit config file path for this workspace.
-   */
-  configFilePath?: string
-  /**
-   * Method identifier shown in compare reports.
-   */
-  id: string
-  /**
-   * Project name to execute inside workspace config.
-   */
-  project: string
-  /**
-   * Workspace path containing this method's `vieval.config.*`.
-   */
-  workspace: string
-}
-
-/**
- * Comparison mode config for `vieval compare`.
- */
-export interface CliComparisonModeConfig extends CliConfigBase {
-  comparisons: CliComparisonConfig[]
+  id?: string
   projects?: never
-  workspaces?: never
+  /**
+   * Workspaces to compare: directories holding a `vieval.config.*`, as paths or globs relative to this config,
+   * or entries with their own id and env. A glob entry starting with `!` excludes directories.
+   */
+  workspaces: Array<CliComparisonWorkspaceConfig | string>
+}
+
+/**
+ * One workspace of a comparison, given explicitly.
+ */
+export interface CliComparisonWorkspaceConfig {
+  /**
+   * Env given to this workspace only, on top of the comparison's `env`.
+   *
+   * @default {}
+   */
+  env?: NodeJS.ProcessEnv
+  /**
+   * Workspace id used in report paths and on every event.
+   *
+   * @default the name of `root`
+   */
+  id?: string
+  /**
+   * Directory of the workspace (holding its `vieval.config.*`), relative to the comparison config.
+   */
+  root: string
 }
 
 /**
  * Top-level CLI config loaded from `vieval.config.*`.
  *
- * Exactly one top-level mode is allowed:
- * - `projects`
- * - `workspaces`
- * - `comparisons`
+ * - With `workspaces`, the config is a comparison ({@link CliComparisonConfig}).
+ * - Otherwise it is a workspace: it lists its `projects` ({@link CliProjectModeConfig}).
  */
-export type CliConfig = CliComparisonModeConfig | CliProjectModeConfig | CliWorkspaceModeConfig
+export type CliConfig = CliComparisonConfig | CliProjectModeConfig
 
-export type CliConfigMode = 'comparisons' | 'projects' | 'workspaces'
+export type CliConfigMode = 'comparison' | 'workspace'
 
 /**
  * CLI plugin shape bound to the full CLI config object.
  */
-export type CliConfigPlugin = ConfigHookPlugin<CliConfig>
+export type CliConfigPlugin = ConfigHookPlugin<CliProjectModeConfig>
 
 /**
  * Pools a project declares for its own tasks and cases.
@@ -175,7 +186,7 @@ export interface CliProjectConfig {
   /**
    * Project root used for include/exclude glob matching.
    *
-   * @default process cwd
+   * @default the directory of the config file (the process cwd without one)
    */
   root?: string
   /**
@@ -210,6 +221,7 @@ export interface CliProjectExecutorContext extends TaskExecutionContext {
   events?: TaskRunContext['events']
   runStorage?: TaskRunContext['runStorage']
   scheduler?: TaskRunContext['scheduler']
+  selectsCase?: TaskRunContext['selectsCase']
   signal?: TaskRunContext['signal']
   telemetry?: TaskRunContext['telemetry']
 }
@@ -218,14 +230,43 @@ export interface CliProjectExecutorContext extends TaskExecutionContext {
  * Project mode config for `vieval run`.
  */
 export interface CliProjectModeConfig extends CliConfigBase {
-  comparisons?: never
   /**
-   * Project list expanded by `vieval run`.
+   * Projects of this workspace: inline project objects, or references to other configs whose projects the
+   * workspace collects (a path or glob string, or {@link CliProjectReference}), for example `'packages/*'`.
    *
    * @default [{ name: 'default' }]
    */
-  projects?: CliProjectConfig[]
+  projects?: Array<CliProjectConfig | CliProjectReference | string>
   workspaces?: never
+}
+
+/**
+ * A reference from a workspace to other configs whose projects it collects.
+ *
+ * A collected project is loaded by its own config, with that config's plugins, models, and reporters, so it runs
+ * as it does alone; only what a workspace owns (env and scheduling) is added here.
+ */
+export interface CliProjectReference {
+  /**
+   * Env added for the collected projects.
+   *
+   * Projects of one workspace share one process, so env is process-wide: the workspace's own env, each
+   * referenced config's env, and these values are merged, and a key set to two different values is an error
+   * (run such projects as workspaces of a comparison instead, which gives each its own process).
+   *
+   * @default {}
+   */
+  env?: NodeJS.ProcessEnv
+  /**
+   * A config file, a directory holding a `vieval.config.*`, or a glob of such directories, relative to this config.
+   */
+  from: string
+  /**
+   * Scheduler settings applied to every collected project, replacing what its config declares.
+   *
+   * @default undefined (each project keeps its own)
+   */
+  scheduler?: CliProjectSchedulerConfig
 }
 
 /**
@@ -268,7 +309,7 @@ export interface CliSchedulerConfig {
    * - each provided value to be a positive integer; projects, tasks, and case groups can only declare smaller pools
    *   for their own work, and CLI flags can only lower these values
    *
-   * @default `{ project: 1 }`
+   * @default `{ project: 1 }` when neither `task` nor `case` is declared here or by the CLI; otherwise projects are bounded only by those pools
    */
   concurrency?: SchedulerConcurrencyConfig
   /**
@@ -279,29 +320,6 @@ export interface CliSchedulerConfig {
    * @default []
    */
   middleware?: SchedulerMiddleware[]
-}
-
-/**
- * One workspace descriptor for workspace-mode configs.
- */
-export interface CliWorkspaceConfig {
-  /**
-   * Workspace identifier.
-   */
-  id: string
-  /**
-   * Workspace root path.
-   */
-  root: string
-}
-
-/**
- * Workspace mode config placeholder for future workspace orchestration.
- */
-export interface CliWorkspaceModeConfig extends CliConfigBase {
-  comparisons?: never
-  projects?: never
-  workspaces: CliWorkspaceConfig[]
 }
 
 /**
@@ -334,6 +352,19 @@ export interface LoadVievalCliConfigOptions {
    * @default process.cwd()
    */
   cwd?: string
+  /**
+   * Env values that win over the config's `env`. They are merged into `config.env` right after the config module
+   * is evaluated, before any plugin runs, so plugins that read `config.env` (model API keys) see them.
+   *
+   * @default {}
+   */
+  envOverrides?: NodeJS.ProcessEnv
+  /**
+   * Config files already being loaded higher up a chain of project references, to report a cycle.
+   *
+   * @default empty
+   */
+  visitedConfigFiles?: ReadonlySet<string>
 }
 
 /**
@@ -405,31 +436,17 @@ interface CliConfigBase {
 export const defineConfig = createDefineConfig<CliConfig>()
 
 /**
- * Detects which top-level config mode is active.
- *
- * Expects:
- * - exactly one of `projects`, `workspaces`, or `comparisons`
+ * Detects whether a config is a comparison or a workspace.
  *
  * Returns:
- * - active top-level mode key
+ * - `comparison` when the config lists `workspaces`, `workspace` otherwise (including a config without `projects`)
  */
 export function detectCliConfigMode(config: CliConfig): CliConfigMode {
-  const declaredModes: CliConfigMode[] = []
-  if (config.projects != null) {
-    declaredModes.push('projects')
-  }
-  if (config.workspaces != null) {
-    declaredModes.push('workspaces')
-  }
-  if (config.comparisons != null) {
-    declaredModes.push('comparisons')
+  if (config.workspaces != null && config.projects != null) {
+    throw new Error('Invalid vieval config: `workspaces` (a comparison) and `projects` (a workspace) are mutually exclusive.')
   }
 
-  if (declaredModes.length > 1) {
-    throw new Error(`Invalid vieval config: top-level keys are mutually exclusive. Found ${declaredModes.join(', ')}.`)
-  }
-
-  return declaredModes[0] ?? 'projects'
+  return config.workspaces == null ? 'workspace' : 'comparison'
 }
 
 /**
@@ -465,8 +482,16 @@ export async function loadRawVievalConfig(options: LoadVievalCliConfigOptions = 
       }
     }
 
-    const config = await applyVievalPlugins(loadedConfig.config)
-    detectCliConfigMode(config)
+    // A comparison has no plugins: its workspaces load (and run their plugins) in their own processes.
+    if (detectCliConfigMode(loadedConfig.config) === 'comparison') {
+      return { config: loadedConfig.config, configFilePath: loadedConfig.configFilePath }
+    }
+
+    const workspaceConfig = loadedConfig.config as CliProjectModeConfig
+    const overrides = Object.keys(options.envOverrides ?? {}).length === 0 ? undefined : options.envOverrides
+    const config = await applyVievalPlugins(overrides == null
+      ? workspaceConfig
+      : { ...workspaceConfig, env: { ...workspaceConfig.env, ...overrides } })
 
     return {
       config,
@@ -504,18 +529,49 @@ export async function loadVievalCliConfig(options: LoadVievalCliConfigOptions = 
       return {
         configFilePath: null,
         env: {},
-        projects: await normalizeConfig(null, cwd),
+        projects: await normalizeConfig(null, [{ name: 'default' }], cwd),
         reporting: undefined,
         scheduler: undefined,
       }
     }
 
-    const config = loadedConfig.config
+    if (detectCliConfigMode(loadedConfig.config) === 'comparison') {
+      throw new Error('This config is a comparison (it lists workspaces); `vieval run` runs it through runComparison.')
+    }
+    const config = loadedConfig.config as CliProjectModeConfig
+    const configDirectory = dirname(loadedConfig.configFilePath)
+    const entries = config.projects ?? [{ name: 'default' }]
+    const inlineProjects = entries.filter((entry): entry is CliProjectConfig => typeof entry !== 'string' && !('from' in entry))
+    const references = entries.flatMap(entry => typeof entry === 'string' ? [{ from: entry }] : ('from' in entry ? [entry] : []))
+    const env: NodeJS.ProcessEnv = { ...config.env }
+    const projects = await normalizeConfig(config, inlineProjects, configDirectory)
+    const visited = new Set([...(options.visitedConfigFiles ?? []), resolve(loadedConfig.configFilePath)])
+
+    for (const reference of references) {
+      for (const sourceConfigFilePath of await resolveProjectReference(reference.from, configDirectory)) {
+        if (visited.has(sourceConfigFilePath)) {
+          throw new Error(`Config "${loadedConfig.configFilePath}" collects projects from "${sourceConfigFilePath}", which already collects from it.`)
+        }
+        const source = await loadVievalCliConfig({ configFilePath: sourceConfigFilePath, envOverrides: options.envOverrides, visitedConfigFiles: visited })
+        mergeWorkspaceEnv(env, source.env, sourceConfigFilePath)
+        mergeWorkspaceEnv(env, reference.env ?? {}, `${loadedConfig.configFilePath} (from: ${reference.from})`)
+        projects.push(...source.projects.map(project => reference.scheduler == null ? project : { ...project, scheduler: reference.scheduler }))
+      }
+    }
+
+    const names = new Map<string, number>()
+    for (const project of projects) {
+      names.set(project.name, (names.get(project.name) ?? 0) + 1)
+    }
+    const duplicates = [...names].filter(([, count]) => count > 1).map(([name]) => name)
+    if (duplicates.length > 0) {
+      throw new Error(`Workspace "${loadedConfig.configFilePath}" has more than one project named ${duplicates.map(name => `"${name}"`).join(', ')}. Project names must be unique within a workspace.`)
+    }
 
     return {
       configFilePath: loadedConfig.configFilePath,
-      env: config.env ?? {},
-      projects: await normalizeConfig(config, dirname(loadedConfig.configFilePath)),
+      env: { ...env, ...options.envOverrides },
+      projects,
       reporting: normalizeReportingConfig(config.reporting),
       scheduler: config.scheduler,
     }
@@ -529,8 +585,23 @@ export async function loadVievalCliConfig(options: LoadVievalCliConfigOptions = 
   }
 }
 
+/**
+ * Tells whether the nearest (or given) config is a comparison or a workspace, without running its plugins.
+ *
+ * Use when:
+ * - `vieval run` decides between running a comparison and running a workspace
+ *
+ * Returns:
+ * - `workspace` also when no config file exists (the defaults are one project)
+ */
+export async function resolveVievalConfigMode(options: LoadVievalCliConfigOptions = {}): Promise<CliConfigMode> {
+  // Importing the config here and loading it again later evaluates it once: ESM caches the module.
+  const loaded = await resolveVievalConfig(options.cwd ?? process.cwd(), options.configFilePath)
+  return loaded.config == null ? 'workspace' : detectCliConfigMode(loaded.config)
+}
+
 async function applyProjectPlugins(
-  config: CliConfig | null | undefined,
+  config: CliProjectModeConfig | null | undefined,
   project: CliProjectConfig,
   normalizedProject: NormalizedCliProjectConfig,
   cwd: string,
@@ -541,11 +612,12 @@ async function applyProjectPlugins(
 
   const scopedConfig = createProjectScopedConfig(config, project, normalizedProject)
   const resolvedConfig = await applyVievalPlugins(scopedConfig) as CliProjectModeConfig
-  const scopedProject = scopedConfig.projects?.[0]
+  // The scoped config holds exactly the one inline project; a plugin may replace it, but not with a reference.
+  const scopedProject = scopedConfig.projects?.[0] as CliProjectConfig | undefined
   if (scopedProject == null) {
     throw new Error('Project-local plugin normalization requires one scoped project.')
   }
-  const resolvedProject = resolvedConfig.projects?.[0] ?? scopedProject
+  const resolvedProject = (resolvedConfig.projects?.[0] as CliProjectConfig | undefined) ?? scopedProject
 
   return normalizeProjectConfig(
     {
@@ -566,8 +638,8 @@ async function applyProjectPlugins(
   )
 }
 
-async function applyVievalPlugins(config: CliConfig): Promise<CliConfig> {
-  let currentConfig: CliConfig = config
+async function applyVievalPlugins(config: CliProjectModeConfig): Promise<CliProjectModeConfig> {
+  let currentConfig: CliProjectModeConfig = config
   const plugins = currentConfig.plugins ?? []
 
   for (const plugin of plugins) {
@@ -580,7 +652,7 @@ async function applyVievalPlugins(config: CliConfig): Promise<CliConfig> {
       currentConfig = {
         ...currentConfig,
         ...nextConfig,
-      } as CliConfig
+      } as CliProjectModeConfig
     }
   }
 
@@ -602,7 +674,7 @@ function assertNonAmbiguousMatrixDefinition(matrix: MatrixDefinition | MatrixLay
 }
 
 function createProjectScopedConfig(
-  config: CliConfig | null | undefined,
+  config: CliProjectModeConfig | null | undefined,
   project: CliProjectConfig,
   normalizedProject: NormalizedCliProjectConfig,
 ): CliProjectModeConfig {
@@ -634,20 +706,10 @@ function createProjectScopedConfig(
 }
 
 async function findNearestConfigFile(startDirectory: string): Promise<null | string> {
-  const supportedFileNames = [
-    'vieval.config.ts',
-    'vieval.config.mts',
-    'vieval.config.cts',
-    'vieval.config.js',
-    'vieval.config.mjs',
-    'vieval.config.cjs',
-    'vieval.config.json',
-  ]
-
   let currentDirectory = resolve(startDirectory)
 
   while (true) {
-    for (const fileName of supportedFileNames) {
+    for (const fileName of supportedConfigFileNames) {
       const candidatePath = join(currentDirectory, fileName)
       if (await isReadableFile(candidatePath)) {
         return candidatePath
@@ -703,22 +765,25 @@ async function isReadableFile(filePath: string): Promise<boolean> {
   }
 }
 
-async function normalizeConfig(config: CliConfig | null | undefined, cwd: string): Promise<NormalizedCliProjectConfig[]> {
-  if (config != null) {
-    const mode = detectCliConfigMode(config)
-    if (mode === 'comparisons') {
-      throw new Error('vieval run requires project-mode config. Received comparison-mode config.')
+/**
+ * Merges env a referenced config or reference adds into a workspace's process-wide env.
+ *
+ * NOTICE:
+ * Projects of one workspace run in one process and `vieval run` applies env to `process.env` for the run, so two
+ * values for one key cannot both hold. Silently keeping one would run a project with another project's settings.
+ */
+function mergeWorkspaceEnv(target: NodeJS.ProcessEnv, added: NodeJS.ProcessEnv, source: string): void {
+  for (const [key, value] of Object.entries(added)) {
+    if (Object.hasOwn(target, key) && target[key] !== value) {
+      throw new Error(`Env "${key}" has two values in one workspace (from ${source}). Projects of a workspace share one process; run them as workspaces of a comparison to give each its own env.`)
     }
+    target[key] = value
   }
+}
 
-  const projects = config?.workspaces == null
-    ? ((config as CliProjectModeConfig | null | undefined)?.projects ?? [{ name: 'default' }])
-    : config.workspaces.map(workspace => ({
-        name: workspace.id,
-        root: workspace.root,
-      }))
-  const inheritedModels = config?.models ?? []
-  const inheritedReporterReferences = config?.reporters ?? []
+async function normalizeConfig(workspaceConfig: CliProjectModeConfig | null, projects: readonly CliProjectConfig[], cwd: string): Promise<NormalizedCliProjectConfig[]> {
+  const inheritedModels = workspaceConfig?.models ?? []
+  const inheritedReporterReferences = workspaceConfig?.reporters ?? []
 
   return Promise.all(projects.map(async (project) => {
     const normalizedProject = normalizeProjectConfig(
@@ -729,7 +794,7 @@ async function normalizeConfig(config: CliConfig | null | undefined, cwd: string
     )
 
     return applyProjectPlugins(
-      config,
+      workspaceConfig,
       project,
       normalizedProject,
       cwd,
@@ -822,6 +887,42 @@ function resolveConfigExport(moduleValue: unknown): unknown {
   }
 
   return moduleValue
+}
+
+/**
+ * Resolves a project reference to config files.
+ *
+ * Before:
+ * - `'packages/*'` (glob of directories), `'agents/legacy'` (directory), `'agents/x/vieval.config.ts'` (file)
+ *
+ * After:
+ * - the `vieval.config.*` of each matched directory (directories without one are skipped for a glob), or the file
+ */
+async function resolveProjectReference(from: string, configDirectory: string): Promise<string[]> {
+  const findConfigFile = async (directory: string) => {
+    for (const name of supportedConfigFileNames) {
+      if (await isReadableFile(join(directory, name))) {
+        return join(directory, name)
+      }
+    }
+    return undefined
+  }
+
+  if (/[*?[\]{}]/.test(from)) {
+    const directories = (await glob(from, { absolute: true, cwd: configDirectory, onlyDirectories: true })).map(path => resolve(path)).sort()
+    const files = await Promise.all(directories.map(findConfigFile))
+    return files.filter((file): file is string => file != null)
+  }
+
+  const target = isAbsolute(from) ? from : resolve(configDirectory, from)
+  if (await isReadableFile(target) && supportedConfigFileNames.some(name => target.endsWith(name))) {
+    return [target]
+  }
+  const file = await findConfigFile(target)
+  if (file == null) {
+    throw new Error(`Project reference "${from}" has no vieval.config.* at ${target}.`)
+  }
+  return [file]
 }
 
 async function resolveVievalConfig(

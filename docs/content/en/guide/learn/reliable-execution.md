@@ -49,7 +49,9 @@ Concurrency is scheduler configuration, not an inherited default: the top-level 
 
 A case starts only after it holds a slot in every pool on its path: its group, its task, its project, and the run. Pools do not override each other, so the smallest one wins, and a narrower value can only lower concurrency for its own work. A case waits for its narrow pools before it takes a run-wide slot, and its timeout starts only after it holds every slot.
 
-A top-level value and a CLI flag for the same key both bound the whole run, so the smaller value applies. A flag never raises a configured value, but it can raise a built-in default. Without any declaration, one project runs at a time, each project runs one task at a time, and cases are not limited. A run-wide `task` or `case` value lifts the one-task-per-project default: a run-wide case pool already bounds the real work, so tasks overlap and a slow case of one task no longer holds back the next task.
+A top-level value and a CLI flag for the same key both bound the whole run, so the smaller value applies. A flag never raises a configured value, but it can raise a built-in default. Without any declaration, one project runs at a time, each project runs one task at a time, and cases are not limited. A run-wide `task` or `case` value, in config or on the CLI, lifts both defaults: a run-wide pool already bounds the real work, so tasks and projects overlap, bounded only by those pools. A slow case of one task no longer holds back the next task, and the next project starts while a slow case of another project still runs.
+
+A comparison runs each workspace in its own process, so every workspace keeps its own pools. `concurrency: { workspace }` in the comparison config, or `--workspace-concurrency`, limits how many workspaces run at once; by default all of them do.
 
 ```ts [vieval.config.ts]
 import { defineConfig } from 'vieval'
@@ -156,7 +158,18 @@ describeTask('dataset-backed eval', ({ caseOf }) => {
 
 During a CLI run, the path is derived from the project root's `.vieval/cache`, then workspace ID, project name, namespace, key segments, and extension. The runtime sanitizes path segments and writes text, JSON, and buffers atomically. It does not hash inputs, expire entries, or decide whether cached content is still valid. Put every identity that changes the artifact into the namespace or key.
 
-The same cache root and stable workspace/project/namespace/key resolve to the same file across task attempts and later runs. Top-level comparison runs deliberately share the project identity segment through their configured benchmark cache namespace, but methods under different project roots still use different physical `.vieval/cache` directories. Reusing one cached file also requires the same cache root.
+The same cache root and stable workspace/project/namespace/key resolve to the same file across task attempts and later runs. Workspaces under different roots therefore use different `.vieval/cache` directories, unless a comparison shares one cache: with `cache: { namespace }` in the comparison config, every workspace caches under `.vieval/cache/<comparison id>/<namespace>/` next to the comparison config, so a case prepared by one workspace is reused by the others.
+
+```ts [evals/agent-memory/vieval.config.ts]
+import { defineConfig, loadEnv } from 'vieval'
+
+export default defineConfig({
+  cache: { namespace: 'locomo-cases-v1' },
+  env: loadEnv('test', import.meta.dirname, ''),
+  id: 'agent-memory-semantic-approaches',
+  workspaces: ['eval/test-objects/*'],
+})
+```
 
 ## Know which evidence survives each layer
 
@@ -165,7 +178,7 @@ Task aggregation and report artifacts answer related but different questions:
 - A failed or timed-out case adds exact score evidence of `0`; a passing case without a custom score adds `1`.
 - A passing case contributes its custom `exact` and `judge` scores. A failed case's custom score is not used by task aggregation.
 - Every completed auto attempt contributes another set of case outcomes to the task's aggregated score.
-- Reporter lifecycle, score, and metric events are emitted as execution happens. With `--report-out`, `events.jsonl` retains those events.
+- Reporter lifecycle, score, and metric events are emitted as execution happens. Unless the run uses `--no-report`, `events.jsonl` retains those events.
 - `cases.jsonl` is a final normalized projection keyed by task and case, so repeated retries or automatic attempts do not become independent case rows. For a task with automatic attempts, the record lists every attempt in `attempts`. Read raw events when the exact sequence matters (`case.started` and `case.ended` carry `attemptIndex`), and read the task aggregate in `run-summary.json` when attempt-weighted scoring matters.
 
 As described in [Assertions, Scores, and Metrics](/en/guide/learn/assertions-scores-and-metrics), a score event emitted before a later failure can remain in a persisted case record even though task aggregation counts that outcome as a failure. Diagnose state and score together.

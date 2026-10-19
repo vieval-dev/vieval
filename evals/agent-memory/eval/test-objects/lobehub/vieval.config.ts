@@ -1,10 +1,11 @@
-import { cwd } from 'node:process'
+import { resolve } from 'node:path'
 
 import { defineConfig, loadEnv, requiredEnvFrom } from 'vieval'
 import { chatModelFrom, ChatModels } from 'vieval/plugins/chat-models'
 
 export default defineConfig({
-  env: loadEnv('test', cwd(), ''),
+  // Env files live at the agent-memory root, so this workspace finds them alone and inside the comparison.
+  env: loadEnv('test', resolve(import.meta.dirname, '../../..'), ''),
   plugins: [
     ChatModels({
       models: [

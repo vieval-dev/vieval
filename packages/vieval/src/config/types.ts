@@ -358,6 +358,16 @@ export interface TaskConcurrencyConfig {
  */
 export interface TaskDefinition {
   /**
+   * Names of the cases this task runs, when they are known before the task runs.
+   *
+   * `describeTask` sets them from the cases registered when the eval module loads, so progress totals are known as
+   * soon as tasks are queued and `--case` can be checked before anything runs. Auto attempts can run cases again;
+   * each case is listed once.
+   *
+   * @default undefined (the total becomes known when the task's first case starts)
+   */
+  caseNames?: readonly string[]
+  /**
    * Pools this task declares for its own cases.
    *
    * @default undefined
@@ -498,6 +508,14 @@ export interface TaskRunContext {
    * @default an unbounded scheduler when the task runs outside `vieval run`
    */
   scheduler?: Scheduler
+  /**
+   * Whether the task should run the case with this name; set by `vieval run --case`.
+   *
+   * Tasks that run their own cases (a custom `run`) may ignore it.
+   *
+   * @default undefined (every case runs)
+   */
+  selectsCase?: (caseName: string) => boolean
   /**
    * Cooperative abort signal for the current execution.
    *

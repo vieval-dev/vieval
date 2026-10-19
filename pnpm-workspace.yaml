@@ -43,7 +43,6 @@ catalog:
   '@nolebase/vitepress-plugin-git-changelog': ^2.21.0
   '@opentelemetry/api': ^1.9.1
   '@pinia/colada': ^1.4.8
-  '@pnpm/find-workspace-dir': ^1000.1.5
   '@proj-airi/unocss-preset-chromatic': ^1.1.5
   '@shikijs/transformers': ^4.4.3
   '@tanstack/vue-virtual': ^3.13.41

@@ -25,8 +25,12 @@ Watch a run you start:
 
 ```sh
 vieval run --with-viewer                 # http://127.0.0.1:51204/
-vieval run --with-viewer --viewer-port 0 --viewer-host 127.0.0.1 --viewer-open
+vieval run --with-viewer --port 0 --host 127.0.0.1 --open
+vieval run --config evals/agent-memory/vieval.config.ts --with-viewer --open   # a comparison
 ```
+
+`--port`, `--host`, and `--open` have the same names and defaults as on `vieval viewer`. With a comparison config, one
+viewer serves the comparison's report root (`.vieval/reports` next to the comparison config).
 
 The viewer keeps serving after the run ended. Press Ctrl+C to exit; the exit code is the run's exit code.
 

@@ -67,62 +67,7 @@ describe('loadVievalCliConfig', () => {
     expect(loaded.projects[0].include).toEqual(['**/*.eval.ts'])
   })
 
-  it('normalizes workspace mode into projects with inherited models and config-relative roots', async () => {
-    const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-cli-config-'))
-    temporaryDirectories.push(temporaryDirectory)
-
-    const configDirectory = join(temporaryDirectory, 'config')
-    await mkdir(configDirectory, { recursive: true })
-
-    const configFilePath = join(configDirectory, 'vieval.config.json')
-    await writeFile(
-      configFilePath,
-      JSON.stringify({
-        models: [
-          {
-            id: 'openai/gpt-5-mini',
-            inferenceExecutor: 'openai',
-            inferenceExecutorId: 'openai',
-            model: 'openai/gpt-5-mini',
-          },
-        ],
-        reporters: ['./workspace-reporter.js'],
-        workspaces: [
-          {
-            id: 'workspace-a',
-            root: '../workspace-a',
-          },
-          {
-            id: 'workspace-b',
-            root: './nested/workspace-b',
-          },
-        ],
-      }),
-      'utf-8',
-    )
-
-    const loaded = await loadVievalCliConfig({
-      cwd: configDirectory,
-    })
-
-    expect(loaded.configFilePath).toBe(configFilePath)
-    expect(loaded.projects).toHaveLength(2)
-    expect(loaded.projects.map(project => project.name)).toEqual(['workspace-a', 'workspace-b'])
-    expect(loaded.projects.map(project => project.root)).toEqual([
-      join(temporaryDirectory, 'workspace-a'),
-      join(configDirectory, 'nested', 'workspace-b'),
-    ])
-    expect(loaded.projects.map(project => project.models.map(model => model.id))).toEqual([
-      ['openai/gpt-5-mini'],
-      ['openai/gpt-5-mini'],
-    ])
-    expect(loaded.projects.map(project => project.reporters)).toEqual([
-      ['./workspace-reporter.js'],
-      ['./workspace-reporter.js'],
-    ])
-  })
-
-  it('throws when multiple top-level config modes are declared', async () => {
+  it('rejects a config that is both a comparison and a workspace', async () => {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-cli-config-'))
     temporaryDirectories.push(temporaryDirectory)
 
@@ -130,35 +75,69 @@ describe('loadVievalCliConfig', () => {
       join(temporaryDirectory, 'vieval.config.json'),
       JSON.stringify({
         projects: [{ name: 'fixture-project' }],
-        workspaces: [{ id: 'fixture-workspace', root: './fixture-workspace' }],
+        workspaces: ['./fixture-workspace'],
       }),
       'utf-8',
     )
 
     await expect(loadVievalCliConfig({
       cwd: temporaryDirectory,
-    })).rejects.toThrow('top-level keys are mutually exclusive')
+    })).rejects.toThrow('`workspaces` (a comparison) and `projects` (a workspace) are mutually exclusive')
+  })
 
-    await writeFile(
-      join(temporaryDirectory, 'vieval.config.json'),
-      JSON.stringify({
-        comparisons: [
-          {
-            benchmark: {
-              id: 'benchmark',
-              sharedCaseNamespace: 'benchmark',
-            },
-            id: 'comparison',
-          },
-        ],
-        workspaces: [{ id: 'fixture-workspace', root: './fixture-workspace' }],
-      }),
-      'utf-8',
-    )
+  it('collects projects from the configs of packages, with their own settings and the workspace env', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'vieval-cli-config-'))
+    temporaryDirectories.push(directory)
+    for (const name of ['agent-a', 'agent-b', 'no-config']) {
+      await mkdir(join(directory, 'packages', name), { recursive: true })
+    }
+    await writeFile(join(directory, 'packages', 'agent-a', 'vieval.config.json'), JSON.stringify({ env: { AGENT_A: 'a' }, projects: [{ include: ['evals/*.eval.ts'], name: 'agent-a' }, { name: 'agent-a-smoke' }] }), 'utf-8')
+    await writeFile(join(directory, 'packages', 'agent-b', 'vieval.config.json'), JSON.stringify({ projects: [{ name: 'agent-b' }] }), 'utf-8')
+    await mkdir(join(directory, 'legacy'), { recursive: true })
+    await writeFile(join(directory, 'legacy', 'vieval.config.json'), JSON.stringify({ projects: [{ name: 'legacy' }] }), 'utf-8')
+    await writeFile(join(directory, 'vieval.config.json'), JSON.stringify({
+      env: { SHARED: 'workspace' },
+      projects: ['packages/*', { env: { LEGACY_MODE: '1' }, from: 'legacy', scheduler: { concurrency: { case: 2 } } }, { name: 'inline' }],
+    }), 'utf-8')
 
-    await expect(loadVievalCliConfig({
-      cwd: temporaryDirectory,
-    })).rejects.toThrow('top-level keys are mutually exclusive')
+    const loaded = await loadVievalCliConfig({ cwd: directory })
+
+    expect(loaded.projects.map(project => project.name)).toEqual(['inline', 'agent-a', 'agent-a-smoke', 'agent-b', 'legacy'])
+    // A collected project keeps the root and globs of its own config.
+    expect(loaded.projects[1]!.root).toBe(join(directory, 'packages', 'agent-a'))
+    expect(loaded.projects[1]!.include).toEqual(['evals/*.eval.ts'])
+    expect(loaded.projects[4]!.scheduler).toEqual({ concurrency: { case: 2 } })
+    expect(loaded.env).toEqual({ AGENT_A: 'a', LEGACY_MODE: '1', SHARED: 'workspace' })
+  })
+
+  it('rejects env keys with two values, cycles, and duplicate project names across collected configs', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'vieval-cli-config-'))
+    temporaryDirectories.push(directory)
+    await mkdir(join(directory, 'a'), { recursive: true })
+    await writeFile(join(directory, 'a', 'vieval.config.json'), JSON.stringify({ env: { MODE: 'a' }, projects: [{ name: 'same' }] }), 'utf-8')
+
+    await writeFile(join(directory, 'vieval.config.json'), JSON.stringify({ env: { MODE: 'root' }, projects: ['a'] }), 'utf-8')
+    await expect(loadVievalCliConfig({ cwd: directory })).rejects.toThrow('Env "MODE" has two values in one workspace')
+
+    await writeFile(join(directory, 'vieval.config.json'), JSON.stringify({ projects: ['a', { name: 'same' }] }), 'utf-8')
+    await expect(loadVievalCliConfig({ cwd: directory })).rejects.toThrow('more than one project named "same"')
+
+    await writeFile(join(directory, 'a', 'vieval.config.json'), JSON.stringify({ projects: ['..'] }), 'utf-8')
+    await writeFile(join(directory, 'vieval.config.json'), JSON.stringify({ projects: ['a'] }), 'utf-8')
+    await expect(loadVievalCliConfig({ cwd: directory })).rejects.toThrow('which already collects from it')
+  })
+
+  it('loads env overrides over the config env before plugins run', async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), 'vieval-cli-config-'))
+    temporaryDirectories.push(temporaryDirectory)
+    await writeFile(join(temporaryDirectory, 'vieval.config.json'), JSON.stringify({
+      env: { KEEP: 'config', REPLACED: 'config' },
+      projects: [{ name: 'fixture-project' }],
+    }), 'utf-8')
+
+    const loaded = await loadVievalCliConfig({ cwd: temporaryDirectory, envOverrides: { ADDED: 'override', REPLACED: 'override' } })
+
+    expect(loaded.env).toEqual({ ADDED: 'override', KEEP: 'config', REPLACED: 'override' })
   })
 
   it('loads top-level env map from config', async () => {

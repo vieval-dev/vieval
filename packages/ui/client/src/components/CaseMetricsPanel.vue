@@ -230,21 +230,8 @@ watch(numericAxes, (names) => {
 })
 const pairAxes = computed<ParallelAxis[]>(() => (pickedPair.value ?? []).map(name => ({ kind: 'numeric' as const, name })))
 
-/** Values of each category, most frequent first (`state` in its usual order). */
-const categoryValues = computed(() => {
-  const result: Record<string, string[]> = {}
-  for (const name of table.value.categories) {
-    const counts = new Map<string, number>()
-    for (const row of table.value.rows) {
-      const value = row.categories[name]
-      if (value != null)
-        counts.set(value, (counts.get(value) ?? 0) + 1)
-    }
-    const order = ['passed', 'failed', 'timeout', 'skipped', 'running', 'unfinished']
-    result[name] = [...counts.keys()].sort((a, b) => (name === 'state' ? order.indexOf(a) - order.indexOf(b) : (counts.get(b)! - counts.get(a)!)))
-  }
-  return result
-})
+/** Values of each category axis in drawing order (see {@link CaseTable.valueCounts}). */
+const categoryValues = computed(() => Object.fromEntries(Object.entries(table.value.valueCounts).map(([name, counts]) => [name, [...counts.keys()]])))
 
 const filters = shallowRef<CaseFilters>({ box: null, categories: {}, ranges: {} })
 function clearFilters(): void {
@@ -297,41 +284,34 @@ watch(colorOptions, (options) => {
 /** Categorical series slots; values past the eighth share the neutral chart text color. */
 const SERIES_SLOTS = 8
 const SEQUENTIAL_STEPS = 5
-const legend = computed<{ color: string, label: string }[]>(() => {
+/** How each case is colored, and the legend that explains it: one source, so the two never disagree. */
+const palette = computed<{ colorOf: (row: CaseRow) => string, legend: { color: string, label: string }[] }>(() => {
   const name = colorBy.value
   if (name === 'state')
-    return (categoryValues.value.state ?? []).map(value => ({ color: `var(--mark-${value})`, label: value }))
-  if (table.value.categories.includes(name)) {
-    const values = categoryValues.value[name] ?? []
-    const shown = values.slice(0, SERIES_SLOTS).map((value, index) => ({ color: `var(--series-${index + 1})`, label: value }))
-    return values.length > SERIES_SLOTS ? [...shown, { color: 'var(--chart-text)', label: `${values.length - SERIES_SLOTS} more` }] : shown
+    return { colorOf: row => `var(--mark-${row.state})`, legend: (categoryValues.value.state ?? []).map(value => ({ color: `var(--mark-${value})`, label: value })) }
+  const values = categoryValues.value[name]
+  if (values != null) {
+    const slots = new Map(values.slice(0, SERIES_SLOTS).map((value, index) => [value, `var(--series-${index + 1})`]))
+    const legend = [...slots].map(([label, color]) => ({ color, label }))
+    if (values.length > SERIES_SLOTS)
+      legend.push({ color: 'var(--chart-text)', label: `${values.length - SERIES_SLOTS} more` })
+    return { colorOf: row => slots.get(row.categories[name] ?? '') ?? 'var(--chart-text)', legend }
   }
+  // A metric: five steps of one hue along its scale (symlog for heavy tails), each labeled by where it starts.
   const scale = scales.value[name]
   if (scale == null)
-    return []
-  const [low, high] = scale.domain() as [number, number]
+    return { colorOf: () => 'var(--chart-grid)', legend: [] }
+  const unit = scale.copy().range([0, 1])
   const step = format('~s')
-  return Array.from({ length: SEQUENTIAL_STEPS }, (_, index) => ({
-    color: `var(--seq-${index + 1})`,
-    label: `${step(scale.invert(scale(low) + ((scale(high) - scale(low)) * index) / SEQUENTIAL_STEPS))}+`,
-  }))
-})
-const colorOf = computed(() => {
-  const name = colorBy.value
-  if (name === 'state')
-    return (row: CaseRow) => `var(--mark-${row.state})`
-  if (table.value.categories.includes(name)) {
-    const slots = new Map((categoryValues.value[name] ?? []).slice(0, SERIES_SLOTS).map((value, index) => [value, `var(--series-${index + 1})`]))
-    return (row: CaseRow) => slots.get(row.categories[name] ?? '') ?? 'var(--chart-text)'
-  }
-  const scale = scales.value[name]?.copy().range([0, 1])
-  return (row: CaseRow) => {
-    const value = row.numbers[name]
-    if (value == null || scale == null)
-      return 'var(--chart-grid)'
-    return `var(--seq-${Math.min(SEQUENTIAL_STEPS, Math.floor(scale(value) * SEQUENTIAL_STEPS) + 1)})`
+  return {
+    colorOf: (row) => {
+      const value = row.numbers[name]
+      return value == null ? 'var(--chart-grid)' : `var(--seq-${Math.min(SEQUENTIAL_STEPS, Math.floor(unit(value) * SEQUENTIAL_STEPS) + 1)})`
+    },
+    legend: Array.from({ length: SEQUENTIAL_STEPS }, (_, index) => ({ color: `var(--seq-${index + 1})`, label: `${step(unit.invert(index / SEQUENTIAL_STEPS))}+` })),
   }
 })
+const colorOf = computed(() => palette.value.colorOf)
 
 // The case under the pointer, and the case pinned by a click. Both points are page coordinates, so a pinned card
 // stays on its line while the page scrolls.
@@ -437,7 +417,7 @@ const unitOf = (name: string) => definitions.value.get(name)?.unit
             </DropdownMenuPortal>
           </DropdownMenuRoot>
           <span :class="['inline-flex flex-wrap items-center gap-x-2.5 gap-y-1 ml-1']">
-            <span v-for="item in legend" :key="item.label" :class="['inline-flex items-center gap-1']">
+            <span v-for="item in palette.legend" :key="item.label" :class="['inline-flex items-center gap-1']">
               <span :class="['inline-block w-3 h-1.5 rounded-sm']" :style="{ background: item.color }" />{{ item.label }}
             </span>
           </span>
@@ -506,7 +486,7 @@ const unitOf = (name: string) => definitions.value.get(name)?.unit
         >
           <AnimatedContent>
             <div v-if="shownCard" :class="['w-80 max-w-[calc(100vw-2rem)]']">
-              <CaseCard :active-axis="shownCard.axis" :axes="axes" :href="caseHref(shownCard.row)" :label-of="labelOf" :pinned="shownCard.pinned" :row="shownCard.row" :rows="table.rows" :scales="scales" :unit-of="unitOf" @unpin="pinned = undefined" />
+              <CaseCard :active-axis="shownCard.axis" :axes="axes" :href="caseHref(shownCard.row)" :label-of="labelOf" :pinned="shownCard.pinned" :row="shownCard.row" :rows="table.rows" :scales="scales" :unit-of="unitOf" :value-counts="table.valueCounts" @unpin="pinned = undefined" />
             </div>
             <PopoverArrow :class="['floating-arrow']" />
           </AnimatedContent>
@@ -529,7 +509,7 @@ const unitOf = (name: string) => definitions.value.get(name)?.unit
             The case's value on every axis and where it sits among all cases.
           </DrawerDescription>
           <div v-if="pinnedRow" :class="['overflow-y-auto min-h-0']">
-            <CaseCard :active-axis="pinned?.axis ?? undefined" :axes="axes" :href="caseHref(pinnedRow)" :label-of="labelOf" layout="drawer" pinned :row="pinnedRow" :rows="table.rows" :scales="scales" :unit-of="unitOf" @unpin="pinned = undefined" />
+            <CaseCard :active-axis="pinned?.axis ?? undefined" :axes="axes" :href="caseHref(pinnedRow)" :label-of="labelOf" layout="drawer" pinned :row="pinnedRow" :rows="table.rows" :scales="scales" :unit-of="unitOf" :value-counts="table.valueCounts" @unpin="pinned = undefined" />
           </div>
         </DrawerContent>
       </DrawerPortal>

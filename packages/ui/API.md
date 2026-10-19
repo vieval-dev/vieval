@@ -19,7 +19,7 @@ schemas. This document explains the routes and the rules behind the numbers.
 | Term | Meaning |
 |---|---|
 | workspace / project / experiment / attempt | Labels of a run (report path segments `<workspace>/<project>/<experiment>/<attempt>/<run>`). The run-level `attemptId` (`--attempt`) never re-runs anything. |
-| run | One `vieval run` invocation. |
+| run | One project of one `vieval run` invocation (vieval writes one run per project). |
 | task | One scheduled task (one matrix row of one eval entry). `matrix` is parsed from the task id. |
 | round (`roundIndex`) | One **auto attempt** of a task (`autoAttempt`: every case of the task runs again). Equals the scheduler's `attemptIndex`. `roundIndexInferred: true` when the log has no `attemptIndex` and the round was derived from repeated `case.started` events. |
 | try (`retryIndex`) | One immediate retry of one case inside one round (`autoRetry`). A failed try that was retried has state `retried`. |
@@ -48,7 +48,7 @@ dropped (duplicates); missing numbers are counted in `seqGaps`; invalid lines in
 | Route | Response | Notes |
 |---|---|---|
 | `GET /api/health` | `{ ok, apiVersion, mode, reportRoots, evidenceRoots, logDirectories }` | |
-| `GET /api/tree` | `TreeResponse` | `workspaces[].projects[].experiments[].attempts[].runs[]` (`RunListItem`). Project = report path segment (`multi-project` for runs of several projects; see `projectIds`). |
+| `GET /api/tree` | `TreeResponse` | `workspaces[].projects[].experiments[].attempts[].runs[]` (`RunListItem`). Project = report path segment. Current vieval writes one run per project; older reports may use `multi-project` for runs of several projects (see `projectIds`). |
 | `GET /api/runs?workspace=&project=&experiment=&attempt=&state=&source=` | `RunListItem[]` | Newest first. `counts`, `exactAverage`/`judgeAverage`/`hybridAverage` (from `run-summary.json` once written, else from events). `reportRoot` is the absolute report root the run was found in (tells archived roots apart), `reportPath` the directory below it. `matrix`: run-matrix axes of the run's tasks with their distinct values in natural order (`{ model: ['gpt-5.5'], repeat: ['1', '2', '10'] }`), `{}` without a run matrix. |
 | `GET /api/runs/:runKey` | `RunListItem` | |
 

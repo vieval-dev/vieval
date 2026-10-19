@@ -5,7 +5,7 @@ import type { RunReadyContext } from './viewer-host'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { afterEach, describe, expect, it } from 'vitest'
@@ -100,15 +100,15 @@ describe('runVievalCli onRunReady', () => {
     const reportRoot = join(projectDirectory, '.vieval', 'reports')
     expect(contexts).toHaveLength(1)
     expect(contexts[0]).toMatchObject({
-      artifactsRoot: join(output.reportDirectory!, 'artifacts'),
+      artifactsRoot: join(output.projects[0]!.reportDirectory!, 'artifacts'),
       configFilePath: join(projectDirectory, 'vieval.config.ts'),
-      identity: { attemptId: 'attempt-hook', experimentId: 'exp-hook', runId: output.runId, workspaceId: 'ws-hook' },
+      identity: { attemptId: 'attempt-hook', experimentId: 'exp-hook', runId: output.projects[0]!.runId, workspaceId: 'ws-hook' },
       projectNames: ['osworld-style'],
-      reportDirectory: output.reportDirectory,
+      reportDirectory: output.projects[0]!.reportDirectory,
       reportRoot,
     })
     // The host sees the whole run, from `run.started` (seq 1) to `run.ended`, exactly as written to `events.jsonl`.
-    const logged = await readJsonl<RunEventEnvelope>(join(output.reportDirectory!, 'events.jsonl'))
+    const logged = await readJsonl<RunEventEnvelope>(join(output.projects[0]!.reportDirectory!, 'events.jsonl'))
     expect(received[0]?.event).toBe('run.started')
     expect(received[0]?.seq).toBe(1)
     expect(received.at(-1)?.event).toBe('run.ended')
@@ -172,7 +172,7 @@ describe('runVievalCli auto attempt reports', () => {
       experiment: 'exp-osworld',
     })
 
-    const reportDirectory = output.reportDirectory!
+    const reportDirectory = output.projects[0]!.reportDirectory!
     const events = await readJsonl<RunEventEnvelope<Record<string, unknown>>>(join(reportDirectory, 'events.jsonl'))
     const caseEvents = events.filter(event => event.event === 'case.started' || event.event === 'case.ended')
     const cases = await readJsonl<CaseRecord>(join(reportDirectory, 'cases.jsonl'))
@@ -202,7 +202,8 @@ describe('runVievalCli auto attempt reports', () => {
     ])
 
     // The same four ids identify the run in every artifact.
-    const identity = { attemptId: 'attempt-label', experimentId: 'exp-osworld', runId: output.runId, workspaceId: 'default-workspace' }
+    // Without `workspace`, a workspace is named after the directory of its config.
+    const identity = { attemptId: 'attempt-label', experimentId: 'exp-osworld', runId: output.projects[0]!.runId, workspaceId: basename(projectDirectory) }
     expect(summary).toMatchObject(identity)
     for (const event of events) {
       expect(event).toMatchObject(identity)
@@ -216,6 +217,6 @@ describe('runVievalCli auto attempt reports', () => {
       { key: 'vieval.run.id', value: { stringValue: identity.runId } },
       { key: 'vieval.workspace.id', value: { stringValue: identity.workspaceId } },
     ])
-    expect(reportDirectory.endsWith(join('default-workspace', 'osworld-style', 'exp-osworld', 'attempt-label', output.runId!))).toBe(true)
+    expect(reportDirectory.endsWith(join(basename(projectDirectory), 'osworld-style', 'exp-osworld', 'attempt-label', output.projects[0]!.runId!))).toBe(true)
   })
 })

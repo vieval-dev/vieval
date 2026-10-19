@@ -36,33 +36,20 @@ const props = defineProps<{
   rows: readonly CaseRow[]
   scales: Readonly<Record<string, ScaleContinuousNumeric<number, number>>>
   unitOf: (name: string) => string | undefined
+  /** Cases per value of each category axis (`CaseTable.valueCounts`), for "46 / 361 cases". */
+  valueCounts: Readonly<Record<string, ReadonlyMap<string, number>>>
 }>()
 const emit = defineEmits<{ unpin: [] }>()
 const drawer = computed(() => props.layout === 'drawer')
-
-/** All cases on one axis: value shares for a category, histogram bar heights (0..1) and the scale for a metric. */
-type AxisDistribution
-  = | { heights: number[], kind: 'numeric', position?: (value: number) => number }
-    | { kind: 'category', segments: { count: number, share: number, value: string }[], total: number }
 
 /** Bins of each numeric row's histogram; enough to show a long tail or two peaks in a row about 10 rem wide. */
 const BINS = 24
 
 /**
- * Distribution of every axis over all cases, independent of the case shown, so moving between cases only moves
- * the marker. Numeric bins are taken on the axis's own scale (symlog for heavy tails), the way the chart draws it.
+ * Histogram of every metric axis over all cases, independent of the case shown, so moving between cases only moves
+ * the marker. Bins are taken on the axis's own scale (symlog for heavy tails), the way the chart draws it.
  */
-const distributions = computed(() => new Map<string, AxisDistribution>(props.axes.map((axis): [string, AxisDistribution] => {
-  if (axis.kind === 'category') {
-    const counts = new Map<string, number>()
-    for (const row of props.rows) {
-      const value = row.categories[axis.name]
-      if (value != null)
-        counts.set(value, (counts.get(value) ?? 0) + 1)
-    }
-    const total = [...counts.values()].reduce((sum, count) => sum + count, 0)
-    return [axis.name, { kind: 'category' as const, segments: [...counts].sort((a, b) => b[1] - a[1]).map(([value, count]) => ({ count, share: count / total, value })), total }]
-  }
+const distributions = computed(() => new Map(props.axes.filter(axis => axis.kind === 'numeric').map((axis) => {
   const position = props.scales[axis.name]?.copy().range([0, 1])
   const counts = Array.from<number>({ length: BINS }).fill(0)
   for (const row of props.rows) {
@@ -71,18 +58,19 @@ const distributions = computed(() => new Map<string, AxisDistribution>(props.axe
       counts[Math.min(BINS - 1, Math.max(0, Math.floor(position(value) * BINS)))]! += 1
   }
   const peak = Math.max(1, ...counts)
-  return [axis.name, { heights: counts.map(count => count / peak), kind: 'numeric' as const, position }]
+  return [axis.name, { heights: counts.map(count => count / peak), position }]
 })))
 
 const lines = computed(() => props.axes.map((axis) => {
-  const distribution = distributions.value.get(axis.name)
-  if (distribution?.kind === 'category') {
+  if (axis.kind === 'category') {
     const value = props.row.categories[axis.name]
-    const same = distribution.segments.find(segment => segment.value === value)?.count ?? 0
-    return { detail: value == null ? '' : `${same} / ${distribution.total} cases`, kind: 'category' as const, name: axis.name, segments: distribution.segments, text: value ?? '—', value }
+    const counts = props.valueCounts[axis.name]
+    const total = [...counts?.values() ?? []].reduce((sum, count) => sum + count, 0)
+    return { detail: value == null ? '' : `${counts?.get(value) ?? 0} / ${total} cases`, kind: 'category' as const, name: axis.name, text: value ?? '—', value }
   }
+  const distribution = distributions.value.get(axis.name)
   const value = props.row.numbers[axis.name]
-  const heights = distribution?.kind === 'numeric' ? distribution.heights : []
+  const heights = distribution?.heights ?? []
   if (value == null)
     return { bin: undefined, detail: '', heights, kind: 'numeric' as const, name: axis.name, notability: 0, position: undefined, text: '—' }
   const values = props.rows.map(row => row.numbers[axis.name]).filter((item): item is number => item != null)
@@ -93,7 +81,7 @@ const lines = computed(() => props.axes.map((axis) => {
   const percentile = Math.round(((below + tied / 2) / values.length) * 100)
   const unit = props.unitOf(axis.name)
   const number = Math.abs(value) >= 1000 ? Intl.NumberFormat(undefined, { maximumFractionDigits: 1, notation: 'compact' }).format(value) : String(Math.round(value * 100) / 100)
-  const position = distribution?.kind === 'numeric' ? distribution.position?.(value) : undefined
+  const position = distribution?.position?.(value)
   const bin = position == null ? undefined : Math.min(BINS - 1, Math.max(0, Math.floor(position * BINS)))
   // How far the value sits from the middle of all cases: 0 at the median, 1 at either end.
   const notability = Math.abs(percentile - 50) / 50

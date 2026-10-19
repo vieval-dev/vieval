@@ -11,28 +11,25 @@ The default CLI summary answers what happened in the active terminal. Report art
 
 ## Move from terminal output to retained artifacts
 
-`vieval run` prints a human-readable summary by default. `--json` changes stdout to the machine-readable run output; it does not create files. Add `--report-out` when the run should also persist a report directory.
+`vieval run` prints a human-readable summary and writes report artifacts by default, under `.vieval/reports` next to the config file. `--report-out <path>` changes the report root, and `--no-report` writes nothing (case artifacts then go to a temporary directory that is removed when the run ends). `--json` changes stdout to the machine-readable run output; it does not change which files are written.
 
 ```bash [Terminal]
 vieval run \
   --config ./vieval.config.ts \
-  --workspace local \
   --experiment baseline \
   --attempt attempt-a \
   --report-out .vieval/reports
 ```
 
-The command still prints its human-readable summary of the active run and its project, task, and case state. Add `--json` when a script needs the machine-readable run output, including the resolved `reportDirectory`, on stdout. The report directory created by `--report-out` remains available after the terminal session even though the human-readable summary does not print its path.
-
-Without `--report-out`, `reportDirectory` is `null` and the `vieval report ...` commands have no new artifacts from that run to read.
+The command still prints its human-readable summary of the active run and its project, task, and case state. Add `--json` when a script needs the machine-readable run output on stdout: it has the `invocationId` and a `projects` list, and each project has its own `runId` and `reportDirectory`. With `--no-report`, each `reportDirectory` is `null` and the `vieval report ...` commands have no new artifacts from that run to read.
 
 ## Know what a run writes
 
-Vieval places each run under the report root by workspace, project, experiment, attempt, and generated run ID. A multi-project run uses `multi-project` for the project segment.
+Every project is its own run. Vieval places each run under the report root as `<workspace>/<project>/<experiment>/<attempt>/<run>/`. The workspace segment is the name of the workspace config's directory (`default-workspace` is used only without a config file). The runs of one `vieval run` invocation share `experimentId`, `attemptId`, and `invocationId`; runs started by a comparison also carry `comparisonId`.
 
 | Artifact | Confirmed contents |
 | --- | --- |
-| `run-summary.json` | The CLI run output, including identities, project status, case summaries and failures, matrix summaries, and aggregated run scores. |
+| `run-summary.json` | The run output of exactly one project, with `schemaVersion: 1`, `runId`, `reportDirectory`, identities, project status, case summaries and failures, matrix summaries, and aggregated run scores. `vieval report` commands reject other versions. |
 | `events.jsonl` | Ordered run, task, case, score, metric, and custom event envelopes captured during execution. |
 | `cases.jsonl` | One normalized final record per observed task/case, with identities, state, timing, a derived retry count, scores, metrics, optional input/output, and, for tasks with automatic attempts, `attemptIndex`, `autoAttempt`, and every attempt in `attempts`. |
 | `metrics-summary.json` | Overall score counts, sums, and averages derived from normalized case records. |
@@ -84,14 +81,47 @@ vieval report compare <left-report-directory> <right-report-directory>
 
 It reads normalized cases, aligns them by a case key, and reports matched deltas plus added and removed cases. Per-case and grouped deltas use matched records and are `right - left`; grouping uses the right-side record's selector value. A missing selected score on a matched case is treated as `0`. The overall delta instead subtracts the two full record-set means, ignoring records that lack the selected score, so additions and removals affect it and it is not the mean matched delta. `--score-kind <kind>` defaults to `exact`, and output can be `table` or `json`.
 
-The default alignment key is the `benchmark.case.id` metric when present, then `vieval.case.id`, then the record's `caseId`. Use `--case-key <key>` when the benchmark has another stable identifier. An explicit key must exist on every record. Duplicate resolved keys on either side are an error rather than an arbitrary match.
+The default alignment key is the `benchmark.case.id` metric when present, then `vieval.case.id`, then `<taskId>::<caseName>`. Use `--case-key <key>` when the benchmark has another stable identifier. An explicit key must exist on every record. Duplicate resolved keys on either side are an error rather than an arbitrary match.
 
 Selectors used by `--case-key`, `--group-by`, and `report cases` look for an exact metric name first, then `scores.<name>` or a bare score name, then a direct case-record field. For example, `benchmark.category` can refer to a metric, while `state` refers to the normalized record field.
 
-Do not confuse this command with top-level `vieval compare`:
+`vieval report compare <left> <right>` compares case artifacts that already exist. To run several implementations of one benchmark side by side, use a comparison config instead.
 
-- `vieval report compare <left> <right>` compares case artifacts that already exist.
-- `vieval compare --config ... --comparison ...` loads a comparison-mode config, executes every configured method against one benchmark, shares the configured benchmark cache namespace, and can write its aggregate comparison artifact with `--output`.
+## Run a comparison
+
+A config that lists `workspaces` is a comparison. Each entry is a path or glob of directories that hold a `vieval.config.*`, `'!<glob>'` to exclude directories, or `{ root, id?, env? }`. A workspace id defaults to its directory name, and duplicate ids are an error. A comparison has no models, plugins, or reporters: each workspace runs with its own config.
+
+```ts [evals/agent-memory/vieval.config.ts]
+import { defineConfig, loadEnv } from 'vieval'
+
+export default defineConfig({
+  cache: { namespace: 'locomo-cases-v1' },
+  env: loadEnv('test', import.meta.dirname, ''),
+  id: 'agent-memory-semantic-approaches',
+  workspaces: ['eval/test-objects/*'],
+})
+```
+
+```bash [Terminal]
+vieval run --config evals/agent-memory/vieval.config.ts
+```
+
+- Every workspace runs in its own process, with the `vieval` that the workspace resolves. It must be the same version, so the workspace's dependencies must be installed.
+- All workspaces start at once. `concurrency: { workspace }` or `--workspace-concurrency` limits them.
+- The comparison `env` (and an entry's `env`) wins over each workspace config's `env`, and is applied before the workspace's plugins run.
+- `cache: { namespace }` makes all workspaces share `.vieval/cache/<comparison id>/<namespace>/` next to the comparison config.
+- One live terminal window shows `Workspaces`, `Projects`, `Tasks`, `Cases`, `Concurrency`, and `Time` rows for all workspaces. A failing workspace does not stop the others.
+- At the end, a leaderboard prints one row per workspace and project, sorted by hybrid score, then the failed workspaces with the last lines of their stderr.
+- The exit code is `1` when any workspace failed or had failing cases. `--json` prints the comparison output.
+- Reports go to `.vieval/reports` next to the comparison config. The experiment defaults to the comparison id, and all workspaces share one attempt, so every run of the comparison sits under `<workspace>/<project>/<comparison id>/<attempt>/`.
+- With `--with-viewer`, one viewer serves the comparison's report root.
+
+Selectors narrow a run. They are repeatable, and a value that contains `*` is a glob: `--workspace <id>` (comparison only; an error on a workspace config), `--project <name>`, `--task <name>` (the `describeTask` name or entry id), and `--case <name>` (the case name). A selector that matches nothing is an error that lists what exists; in a comparison, `--project`, `--task`, and `--case` must match in at least one workspace.
+
+```bash [Terminal]
+vieval run --config evals/agent-memory/vieval.config.ts --workspace mem9 --with-viewer --open
+vieval run --task zh --case 'case #1*'
+```
 
 ## Run one complete comparison flow
 
@@ -100,7 +130,6 @@ The following flow retains two executions, indexes the combined root, inspects c
 ```bash [Terminal — retain the baseline]
 vieval run \
   --config ./vieval.config.ts \
-  --workspace local \
   --experiment baseline \
   --attempt attempt-a \
   --report-out .vieval/reports/baseline
@@ -109,7 +138,6 @@ vieval run \
 ```bash [Terminal — retain the candidate]
 vieval run \
   --config ./vieval.config.ts \
-  --workspace local \
   --experiment candidate \
   --attempt attempt-a \
   --report-out .vieval/reports/candidate
@@ -140,6 +168,6 @@ vieval report compare \
 
 The final command requires every case to emit a unique `benchmark.case.id`. Omit `--case-key` if that guarantee does not exist and the built-in fallback identities are appropriate.
 
-A common failure is treating `--json` as persistence or pointing report commands at a directory created by a run that omitted `--report-out`. Another is aligning on generated or duplicate identifiers; comparison is meaningful only when the chosen key denotes the same benchmark case on both sides.
+A common failure is pointing report commands at the wrong root: with `--report-out`, the reports are under that path, not under `.vieval/reports`, and a run with `--no-report` leaves nothing to read. Another is aligning on generated or duplicate identifiers; comparison is meaningful only when the chosen key denotes the same benchmark case on both sides.
 
 See [API](/en/api/) for public entrypoints and [Config](/en/config/) for the current configuration surface.

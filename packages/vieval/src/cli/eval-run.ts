@@ -10,6 +10,8 @@ import { errorMessageFrom } from '@moeru/std'
 
 import packageJSON from '../../package.json'
 
+import { comparisonExitCode, formatComparisonOutput, openComparisonChannel, readComparisonEnvOverrides, runComparison } from './comparison'
+import { resolveVievalConfigMode } from './config'
 import { exitCodeFromSignal } from './interrupt'
 import { formatVievalCliRunOutput, hasRunFailures, runVievalCli } from './run'
 import { DEFAULT_VIEWER_HOST, DEFAULT_VIEWER_PORT, importViewer } from './viewer-host'
@@ -28,7 +30,10 @@ export interface EvalRunCliRuntime {
 
 interface ParsedCliArguments {
   attempt?: string
+  case: string[]
   caseConcurrency?: number
+  /** Set when a comparison started this process for one of its workspaces; see {@link ParsedComparisonChild}. */
+  comparisonChild?: ParsedComparisonChild
   configFilePath?: string
   experiment?: string
   json: boolean
@@ -36,9 +41,19 @@ interface ParsedCliArguments {
   projectConcurrency?: number
   report: boolean
   reportOut?: string
+  task: string[]
   taskConcurrency?: number
   viewer?: ParsedViewerArguments
-  workspace?: string
+  workspace: string[]
+  workspaceConcurrency?: number
+}
+
+/** What a comparison tells the process it starts for one workspace (internal flags, not in `--help`). */
+interface ParsedComparisonChild {
+  cache?: { namespace: string, root: string, scope: string }
+  comparisonId?: string
+  invocationId?: string
+  workspaceId?: string
 }
 
 interface ParsedViewerArguments {
@@ -48,34 +63,41 @@ interface ParsedViewerArguments {
 }
 
 const evalRunHelpText = `
-  Execute vieval projects from discovered or explicit config.
+  Run a workspace (a config that lists projects) or a comparison (a config that lists workspaces).
 
   Usage
-    $ vieval run [--config <path>] [--project <name>] [--json] [--report-out <path> | --no-report]
+    $ vieval run [--config <path>] [selectors] [--report-out <path> | --no-report] [--with-viewer [--open]]
+
+  Selectors (each may be repeated; a value with * is a glob)
+    --workspace <id>   Workspaces of a comparison to run
+    --project <name>   Projects to run
+    --task <name>      Tasks to run, by describeTask name or entry id
+    --case <name>      Cases to run, by case name
+                       A selector that matches nothing is an error.
 
   Options
-    --config     Config file path
-    --project    Project name to execute; may be repeated
-    --workspace  Workspace id used in report artifacts
+    --config     Config file path (default: nearest vieval.config.*)
     --experiment Experiment id used in report artifacts
     --attempt    Attempt id used in report artifacts
-    --project-concurrency Most projects running at once (default: 1)
-    --task-concurrency    Most tasks running at once in the whole run
-    --case-concurrency    Most cases running at once in the whole run
-                          Concurrency flags apply to the whole run and never raise a value set in config
+    --workspace-concurrency Most workspaces of a comparison running at once (default: all)
+    --project-concurrency   Most projects running at once (default: 1 without a task or case pool, else unbounded)
+    --task-concurrency      Most tasks running at once in the whole run
+    --case-concurrency      Most cases running at once in the whole run
+                            Concurrency flags apply to the whole run and never raise a value set in config
     --report-out Report output root directory (default: .vieval/reports next to the config file)
     --no-report  Do not write reports or case artifacts
     --json       Print machine-readable JSON output
-    --with-viewer        Serve the web viewer (package @vieval/ui) for this run; keeps serving after
-                         the run ends until Ctrl+C
-    --viewer-port <port> Viewer port (default: ${DEFAULT_VIEWER_PORT})
-    --viewer-host <host> Viewer host (default: ${DEFAULT_VIEWER_HOST})
-    --viewer-open        Open the viewer in a browser
+    --with-viewer  Serve the web viewer (package @vieval/ui) for this run; keeps serving after
+                   the run ends until Ctrl+C
+    --port <port>  Viewer port (default: ${DEFAULT_VIEWER_PORT}; 0 picks a free port)
+    --host <host>  Viewer host (default: ${DEFAULT_VIEWER_HOST})
+    --open         Open the viewer in a browser
 `
 
 interface LoadedViewer {
   getHost: () => undefined | ViewerHost
   onRunReady: RunReadyHook
+  startStatic: (reportRoot: null | string) => Promise<void>
 }
 
 /**
@@ -89,88 +111,77 @@ interface LoadedViewer {
  * - argv in either direct `run` form or forwarded `-- ...` form
  *
  * Returns:
- * - normalized run options ready for {@link runVievalCli}
+ * - normalized run options ready for {@link runVievalCli} or {@link runComparison}
  */
 export function parseCliArguments(argv: readonly string[]): ParsedCliArguments {
   const cli = meow(evalRunHelpText, {
     argv: normalizeCliArgv(argv),
     flags: {
-      attempt: {
-        type: 'string',
-      },
-      caseConcurrency: {
-        type: 'number',
-      },
-      config: {
-        type: 'string',
-      },
-      experiment: {
-        type: 'string',
-      },
-      json: {
-        default: false,
-        type: 'boolean',
-      },
-      project: {
-        isMultiple: true,
-        type: 'string',
-      },
-      projectConcurrency: {
-        type: 'number',
-      },
+      attempt: { type: 'string' },
+      cacheNamespace: { type: 'string' },
+      cacheRoot: { type: 'string' },
+      cacheScope: { type: 'string' },
+      case: { isMultiple: true, type: 'string' },
+      caseConcurrency: { type: 'number' },
+      comparisonChild: { default: false, type: 'boolean' },
+      comparisonId: { type: 'string' },
+      config: { type: 'string' },
+      experiment: { type: 'string' },
+      host: { type: 'string' },
+      invocation: { type: 'string' },
+      json: { default: false, type: 'boolean' },
+      open: { default: false, type: 'boolean' },
+      port: { type: 'number' },
+      project: { isMultiple: true, type: 'string' },
+      projectConcurrency: { type: 'number' },
       // meow turns `--no-report` into `report: false`.
-      report: {
-        default: true,
-        type: 'boolean',
-      },
-      reportOut: {
-        type: 'string',
-      },
-      taskConcurrency: {
-        type: 'number',
-      },
-      viewerHost: {
-        type: 'string',
-      },
-      viewerOpen: {
-        default: false,
-        type: 'boolean',
-      },
-      viewerPort: {
-        type: 'number',
-      },
-      withViewer: {
-        default: false,
-        type: 'boolean',
-      },
-      workspace: {
-        type: 'string',
-      },
+      report: { default: true, type: 'boolean' },
+      reportOut: { type: 'string' },
+      task: { isMultiple: true, type: 'string' },
+      taskConcurrency: { type: 'number' },
+      withViewer: { default: false, type: 'boolean' },
+      workspace: { isMultiple: true, type: 'string' },
+      workspaceConcurrency: { type: 'number' },
+      workspaceId: { type: 'string' },
     },
     importMeta: import.meta,
   })
+  const flags = cli.flags
 
   return {
-    attempt: cli.flags.attempt,
-    caseConcurrency: cli.flags.caseConcurrency,
-    configFilePath: cli.flags.config,
-    experiment: cli.flags.experiment,
-    json: cli.flags.json === true,
-    project: normalizeProjectNames(cli.flags.project),
-    projectConcurrency: cli.flags.projectConcurrency,
-    report: cli.flags.report,
-    reportOut: cli.flags.reportOut,
-    taskConcurrency: cli.flags.taskConcurrency,
-    ...(cli.flags.withViewer
+    attempt: flags.attempt,
+    case: flags.case ?? [],
+    caseConcurrency: flags.caseConcurrency,
+    ...(flags.comparisonChild
       ? {
-          viewer: {
-            host: cli.flags.viewerHost ?? DEFAULT_VIEWER_HOST,
-            open: cli.flags.viewerOpen,
-            port: normalizeViewerPort(cli.flags.viewerPort ?? DEFAULT_VIEWER_PORT),
+          comparisonChild: {
+            ...(flags.cacheRoot == null || flags.cacheScope == null || flags.cacheNamespace == null ? {} : { cache: { namespace: flags.cacheNamespace, root: flags.cacheRoot, scope: flags.cacheScope } }),
+            comparisonId: flags.comparisonId,
+            invocationId: flags.invocation,
+            workspaceId: flags.workspaceId,
           },
         }
       : {}),
-    workspace: cli.flags.workspace,
+    configFilePath: flags.config,
+    experiment: flags.experiment,
+    json: flags.json,
+    project: flags.project ?? [],
+    projectConcurrency: flags.projectConcurrency,
+    report: flags.report,
+    reportOut: flags.reportOut,
+    task: flags.task ?? [],
+    taskConcurrency: flags.taskConcurrency,
+    ...(flags.withViewer
+      ? {
+          viewer: {
+            host: flags.host ?? DEFAULT_VIEWER_HOST,
+            open: flags.open,
+            port: normalizeViewerPort(flags.port ?? DEFAULT_VIEWER_PORT),
+          },
+        }
+      : {}),
+    workspace: flags.workspace ?? [],
+    workspaceConcurrency: flags.workspaceConcurrency,
   }
 }
 
@@ -183,8 +194,11 @@ export function parseCliArguments(argv: readonly string[]): ParsedCliArguments {
  *   -> {@link runTopLevelCli} (`./index`)
  *     -> {@link runEvalRunCli}
  *       -> {@link parseCliArguments}
+ *       -> {@link resolveVievalConfigMode}
  *       -> {@link importViewer} (only with `--with-viewer`)
- *       -> {@link runVievalCli} (with `onRunReady` attaching the viewer, only with `--with-viewer`)
+ *       -> comparison config: {@link runComparison}
+ *            -> one `vieval run --comparison-child` process per workspace (this function again, in {@link runComparisonChild})
+ *       -> workspace config: {@link runVievalCli} (with `onRunReady` attaching the viewer, only with `--with-viewer`)
  *       -> `process.stdout.write(...)` / `process.stderr.write(...)`
  *       -> `process.exitCode`
  *       -> {@link ViewerHost.waitUntilClosed} (only with `--with-viewer`)
@@ -206,7 +220,18 @@ export function parseCliArguments(argv: readonly string[]): ParsedCliArguments {
  *   await guards once tsdown inlines both modules into `dist/cli/index.mjs`.
  */
 export async function runEvalRunCli(argv: readonly string[], runtime: EvalRunCliRuntime = {}): Promise<void> {
-  const parsed = parseCliArguments(argv)
+  let parsed: ParsedCliArguments
+  try {
+    parsed = parseCliArguments(argv)
+    if (parsed.comparisonChild != null) {
+      await runComparisonChild(parsed, parsed.comparisonChild)
+      return
+    }
+  }
+  catch (error) {
+    writeCliError(error)
+    return
+  }
 
   const viewer = parsed.viewer == null
     ? undefined
@@ -216,27 +241,54 @@ export async function runEvalRunCli(argv: readonly string[], runtime: EvalRunCli
   }
 
   try {
-    const output = await runVievalCli({
-      attempt: parsed.attempt,
-      caseConcurrency: parsed.caseConcurrency,
-      configFilePath: parsed.configFilePath,
-      experiment: parsed.experiment,
-      project: parsed.project,
-      projectConcurrency: parsed.projectConcurrency,
-      report: parsed.report,
-      reportOut: parsed.reportOut,
-      taskConcurrency: parsed.taskConcurrency,
-      ...(viewer == null ? {} : { onRunReady: viewer.onRunReady }),
-      workspace: parsed.workspace,
-    })
-
-    process.stdout.write(`${parsed.json ? JSON.stringify(output, null, 2) : formatVievalCliRunOutput(output)}\n`)
-    // An interrupted run exits like a process ended by that signal, so shells and CI see the interrupt.
-    if (output.interruptSignal != null) {
-      process.exitCode = exitCodeFromSignal(output.interruptSignal)
+    const mode = await resolveVievalConfigMode({ configFilePath: parsed.configFilePath })
+    if (mode === 'comparison') {
+      const output = await runComparison({
+        attempt: parsed.attempt,
+        case: parsed.case,
+        caseConcurrency: parsed.caseConcurrency,
+        configFilePath: parsed.configFilePath,
+        experiment: parsed.experiment,
+        ...(viewer == null ? {} : { onStart: async ({ reportRoot }) => viewer.startStatic(reportRoot) }),
+        project: parsed.project,
+        projectConcurrency: parsed.projectConcurrency,
+        report: parsed.report,
+        reportOut: parsed.reportOut,
+        task: parsed.task,
+        taskConcurrency: parsed.taskConcurrency,
+        workspace: parsed.workspace,
+        workspaceConcurrency: parsed.workspaceConcurrency,
+      })
+      process.stdout.write(`${parsed.json ? JSON.stringify(output, null, 2) : formatComparisonOutput(output)}\n`)
+      process.exitCode = comparisonExitCode(output)
     }
-    else if (hasRunFailures(output)) {
-      process.exitCode = 1
+    else {
+      if (parsed.workspace.length > 0 || parsed.workspaceConcurrency != null) {
+        throw new Error('--workspace and --workspace-concurrency select workspaces of a comparison; this config is a workspace (it lists projects).')
+      }
+      const output = await runVievalCli({
+        attempt: parsed.attempt,
+        case: parsed.case,
+        caseConcurrency: parsed.caseConcurrency,
+        configFilePath: parsed.configFilePath,
+        experiment: parsed.experiment,
+        project: parsed.project,
+        projectConcurrency: parsed.projectConcurrency,
+        report: parsed.report,
+        reportOut: parsed.reportOut,
+        task: parsed.task,
+        taskConcurrency: parsed.taskConcurrency,
+        ...(viewer == null ? {} : { onRunReady: viewer.onRunReady }),
+      })
+
+      process.stdout.write(`${parsed.json ? JSON.stringify(output, null, 2) : formatVievalCliRunOutput(output)}\n`)
+      // An interrupted run exits like a process ended by that signal, so shells and CI see the interrupt.
+      if (output.interruptSignal != null) {
+        process.exitCode = exitCodeFromSignal(output.interruptSignal)
+      }
+      else if (hasRunFailures(output)) {
+        process.exitCode = 1
+      }
     }
   }
   catch (error) {
@@ -253,7 +305,8 @@ export async function runEvalRunCli(argv: readonly string[], runtime: EvalRunCli
  * Loads the viewer before the run starts, so a missing package fails fast instead of after a long run.
  *
  * Returns:
- * - the hook that starts the viewer on the first ready run and attaches every run to it
+ * - the hook that starts the viewer on the first ready run and attaches every run to it, and a starter for a
+ *   comparison, whose runs are written by other processes and read from the report root
  * - `null` after reporting a load failure (exit code 1)
  */
 async function loadViewer(parsed: ParsedCliArguments, runtime: EvalRunCliRuntime): Promise<LoadedViewer | null> {
@@ -269,22 +322,27 @@ async function loadViewer(parsed: ParsedCliArguments, runtime: EvalRunCliRuntime
   }
 
   let host: undefined | ViewerHost
+  async function start(reportRoot: null | string): Promise<ViewerHost> {
+    if (host == null) {
+      // Started once the report root is known, so the viewer can also list earlier runs.
+      host = await viewerModule.startViewer({
+        host: options.host,
+        mode: 'live',
+        open: options.open,
+        port: options.port,
+        reportRoots: reportRoot == null ? [] : [reportRoot],
+      })
+      process.stderr.write(`Viewer: ${host.url}\n`)
+    }
+    return host
+  }
   return {
     getHost: () => host,
     async onRunReady(context) {
-      if (host == null) {
-        // Started once the report root is known, so the viewer can also list earlier runs.
-        host = await viewerModule.startViewer({
-          host: options.host,
-          mode: 'live',
-          open: options.open,
-          port: options.port,
-          reportRoots: context.reportRoot == null ? [] : [context.reportRoot],
-        })
-        process.stderr.write(`Viewer: ${host.url}\n`)
-      }
-
-      return await host.attachRun(context)
+      return await (await start(context.reportRoot)).attachRun(context)
+    },
+    async startStatic(reportRoot) {
+      await start(reportRoot)
     },
   }
 }
@@ -299,20 +357,51 @@ function normalizeCliArgv(argv: readonly string[]): string[] {
     : normalizedArgv
 }
 
-function normalizeProjectNames(projectNames: string | string[] | undefined): string[] {
-  if (typeof projectNames === 'string') {
-    return [projectNames]
-  }
-
-  return projectNames ?? []
-}
-
 function normalizeViewerPort(port: number): number {
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
-    throw new Error(`Invalid --viewer-port "${String(port)}". Expected an integer from 0 to 65535.`)
+    throw new Error(`Invalid --port "${String(port)}". Expected an integer from 0 to 65535.`)
   }
 
   return port
+}
+
+/**
+ * Runs one workspace for the comparison that started this process: no terminal output (the comparison draws one
+ * window for all workspaces), every event and the final output sent on the comparison channel.
+ */
+async function runComparisonChild(parsed: ParsedCliArguments, child: ParsedComparisonChild): Promise<void> {
+  const channel = openComparisonChannel()
+  try {
+    const output = await runVievalCli({
+      attempt: parsed.attempt,
+      case: parsed.case,
+      caseConcurrency: parsed.caseConcurrency,
+      ...(child.comparisonId == null ? {} : { comparisonId: child.comparisonId }),
+      configFilePath: parsed.configFilePath,
+      envOverrides: readComparisonEnvOverrides(),
+      experiment: parsed.experiment,
+      ...(child.invocationId == null ? {} : { invocationId: child.invocationId }),
+      onRunReady({ bus }) {
+        bus.onAny(envelope => channel.send({ envelope, type: 'event' }))
+      },
+      project: parsed.project,
+      projectConcurrency: parsed.projectConcurrency,
+      report: parsed.report,
+      reporter: { isTTY: false, writeOutput: () => {} },
+      reportOut: parsed.reportOut,
+      // The comparison checks that its selectors match in at least one workspace.
+      selectorsMayMatchNothing: true,
+      ...(child.cache == null ? {} : { sharedCache: child.cache }),
+      task: parsed.task,
+      taskConcurrency: parsed.taskConcurrency,
+      workspace: child.workspaceId,
+    })
+    channel.send({ output, type: 'output' })
+    process.exitCode = output.interruptSignal != null ? exitCodeFromSignal(output.interruptSignal) : (hasRunFailures(output) ? 1 : 0)
+  }
+  finally {
+    await channel.close()
+  }
 }
 
 /**
