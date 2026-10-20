@@ -462,22 +462,16 @@ function stripAnsi(value: string): string {
   return stripVTControlCharacters(value)
 }
 
-async function waitForExpectation(assertion: () => void, attempts = 30): Promise<void> {
-  let lastError: unknown
-
-  for (let index = 0; index < attempts; index += 1) {
-    try {
-      assertion()
-      return
-    }
-    catch (error) {
-      lastError = error
-      await new Promise(resolve => setTimeout(resolve, 10))
-    }
-  }
-
-  throw lastError
-}
+/**
+ * How long a test waits for the run to reach a state (cases started, released, or ended).
+ *
+ * NOTICE:
+ * A run loads its config and transpiles the eval files before the first case starts, which takes well over the 300 ms
+ * the previous helper (`waitForExpectation`: 30 tries 10 ms apart) allowed on a busy CI runner. Tests then failed with
+ * "expected [] to have a length of 3" before any case had started (seen on `main` and on PR #33). `vi.waitFor` polls as
+ * often, but gives the run seconds; it still returns as soon as the expectation holds.
+ */
+const RUN_STATE_WAIT = { interval: 10, timeout: 3000 }
 
 describe('runVievalCli', () => {
   afterEach(async () => {
@@ -1292,23 +1286,23 @@ export default defineConfig({
       cwd: projectDirectory,
     })
 
-    await waitForExpectation(() => {
+    await vi.waitFor(() => {
       expect(state.started).toHaveLength(2)
       expect(state.started.some(entry => entry.startsWith('alpha:'))).toBe(true)
       expect(state.started.some(entry => entry.startsWith('beta:'))).toBe(true)
       expect(state.projectPeak.alpha).toBe(1)
       expect(state.projectPeak.beta).toBe(1)
       expect(state.peak).toBe(2)
-    })
+    }, RUN_STATE_WAIT)
 
     await Promise.resolve()
     expect(state.started).toHaveLength(2)
 
     state.releases.splice(0).forEach(release => release())
 
-    await waitForExpectation(() => {
+    await vi.waitFor(() => {
       expect(state.started).toHaveLength(4)
-    })
+    }, RUN_STATE_WAIT)
 
     state.releases.splice(0).forEach(release => release())
 
@@ -1338,19 +1332,19 @@ export default defineConfig({
       taskConcurrency: 2,
     })
 
-    await waitForExpectation(() => {
+    await vi.waitFor(() => {
       expect(state.started).toHaveLength(2)
       expect(state.peak).toBe(2)
-    })
+    }, RUN_STATE_WAIT)
 
     await Promise.resolve()
     expect(state.started).toHaveLength(2)
 
     state.releases.splice(0).forEach(release => release())
 
-    await waitForExpectation(() => {
+    await vi.waitFor(() => {
       expect(state.started).toHaveLength(3)
-    })
+    }, RUN_STATE_WAIT)
 
     state.releases.splice(0).forEach(release => release())
 
@@ -1379,19 +1373,19 @@ export default defineConfig({
       taskConcurrency: 3,
     })
 
-    await waitForExpectation(() => {
+    await vi.waitFor(() => {
       expect(state.started).toHaveLength(1)
       expect(state.peak).toBe(1)
-    })
+    }, RUN_STATE_WAIT)
 
     await Promise.resolve()
     expect(state.started).toHaveLength(1)
 
     state.releases.splice(0).forEach(release => release())
 
-    await waitForExpectation(() => {
+    await vi.waitFor(() => {
       expect(state.started).toHaveLength(2)
-    })
+    }, RUN_STATE_WAIT)
 
     state.releases.splice(0).forEach(release => release())
 
@@ -1419,16 +1413,16 @@ export default defineConfig({
       taskConcurrency: 2,
     })
 
-    await waitForExpectation(() => {
+    await vi.waitFor(() => {
       expect(state.started).toHaveLength(2)
       expect(state.peak).toBe(2)
-    })
+    }, RUN_STATE_WAIT)
 
     state.releases.splice(0).forEach(release => release())
 
-    await waitForExpectation(() => {
+    await vi.waitFor(() => {
       expect(state.started).toHaveLength(3)
-    })
+    }, RUN_STATE_WAIT)
 
     state.releases.splice(0).forEach(release => release())
 
@@ -1486,9 +1480,9 @@ ${domainTask('vlc', 20)}
       report: false,
     })
 
-    await waitForExpectation(() => {
+    await vi.waitFor(() => {
       expect(state.started).toHaveLength(3)
-    })
+    }, RUN_STATE_WAIT)
     await new Promise(resolve => setTimeout(resolve, 20))
 
     // Three slots, filled by cases of more than one domain task.
@@ -1562,9 +1556,9 @@ export default defineConfig({
     const runPromise = runVievalCli({ configFilePath: join(directory, 'vieval.config.ts'), cwd: directory, report: false })
 
     // alpha's quick case ends, its slow case keeps one slot: beta must take the other.
-    await waitForExpectation(() => {
+    await vi.waitFor(() => {
       expect(state.started).toContain(10)
-    }, 200)
+    }, RUN_STATE_WAIT)
     expect(state.started).toEqual(expect.arrayContaining([1, 2, 10]))
     expect(state.releases).toHaveLength(2)
 
@@ -1619,7 +1613,7 @@ export default defineConfig({
       configFilePath: join(concurrencyCasesFromInputsProjectDirectory, 'vieval.config.ts'),
       cwd: concurrencyCasesFromInputsProjectDirectory,
       report: false,
-    })
+    }, RUN_STATE_WAIT)
 
     expect(output.projects[0]?.executed).toBe(true)
     expect(output.projects[0]?.taskCount).toBe(1)
@@ -1691,23 +1685,23 @@ describeTask('cli-case-concurrency', (task) => {
       cwd: projectDirectory,
     })
 
-    await waitForExpectation(() => {
+    await vi.waitFor(() => {
       expect(state.started).toEqual([1, 2])
-    })
+    }, RUN_STATE_WAIT)
     expect(state.peak).toBe(2)
 
     state.releases.shift()?.()
 
-    await waitForExpectation(() => {
+    await vi.waitFor(() => {
       expect(state.started).toEqual([1, 2, 3])
-    })
+    }, RUN_STATE_WAIT)
     expect(state.peak).toBe(2)
 
     state.releases.shift()?.()
 
-    await waitForExpectation(() => {
+    await vi.waitFor(() => {
       expect(state.started).toEqual([1, 2, 3, 4])
-    })
+    }, RUN_STATE_WAIT)
     expect(state.peak).toBe(2)
 
     while (state.releases.length > 0) {
