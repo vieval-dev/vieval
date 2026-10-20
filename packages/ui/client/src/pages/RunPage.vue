@@ -5,6 +5,7 @@ import type { LogLine, RunListItem } from '../../../src/shared/contract'
 import type { ViewTab } from '../components/ViewTabs.vue'
 import type { Route } from '../router'
 
+import { DropdownMenuItem } from 'reka-ui'
 import { computed, toRef, useTemplateRef } from 'vue'
 
 import CountsBar from '../components/CountsBar.vue'
@@ -28,7 +29,7 @@ import { useRunLive } from '../composables/useRunLive'
 import { useStatusFavicon } from '../composables/useStatusFavicon'
 import { formatDateTime } from '../format'
 import { levelIcons } from '../hierarchy'
-import { attemptLabel, runLabel } from '../labels'
+import { runLabel } from '../labels'
 import { href, navigate } from '../router'
 
 /**
@@ -101,7 +102,7 @@ const errorCaseHref = (target: { caseId: string, taskId: string }) => href({ ...
 </script>
 
 <template>
-  <PageHeader :id="props.route.runKey" :loading="!live.snapshot.value && !live.error.value" level="run" :position="position" :title="documentTitle">
+  <PageHeader :id="props.route.runKey" :loading="!live.snapshot.value && !live.error.value" level="run" :position="position" :title="documentTitle" title-size="sm">
     <template #title>
       <IdLabel :id="props.route.runKey" :label="label" />
       <!-- RunDetails renders no element of its own; the wrapper centers the button on the title's first line. -->
@@ -111,9 +112,8 @@ const errorCaseHref = (target: { caseId: string, taskId: string }) => href({ ...
       <span v-if="position.experiment" :class="['inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mr-1 align-middle']">
         <span :class="[levelIcons.experiment]" aria-hidden="true" />
         <ExperimentName :experiment-id="position.experiment" :matrix="experimentMatrix" :href="position.workspace && position.project ? href({ experiment: position.experiment, name: 'scope', project: position.project, workspace: position.workspace }) : undefined" />
-        <template v-if="position.attempt">
-          · {{ attemptLabel(position.attempt) }}
-        </template>
+        <!-- The attempt's time was printed here; it is the run's start (the title) to the second, and the breadcrumb
+             names the attempt, so it only repeated the title. -->
       </span>
       <!-- The start is the title already; only the end (or the interruption) adds a fact. -->
       <template v-if="live.snapshot.value?.endedAt || live.snapshot.value?.interruptSignal">
@@ -128,14 +128,19 @@ const errorCaseHref = (target: { caseId: string, taskId: string }) => href({ ...
     <template #actions>
       <!-- The run's score at a glance, on the title's line: the headline with its completion rate, and the case bar
            (counts in its tooltip). A score over part of the cases is not the score of the run, so the completion rate
-           always stands next to it. Phones give the bar the full width and put the score below it. -->
+           always stands next to it. The score leads the header (larger than the title); phones put the bar below it
+           at the full width. -->
       <span v-if="counts && live.snapshot.value" :class="['flex items-center gap-3 mr-1', 'max-md:(w-full mr-0 flex-col items-stretch gap-2)']" data-testid="run-score">
-        <HeadlineScore :result="live.snapshot.value.headline" :definitions="live.snapshot.value.scoreDefinitions" :task-label="taskLabel" @errors="showErrors" />
-        <CountsBar :class="['w-32 max-md:(order-first w-full)']" :counts="counts" />
+        <HeadlineScore :result="live.snapshot.value.headline" :definitions="live.snapshot.value.scoreDefinitions" :task-label="taskLabel" size="lg" @errors="showErrors" />
+        <CountsBar :class="['w-32 max-md:w-full']" :counts="counts" />
       </span>
-      <a v-if="position.workspace && position.project && position.experiment" :class="['btn']" :href="href({ name: 'compare', query: { experiment: position.experiment, project: position.project, view: 'attempts', workspace: position.workspace } })">
-        <span class="i-mingcute-git-compare-line" aria-hidden="true" />Compare attempts
-      </a>
+    </template>
+    <template v-if="position.workspace && position.project && position.experiment" #menu>
+      <DropdownMenuItem as-child :class="['menu-item']">
+        <a :href="href({ name: 'compare', query: { experiment: position.experiment, project: position.project, view: 'attempts', workspace: position.workspace } })">
+          <span class="i-mingcute-git-compare-line" aria-hidden="true" />Compare attempts
+        </a>
+      </DropdownMenuItem>
     </template>
   </PageHeader>
 
