@@ -1674,6 +1674,52 @@ export default defineConfig({
     }
   })
 
+  // ROOT CAUSE:
+  //
+  // If a case errored in its first auto attempt and passed in a later one, the project summary counted it as errored,
+  // listed its first error as a failure, and suggested resuming it.
+  // This happened because `subscribeProjectCaseSummary` counted only the first `case.ended` of each case.
+  //
+  // if (!seenCaseIds.has(projectCaseId)) { seenCaseIds.add(projectCaseId); counters[data.state] += 1 }
+  //
+  // We fixed this by keeping the last `case.ended` of each case, and only its failure.
+  // finalStates.set(key, data.state)
+  /**
+   * @example
+   * expect(output.projects[0]!.caseSummary).toMatchObject({ errored: 0, passed: 1, total: 1 })
+   */
+  it('counts a case that errored in one auto attempt and passed in a later one as passed', async () => {
+    const vievalImportPath = join(packageDirectory, 'src', 'index.ts').replaceAll('\\', '/')
+    const directory = await mkdtemp(join(tmpdir(), 'vieval-final-state-'))
+    temporaryDirectories.push(directory)
+    await writeFile(join(directory, 'flaky.eval.ts'), `
+import { describeTask } from '${vievalImportPath}'
+
+let runs = 0
+describeTask('flaky', ({ caseOf }) => {
+  caseOf('first-attempt-errors', async () => {
+    runs += 1
+    if (runs === 1)
+      throw new Error('provider unavailable')
+  }, { autoAttempt: 1, input: undefined })
+})
+`, 'utf-8')
+    await writeFile(join(directory, 'vieval.config.ts'), `
+import { defineConfig } from '${vievalImportPath}'
+
+export default defineConfig({
+  models: [{ aliases: [], id: 'openai:gpt-4.1-mini', model: 'gpt-4.1-mini', inferenceExecutor: 'openai', inferenceExecutorId: 'openai:gpt-4.1-mini' }],
+  projects: [{ name: 'flaky', include: ['*.eval.ts'] }],
+})
+`, 'utf-8')
+
+    const output = await runVievalCli({ configFilePath: join(directory, 'vieval.config.ts'), cwd: directory, report: false })
+
+    expect(output.projects[0]!.caseSummary).toMatchObject({ errored: 0, passed: 1, total: 1 })
+    expect(output.projects[0]!.caseFailures).toEqual([])
+    expect(output.projects[0]!.result?.overall.completion).toMatchObject({ mean: 1, n: 1 })
+  })
+
   it('runs only the tasks and cases selected by name or glob', async () => {
     const directory = await createLanguageProjectsFixture()
 
@@ -1992,11 +2038,12 @@ describeTask('cli-case-concurrency', (task) => {
       })
 
       expect(output.projects[0]?.executed).toBe(true)
-      // The fixture's first attempt throws a plain error, so that case counts as `errored`.
+      // The fixture's first attempt of case-b throws a plain error, and the second attempt passes: a case counts by its
+      // final state, so both cases count as passed.
       expect(output.projects[0]?.caseSummary).toEqual({
-        errored: 1,
+        errored: 0,
         failed: 0,
-        passed: 1,
+        passed: 2,
         skipped: 0,
         timeout: 0,
         total: 2,

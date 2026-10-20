@@ -4,7 +4,7 @@ import type { RunEventBus } from '../core/runner/event-bus'
 import type { Scheduler, SchedulerConcurrencyConfig } from '../core/scheduler/types'
 import type { HeadlineResult, ScoreSummary } from '../core/scoring'
 import type { TelemetryRuntime } from '../core/telemetry'
-import type { RunEventEmitter, RunEventEnvelope, ScoreDefinedData } from '../events'
+import type { CaseEndedData, RunEventEmitter, RunEventEnvelope, ScoreDefinedData } from '../events'
 import type { CliProjectConcurrencyConfig, CliProjectExecutorContext, LoadVievalCliConfigOptions, NormalizedCliProjectConfig } from './config'
 import type { InterruptSignal } from './interrupt'
 import type { ReportEventLog } from './report-log'
@@ -1868,29 +1868,29 @@ function smallestDeclared(configured: number | undefined, cli: number | undefine
  * Counts the case results of one project from `case.ended` events.
  *
  * Returns:
- * - the failures list, filled as cases fail, and a snapshot function for the project summary
+ * - the final failure of each case that did not pass, and a snapshot function for the project summary; both count each
+ *   case once, by its last `case.ended`
  */
 function subscribeProjectCaseSummary(bus: RunEventBus, projectName: string): {
   failures: CliProjectCaseFailure[]
   toSummary: () => CliProjectCaseSummary
 } {
-  const counters = { errored: 0, failed: 0, passed: 0, skipped: 0, timeout: 0 }
-  const seenCaseIds = new Set<string>()
-  const failures: CliProjectCaseFailure[] = []
+  // The last `case.ended` of a case is its final state: an auto attempt ends the same case again, and a case that
+  // errored in its first attempt but passed in a later one has a result.
+  const finalStates = new Map<string, CaseEndedData['state']>()
+  // Only the final failure of a case is listed, so a case that passed in a later attempt is not reported as failed.
+  const finalFailures = new Map<string, CliProjectCaseFailure>()
 
   bus.on(caseEnded, ({ caseId, data, projectId, taskId }) => {
     if (projectId !== projectName || taskId == null || caseId == null) {
       return
     }
 
-    const projectCaseId = `${taskId}:${caseId}`
-    if (!seenCaseIds.has(projectCaseId)) {
-      seenCaseIds.add(projectCaseId)
-      counters[data.state] += 1
-    }
-
+    const key = `${taskId}:${caseId}`
+    finalStates.set(key, data.state)
+    finalFailures.delete(key)
     if ((data.state === 'failed' || data.state === 'errored' || data.state === 'timeout') && data.errorMessage != null) {
-      failures.push({
+      finalFailures.set(key, {
         caseId,
         caseName: data.name,
         errorMessage: data.errorMessage,
@@ -1900,8 +1900,16 @@ function subscribeProjectCaseSummary(bus: RunEventBus, projectName: string): {
   })
 
   return {
-    failures,
-    toSummary: () => ({ ...counters, total: seenCaseIds.size }),
+    get failures() {
+      return [...finalFailures.values()]
+    },
+    toSummary: () => {
+      const counters = { errored: 0, failed: 0, passed: 0, skipped: 0, timeout: 0 }
+      for (const state of finalStates.values()) {
+        counters[state] += 1
+      }
+      return { ...counters, total: finalStates.size }
+    },
   }
 }
 
