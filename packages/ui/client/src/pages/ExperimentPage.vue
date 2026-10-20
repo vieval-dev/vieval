@@ -80,11 +80,12 @@ const isPartial = (run: (typeof runs.value)[number]) => run.state !== 'running' 
 /**
  * Grid of a run row. Wide screens: one line with select, attempt, run, duration, cases, headline score, menu (the
  * header uses the same columns). Narrow screens: select, attempt, score, and menu on the first line, the run and its
- * duration below the attempt, then the cases.
+ * duration below the attempt, then the cases. The score column fits a typical headline (`100.0% Correct and natural`);
+ * a longer label truncates inside it instead of spilling over the case bar.
  */
 const rowGrid = [
   'grid items-center gap-x-3 gap-y-1.5 grid-cols-[1rem_minmax(0,1fr)_auto_1.75rem]',
-  'md:(gap-x-4 grid-cols-[1rem_minmax(14rem,1.6fr)_minmax(9rem,1fr)_5rem_minmax(12rem,2fr)_8rem_1.75rem])',
+  'md:(gap-x-4 grid-cols-[1rem_minmax(14rem,1.6fr)_minmax(9rem,1fr)_5rem_minmax(12rem,2fr)_minmax(8rem,12rem)_1.75rem])',
 ]
 const selected = shallowRef<string[]>([])
 function duration(run: { endedAt?: string, startedAt?: string }): number | undefined {
@@ -171,7 +172,7 @@ watch([() => props.attempt, () => attempts.value.length], async ([attempt]) => {
                   <CountsBar :class="['flex-1']" :counts="expectedCounts(run)" />
                   <span v-if="isPartial(run)" :class="['badge state-interrupted shrink-0']" :title="`${run.counts.total} of ${run.caseTotal} expected cases ran`" data-testid="attempt-partial">{{ run.counts.total }} / {{ run.caseTotal }}</span>
                 </span>
-                <HeadlineScore :class="['relative z-1 justify-self-end max-md:(row-start-1 col-start-3)']" :result="run.headline" :definitions="run.headlineDefinitions" size="sm" align="end" />
+                <HeadlineScore :class="['relative z-1 justify-self-end min-w-0 max-w-full max-md:(row-start-1 col-start-3)']" :result="run.headline" :definitions="run.headlineDefinitions" size="sm" align="end" />
                 <!-- IdMenu renders no element of its own; the wrapper carries the grid placement. -->
                 <span :class="['flex max-md:(row-start-1 col-start-4)']"><IdMenu :id="run.runKey" kind="run" /></span>
               </div>
