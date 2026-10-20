@@ -2,7 +2,7 @@ import type { FSWatcher } from 'node:fs'
 
 import type { RunReadyContext } from 'vieval/cli'
 
-import type { CaseCounts, RunEvent, RunListItem, RunSource, RunState, TaskNode } from '../shared/contract'
+import type { CaseCounts, HeadlineResult, RunEvent, RunListItem, RunSource, RunState, ScoreDefinition, TaskNode } from '../shared/contract'
 import type { RunReducer } from '../shared/reduce'
 
 import { watch } from 'node:fs'
@@ -10,11 +10,12 @@ import { readFile, stat } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 
 import { glob } from 'tinyglobby'
-import { hybridAverage } from 'vieval/core/scoring'
+import { scoreDefinedDataSchema } from 'vieval/events'
 
 import * as v from 'valibot'
 
-import { average, axisValues, buildTaskNodes, countCases, createRunReducer, expectedCases } from '../shared/reduce'
+import { headlineResultSchema } from '../shared/contract'
+import { axisValues, buildTaskNodes, countCases, createRunReducer, expectedCases, pickScoreDefinitions, resolveTaskHeadline } from '../shared/reduce'
 import { createEventTail } from './event-tail'
 import { parseJsonText } from './files'
 
@@ -24,26 +25,18 @@ export const DEFAULT_STALE_AFTER_MS = 60 * 60 * 1000
 /** Interval of the polling fallback that complements `fs.watch` for tailed runs. */
 const TAIL_POLL_MS = 1000
 
-/** Identity fields that both `run-summary.json` and every event envelope carry. */
-const reportIdentityEntries = {
-  attemptId: v.optional(v.string()),
-  experimentId: v.optional(v.string()),
-  runId: v.optional(v.string()),
-  workspaceId: v.optional(v.string()),
-}
-
 /**
- * Fields of `run-summary.json` (vieval's `CliRunOutput`) that the viewer reads.
+ * Fields of `run-summary.json` (vieval's `RunSummaryFile`) that the viewer reads.
  *
- * Loose and mostly optional, because the file may come from any vieval version, including event schema version 1
- * reports. Missing case counts read as 0, as in the reports of older versions.
+ * Loose and mostly optional: the viewer reads only the counts, the interrupt, and the resolved headline, and a run
+ * whose summary lacks the headline is scored from its events instead.
  */
 const runSummaryFileSchema = v.looseObject({
-  ...reportIdentityEntries,
+  /** Headline of the run, resolved once by the runner (`run-summary.json` schema version 2). */
+  headline: v.optional(headlineResultSchema),
   interruptSignal: v.optional(v.string()),
   projects: v.optional(v.array(v.looseObject({
     caseSummary: v.nullish(v.looseObject({
-      // Reports from before vieval split errored cases out of failed ones have no `errored` count.
       errored: v.optional(v.number(), 0),
       failed: v.optional(v.number(), 0),
       passed: v.optional(v.number(), 0),
@@ -51,37 +44,13 @@ const runSummaryFileSchema = v.looseObject({
       timeout: v.optional(v.number(), 0),
       total: v.optional(v.number(), 0),
     })),
-    result: v.nullish(v.looseObject({
-      overall: v.optional(v.looseObject({
-        exactAverage: v.nullish(v.number()),
-        judgeAverage: v.nullish(v.number()),
-        runCount: v.optional(v.number()),
-      })),
-    })),
-    taskCount: v.optional(v.number()),
   })), []),
+  /** Definitions of the run's scores (`run-summary.json` schema version 2). */
+  scoreDefinitions: v.optional(v.array(scoreDefinedDataSchema)),
 })
 
-/** One line of a legacy (event schema version 1) `cases.jsonl`. */
-const legacyCaseRecordSchema = v.looseObject({
-  caseId: v.string(),
-  caseName: v.optional(v.string()),
-  endedAt: v.optional(v.string()),
-  errorMessage: v.nullish(v.string()),
-  input: v.optional(v.unknown()),
-  metrics: v.optional(v.record(v.string(), v.unknown()), {}),
-  projectName: v.optional(v.string()),
-  scores: v.optional(v.record(v.string(), v.unknown()), {}),
-  startedAt: v.optional(v.string()),
-  state: v.optional(v.string()),
-  taskId: v.optional(v.string()),
-})
-
-/** First line of a legacy `events.jsonl`: only its identity and time are used. */
-const legacyEventSchema = v.looseObject({
-  ...reportIdentityEntries,
-  timestamp: v.optional(v.string()),
-})
+/** Answer to a request that opens a run written by an older vieval. */
+export const UNSUPPORTED_RUN_MESSAGE = 'This report was written by an older vieval. Run it again.'
 
 export interface CreateRunStoreOptions {
   reportRoots: readonly string[]
@@ -109,6 +78,11 @@ export interface RunHandle {
   /** Subscribes to new envelopes. Tailed runs are watched while at least one listener exists. */
   subscribe: (listener: RunListener) => () => void
   summary: () => RunSummaryInfo | undefined
+  /**
+   * Event schema version of the run's `events.jsonl` when an older vieval wrote it. Such a run is listed (source and
+   * state `unsupported`) but not opened.
+   */
+  unsupportedVersion: () => number | undefined
 }
 
 /**
@@ -132,10 +106,11 @@ export interface RunStore {
  */
 export interface RunSummaryInfo {
   caseSummary?: CaseCounts
-  exactAverage: null | number
-  hybridAverage: null | number
+  /** Headline resolved by the runner, when the summary holds one. */
+  headline?: HeadlineResult
   interruptSignal?: string
-  judgeAverage: null | number
+  /** Score definitions written with the headline. */
+  scoreDefinitions?: ScoreDefinition[]
 }
 
 /**
@@ -223,72 +198,6 @@ export async function findRunDirectories(root: string): Promise<string[]> {
 }
 
 /**
- * Rebuilds a legacy (event schema version 1) run from `cases.jsonl` and `run-summary.json`.
- *
- * The events of version 1 use other names and payloads; instead of replaying them, every case record is turned
- * into the version 2 events the reducer understands. Rounds, retries, logs, and inference events are not
- * available for such runs.
- */
-export async function loadLegacyRun(runDirectory: string): Promise<RunReducer> {
-  const reducer = createRunReducer()
-  const records = (await readFile(join(runDirectory, 'cases.jsonl'), 'utf-8').catch(() => ''))
-    .split('\n')
-    .filter(line => line.trim().length > 0)
-    .flatMap((line) => {
-      const record = parseJsonText(legacyCaseRecordSchema, line)
-      return record == null ? [] : [record]
-    })
-  const summary = parseJsonText(runSummaryFileSchema, await readFile(join(runDirectory, 'run-summary.json'), 'utf-8').catch(() => ''))
-  const firstLine = (await readFile(join(runDirectory, 'events.jsonl'), 'utf-8').catch(() => '')).split('\n', 1)[0]
-  const first = parseJsonText(legacyEventSchema, firstLine)
-  const identity = {
-    attemptId: summary?.attemptId ?? first?.attemptId ?? 'unknown-attempt',
-    experimentId: summary?.experimentId ?? first?.experimentId ?? 'unknown-experiment',
-    runId: summary?.runId ?? first?.runId ?? basename(runDirectory),
-    workspaceId: summary?.workspaceId ?? first?.workspaceId ?? 'unknown-workspace',
-  }
-  let seq = 0
-  const startedTimes = records.flatMap(record => record.startedAt ?? []).sort()
-  const endedTimes = records.flatMap(record => record.endedAt ?? []).sort()
-  const runStartedAt = first?.timestamp ?? startedTimes[0] ?? new Date(0).toISOString()
-  const runEndedAt = endedTimes.at(-1) ?? runStartedAt
-  const emit = (event: string, data: unknown, time: string, scope: { caseId?: string, projectId?: string, taskId?: string } = {}) => {
-    seq += 1
-    reducer.apply({ ...identity, ...scope, data, event, schemaVersion: 2, seq, time })
-  }
-  const projects = summary?.projects ?? []
-  emit('run.started', { totalTasks: projects.reduce((sum, project) => sum + (project.taskCount ?? 0), 0) }, runStartedAt)
-
-  const byTask = Map.groupBy(records, record => record.taskId ?? 'unknown-task')
-  for (const [taskId, taskRecords] of byTask) {
-    const projectId = taskRecords[0].projectName ?? 'unknown-project'
-    const scope = { projectId, taskId }
-    const taskStartedAt = taskRecords.map(record => record.startedAt ?? runStartedAt).sort()[0]
-    emit('task.queued', { displayName: parseTaskDisplayName(taskId) }, runStartedAt, scope)
-    emit('task.started', {}, taskStartedAt, scope)
-    for (const record of taskRecords) {
-      const caseScope = { ...scope, caseId: record.caseId }
-      const index = Number.parseInt(record.caseId.split(':')[0], 10) || 0
-      const name = record.caseName ?? record.caseId
-      const startedAt = record.startedAt ?? runStartedAt
-      const endedAt = record.endedAt ?? startedAt
-      emit('case.started', { index, input: record.input, name, total: taskRecords.length }, startedAt, caseScope)
-      for (const [metricName, value] of Object.entries(record.metrics)) {
-        emit('metric.recorded', { name: metricName, value }, endedAt, caseScope)
-      }
-      for (const [kind, score] of Object.entries(record.scores)) {
-        emit('score.recorded', { kind, score }, endedAt, caseScope)
-      }
-      emit('case.ended', { errorMessage: record.errorMessage ?? undefined, index, name, state: record.state, total: taskRecords.length }, endedAt, caseScope)
-    }
-    const failed = taskRecords.some(record => record.state !== 'passed' && record.state !== 'skipped')
-    emit('task.ended', { state: failed ? 'failed' : 'passed' }, taskRecords.map(record => record.endedAt ?? runEndedAt).sort().at(-1)!, scope)
-  }
-  emit('run.ended', { failedTasks: 0, passedTasks: 0, skippedTasks: 0, totalTasks: byTask.size }, runEndedAt)
-  return reducer
-}
-
-/**
  * Reads the official numbers of `run-summary.json`.
  */
 export async function readRunSummary(filePath: string): Promise<RunSummaryInfo | undefined> {
@@ -298,7 +207,6 @@ export async function readRunSummary(filePath: string): Promise<RunSummaryInfo |
   }
   const caseSummary: CaseCounts = { errored: 0, failed: 0, passed: 0, requeued: 0, running: 0, skipped: 0, timeout: 0, total: 0 }
   let hasCaseSummary = false
-  const weighted = { exact: [0, 0], judge: [0, 0] }
   for (const project of parsed.projects) {
     const counts = project.caseSummary
     if (counts != null) {
@@ -307,29 +215,19 @@ export async function readRunSummary(filePath: string): Promise<RunSummaryInfo |
         caseSummary[key] += counts[key]
       }
     }
-    const overall = project.result?.overall
-    const weight = overall?.runCount ?? 1
-    for (const kind of ['exact', 'judge'] as const) {
-      const value = overall?.[`${kind}Average`]
-      if (value != null) {
-        weighted[kind][0] += value * weight
-        weighted[kind][1] += weight
-      }
-    }
   }
-  const exactAverage = weighted.exact[1] === 0 ? null : weighted.exact[0] / weighted.exact[1]
-  const judgeAverage = weighted.judge[1] === 0 ? null : weighted.judge[0] / weighted.judge[1]
   return {
     caseSummary: hasCaseSummary ? caseSummary : undefined,
-    exactAverage,
-    hybridAverage: hybridAverage(exactAverage, judgeAverage),
+    headline: parsed.headline,
     interruptSignal: parsed.interruptSignal,
-    judgeAverage,
+    scoreDefinitions: parsed.scoreDefinitions,
   }
 }
 
 /**
- * Builds the list item of one run (hierarchy labels, state, counts, scores).
+ * Builds the list item of one run (hierarchy labels, state, counts, headline).
+ *
+ * The headline is the one `run-summary.json` holds once the run ended, else the one resolved from the run's events.
  *
  * Expects:
  * - `tasks` only when the caller already built the run's task nodes (building them walks every case)
@@ -344,10 +242,10 @@ export function toRunListItem(handle: RunHandle, now: number, tasks: readonly Ta
   }
   const counts = countCases(tasks.flatMap(task => task.cases))
   const summary = handle.summary()
-  const taskExact = tasks.map(task => task.scores.exact).filter((value): value is number => value != null)
-  const taskJudge = tasks.map(task => task.scores.judge).filter((value): value is number => value != null)
-  const exactAverage = summary?.exactAverage ?? average(taskExact)
-  const judgeAverage = summary?.judgeAverage ?? average(taskJudge)
+  const headline = summary?.headline ?? resolveTaskHeadline(tasks)
+  const definitions = summary?.scoreDefinitions == null
+    ? reducer.scoreDefinitions
+    : new Map(summary.scoreDefinitions.map(definition => [definition.name, definition]))
   const run = reducer.run()
   return {
     ...identity,
@@ -355,9 +253,8 @@ export function toRunListItem(handle: RunHandle, now: number, tasks: readonly Ta
     counts,
     endedAt: run.endedAt,
     evalMatrix: axisValues(tasks.flatMap(task => task.matrix == null ? [] : [task.matrix.eval])),
-    exactAverage,
-    hybridAverage: hybridAverage(exactAverage, judgeAverage),
-    judgeAverage,
+    headline,
+    headlineDefinitions: pickScoreDefinitions(definitions, headlineScoreNames(headline)),
     lastEventAt: run.lastEvent?.time,
     lastSeq: reducer.seq(),
     matrix: axisValues(tasks.flatMap(task => task.matrix == null ? [] : [task.matrix.run])),
@@ -382,6 +279,7 @@ function createDirectoryRun(args: { reportRoot: string, runDirectory: string, st
   let reducer = createRunReducer()
   let source: RunSource = 'live-tail'
   let summary: RunSummaryInfo | undefined
+  let unsupportedVersion: number | undefined
   let parseErrors = 0
   let finished = false
   let refreshing: Promise<void> | undefined
@@ -397,10 +295,11 @@ function createDirectoryRun(args: { reportRoot: string, runDirectory: string, st
       return
     }
     const read = await tail.read()
-    if (read.legacy && source !== 'legacy') {
-      source = 'legacy'
-      reducer = await loadLegacyRun(args.runDirectory)
-      await loadSummary()
+    if (read.unsupportedVersion != null) {
+      // An older vieval wrote the events: they are not read, and the run is listed without opening it.
+      unsupportedVersion = read.unsupportedVersion
+      source = 'unsupported'
+      reducer = createRunReducer()
       finished = true
       stopWatching()
       listeners.emit({ envelopes: [], reset: true })
@@ -478,8 +377,8 @@ function createDirectoryRun(args: { reportRoot: string, runDirectory: string, st
     runKey: basename(args.runDirectory),
     source: () => source,
     state(now) {
-      if (source === 'legacy') {
-        return 'legacy'
+      if (source === 'unsupported') {
+        return 'unsupported'
       }
       const terminal = stateFromReducer(reducer, summary)
       if (terminal != null) {
@@ -502,6 +401,7 @@ function createDirectoryRun(args: { reportRoot: string, runDirectory: string, st
       }
     },
     summary: () => summary,
+    unsupportedVersion: () => unsupportedVersion,
   }
 
   return handle
@@ -567,6 +467,7 @@ function createLiveRun(context: RunReadyContext, staleAfterMs: number): { dispos
       return () => listeners.listeners.delete(listener)
     },
     summary: () => summary,
+    unsupportedVersion: () => undefined,
   }
 
   return {
@@ -582,14 +483,15 @@ function createLiveRun(context: RunReadyContext, staleAfterMs: number): { dispos
   }
 }
 
-function parseTaskDisplayName(taskId: string): string {
-  const [entry] = taskId.split('::')
-  try {
-    return decodeURIComponent(entry).split('/').at(-1) ?? taskId
+/** Names of the scores a headline shows. */
+function headlineScoreNames(headline: HeadlineResult | null): string[] {
+  if (headline == null || headline.headline.kind === 'passed-cases') {
+    return []
   }
-  catch {
-    return taskId
+  if (headline.headline.kind === 'score') {
+    return [headline.headline.score.name]
   }
+  return headline.headline.tasks.map(task => task.score.name)
 }
 
 function stateFromReducer(reducer: RunReducer, summary: RunSummaryInfo | undefined): RunState | undefined {

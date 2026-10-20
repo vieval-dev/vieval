@@ -7,6 +7,7 @@ import { computed } from 'vue'
 
 import CountsBar from '../components/CountsBar.vue'
 import ExperimentName from '../components/ExperimentName.vue'
+import HeadlineScore from '../components/HeadlineScore.vue'
 import MatrixView from '../components/MatrixView.vue'
 import PageHeader from '../components/PageHeader.vue'
 import Sparkline from '../components/Sparkline.vue'
@@ -16,10 +17,10 @@ import TimeAgo from '../components/TimeAgo.vue'
 import ViewTabs from '../components/ViewTabs.vue'
 
 import { useCatalog } from '../composables/useCatalog'
-import { formatScore } from '../format'
 import { levelIcons } from '../hierarchy'
 import { mergeMatrices } from '../labels'
 import { href, navigate } from '../router'
+import { headlineValue, headlineView } from '../scores'
 
 /**
  * One project: its experiments as list rows (what was measured, how its latest run went, the trend over attempts) and
@@ -41,23 +42,28 @@ const tab = computed<Tab>({
 const catalog = useCatalog()
 const project = computed(() => catalog.workspaces.value.find(workspace => workspace.id === props.workspace)?.projects.find(entry => entry.id === props.project))
 
-/** Row data of an experiment: its matrix, the trend of exact scores (oldest run first), and its newest run. */
+/**
+ * Row data of an experiment: its matrix, the trend of its headline scores (oldest run first) named by the newest run's
+ * headline, and its newest run.
+ */
 function toRow(experiment: ExperimentEntry) {
+  const latest = experiment.latest
   return {
     ...experiment,
     matrix: mergeMatrices(experiment.runs.map(run => run.matrix)),
-    trend: experiment.runs.map(run => run.exactAverage).toReversed(),
+    trend: experiment.runs.map(run => headlineValue(run.headline)).toReversed(),
+    trendLabel: latest.headline == null ? 'score' : headlineView(latest.headline, latest.headlineDefinitions).label,
   }
 }
 const rows = computed(() => (project.value?.experiments ?? []).map(toRow))
 /**
- * Grid of a row. Wide screens: one line with name, latest run, trend, cases, exact score, attempts (the header uses
- * the same columns). Narrow screens: the name on top, the latest run with the exact score below it, then the cases;
+ * Grid of a row. Wide screens: one line with name, latest run, trend, cases, headline score, attempts (the header
+ * uses the same columns). Narrow screens: the name on top, the latest run with the score below it, then the cases;
  * the trend and the attempt count are left out (both are on the experiment page).
  */
 const rowGrid = [
   'grid items-center gap-x-4 gap-y-1.5 grid-cols-[minmax(0,1fr)_auto]',
-  'md:grid-cols-[minmax(14rem,2fr)_minmax(12rem,1.2fr)_4.5rem_minmax(16rem,1.8fr)_4rem_4rem]',
+  'md:grid-cols-[minmax(14rem,2fr)_minmax(12rem,1.2fr)_4.5rem_minmax(16rem,1.8fr)_8rem_4rem]',
 ]
 </script>
 
@@ -73,7 +79,7 @@ const rowGrid = [
       <section v-if="tab === 'experiments'" :class="['card']">
         <div :class="[...rowGrid, 'max-md:hidden px-3 py-1.5 border-b border-neutral-200/50 dark:border-neutral-800/50', 'text-xs font-medium muted']" aria-hidden="true">
           <span>Experiment</span><span>Latest run</span><span>Trend</span><span>Cases (latest)</span><span class="text-right">
-            Exact
+            Score
           </span><span class="text-right">
             Attempts
           </span>
@@ -94,9 +100,9 @@ const rowGrid = [
               <TimeAgo :time="row.latest.startedAt" :class="['text-xs muted truncate']" />
             </span>
             <!-- The cell stays even when the trend draws nothing (fewer than two scored runs), so later columns keep their place. -->
-            <span :class="['flex max-md:hidden']"><Sparkline :values="row.trend" :label="`exact score of ${row.runs.length} runs`" :width="72" /></span>
+            <span :class="['flex max-md:hidden']"><Sparkline :values="row.trend" :label="`${row.trendLabel} of ${row.runs.length} runs`" :width="72" /></span>
             <CountsBar :class="['max-md:(row-start-3 col-span-2)']" :counts="row.latest.counts" />
-            <span :class="['text-right tabular-nums font-semibold max-md:(row-start-2 col-start-2)']">{{ formatScore(row.latest.exactAverage) }}</span>
+            <HeadlineScore :class="['relative z-1 justify-self-end max-md:(row-start-2 col-start-2)']" :result="row.latest.headline" :definitions="row.latest.headlineDefinitions" size="sm" align="end" />
             <span :class="['text-right tabular-nums muted max-md:hidden']">{{ row.attempts.length }}</span>
           </li>
         </ul>

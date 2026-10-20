@@ -1,4 +1,9 @@
+import type { AggregatedRunResults } from '../core/runner'
+import type { HeadlineResult, ScoreSummary } from '../core/scoring'
+import type { ScoreDefinedData } from '../events'
 import type { RunSummaryFile } from './report-artifacts'
+import type { CaseRecord, MetricsSummary } from './report-records'
+import type { CliProjectSummary } from './run'
 
 import { Buffer } from 'node:buffer'
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
@@ -23,6 +28,11 @@ const resumeProjectDirectory = join(packageDirectory, 'tests', 'projects', 'resu
 const fixtureProjectDirectory = join(packageDirectory, 'tests', 'projects', 'example-pattern-byoa-bring-your-own-agent')
 const taskProjectDirectory = join(packageDirectory, 'tests', 'projects', 'example-api-defining-new-task')
 const temporaryDirectories: string[] = []
+/**
+ * Source of one score summary that fixture executors and custom tasks return, as `TaskRunOutput.scores` expects; the
+ * built-in task DSL builds the same shape with `scoreCases`.
+ */
+const fixtureScoreSource = `{ mean: 1, n: 1, name: 'fixture.score', sum: 1, total: 1, unscored: {} }`
 const blockingRunStateKey = '__VIEVAL_BLOCKING_RUN_STATE__'
 const caseConcurrencyRunStateKey = '__VIEVAL_CASE_CONCURRENCY_RUN_STATE__'
 const telemetryRunEndStateKey = '__VIEVAL_TELEMETRY_RUN_END_STATE__'
@@ -142,12 +152,7 @@ export default defineEval({
     id: '${evalName}',
     run() {
       return {
-        scores: [
-          {
-            kind: 'exact',
-            score: 1,
-          },
-        ],
+        scores: [${fixtureScoreSource}],
       }
     },
   }),
@@ -193,12 +198,7 @@ export default defineEval({
           id: task.id,
           inferenceExecutorId: task.inferenceExecutor.id,
           matrix: task.matrix,
-          scores: [
-            {
-              kind: 'exact',
-              score: 1,
-            },
-          ],
+          scores: [${fixtureScoreSource}],
         }
       },
     }
@@ -458,8 +458,51 @@ function setCaseConcurrencyRunState(state: CaseConcurrencyRunState): void {
   })[caseConcurrencyRunStateKey] = state
 }
 
+/** A headline of a project whose cases all passed and recorded no score. */
+const passedHeadline: HeadlineResult = {
+  completion: { mean: 1, n: 1, name: 'completion', sum: 1, total: 1, unscored: {} },
+  headline: { kind: 'passed-cases', score: { mean: 1, n: 1, name: 'passed', sum: 1, total: 1, unscored: {} } },
+}
+
+/** Creates one executed project summary for formatting tests, with its result built from `headline`. */
+function projectSummaryOf(options: { headline: HeadlineResult, name: string, scoreDefinitions?: ScoreDefinedData[] }): CliProjectSummary {
+  return {
+    discoveredEvalFileCount: 1,
+    entryCount: 1,
+    errorMessage: null,
+    executed: true,
+    matrixSummary: null,
+    name: options.name,
+    result: resultOf(options.headline, 1),
+    ...(options.scoreDefinitions == null ? {} : { scoreDefinitions: options.scoreDefinitions }),
+    taskCount: 1,
+  }
+}
+
+/** Creates aggregated results whose overall summary carries `headline`. */
+function resultOf(headline: HeadlineResult, runCount: number): AggregatedRunResults {
+  return {
+    inferenceExecutors: [],
+    overall: { completion: headline.completion, headline, runCount, scores: [] },
+    runs: [],
+  }
+}
+
 function stripAnsi(value: string): string {
   return stripVTControlCharacters(value)
+}
+
+/** Creates one score summary over `n` counted cases; `total` defaults to `n` plus the unscored counts. */
+function summaryOf(name: string, options: { n: number, sum: number, unscored?: Record<string, number> }): ScoreSummary {
+  const unscored = options.unscored ?? {}
+  return {
+    mean: options.n === 0 ? null : options.sum / options.n,
+    n: options.n,
+    name,
+    sum: options.sum,
+    total: options.n + Object.values(unscored).reduce((sum, count) => sum + count, 0),
+    unscored,
+  }
 }
 
 /**
@@ -518,7 +561,9 @@ describe('runVievalCli', () => {
     expect(output.projects).toHaveLength(1)
     expect(output.projects[0].executed).toBe(true)
     expect(output.projects[0].result?.overall.runCount).toBe(2)
-    expect(output.projects[0].result?.overall.hybridAverage).toBe(1)
+    // The fixture executor returns its score summaries directly; they pool over both runs.
+    expect(output.projects[0].result?.overall.scores.length).toBeGreaterThan(0)
+    expect(output.projects[0].result?.overall.scores.every(score => score.mean === 1)).toBe(true)
   })
 
   it('injects cache runtime into task execution and persists cache artifacts', async () => {
@@ -610,8 +655,10 @@ describeTask('cache-runtime-task', () => {
     const eventsText = await readFile(join(output.projects[0]!.reportDirectory!, 'events.jsonl'), 'utf-8')
     const summary = JSON.parse(summaryText) as RunSummaryFile
 
-    expect(summary.schemaVersion).toBe(1)
+    expect(summary.schemaVersion).toBe(2)
     expect(summary.projects.map(project => project.name)).toEqual([output.projects[0]!.name])
+    expect(summary.projects[0]?.headline).toEqual(output.projects[0]!.result?.overall.headline)
+    expect(summary.headline).toEqual(output.projects[0]!.result?.overall.headline)
     expect(summaryText).toContain('"workspaceId": "packages-vieval"')
     expect(summaryText).toContain('"experimentId": "baseline"')
     expect(summaryText).toContain('"attemptId": "attempt-1"')
@@ -637,14 +684,19 @@ describeTask('cache-runtime-task', () => {
     const projectDirectory = await createDslProject({
       evalFiles: {
         'semantic-artifact.eval.ts': `
-import { caseOf, describeTask } from '${vievalImportPath}'
+import { caseOf, defineScore, describeTask } from '${vievalImportPath}'
+
+const correct = defineScore('locomo.correct', {
+  label: { 'en': 'Correct answer', 'zh-Hans': '回答正确' },
+  primary: true,
+})
 
 describeTask('semantic-artifact-task', () => {
   caseOf('semantic-artifact-case', (context) => {
     context.recordMetric('benchmark.id', 'locomo')
     context.recordMetric('benchmark.case.id', 'case-semantic')
     context.recordMetric('benchmark.locomo.category', 2)
-    context.recordScore(0.75)
+    context.recordScore(correct, 0.75, { rationale: 'The date matches.' })
     return {
       answer: '7 May 2023',
     }
@@ -672,15 +724,9 @@ describeTask('semantic-artifact-task', () => {
     const casesText = await readFile(join(output.projects[0]!.reportDirectory!, 'cases.jsonl'), 'utf-8')
     const metricsText = await readFile(join(output.projects[0]!.reportDirectory!, 'metrics-summary.json'), 'utf-8')
     const tracesText = await readFile(join(output.projects[0]!.reportDirectory!, 'otlp', 'traces.json'), 'utf-8')
-    const caseRecord = JSON.parse(casesText.trim()) as {
-      input?: { question?: string, sampleId?: string }
-      metrics?: Record<string, unknown>
-      output?: { answer?: string }
-      scores?: Record<string, number>
-    }
-    const metricsSummary = JSON.parse(metricsText) as {
-      overall?: Record<string, { average?: number }>
-    }
+    const caseRecord = JSON.parse(casesText.trim()) as CaseRecord & { input?: { question?: string }, output?: { answer?: string } }
+    const metricsSummary = JSON.parse(metricsText) as MetricsSummary
+    const summary = JSON.parse(await readFile(join(output.projects[0]!.reportDirectory!, 'run-summary.json'), 'utf-8')) as RunSummaryFile
     const traces = JSON.parse(tracesText) as {
       resourceSpans?: Array<{
         scopeSpans?: Array<{
@@ -697,8 +743,14 @@ describeTask('semantic-artifact-task', () => {
     expect(caseRecord.output?.answer).toBe('7 May 2023')
     expect(caseRecord.metrics?.['benchmark.id']).toBe('locomo')
     expect(caseRecord.metrics?.['benchmark.case.id']).toBe('case-semantic')
-    expect(caseRecord.scores?.exact).toBe(0.75)
-    expect(metricsSummary.overall?.exact.average).toBe(0.75)
+    expect(caseRecord.scores).toEqual({ 'locomo.correct': 0.75 })
+    expect(caseRecord.scoreDetails).toEqual({ 'locomo.correct': { rationale: 'The date matches.' } })
+    expect(metricsSummary.overall['locomo.correct']?.mean).toBe(0.75)
+    expect(summary.projects[0]?.scoreDefinitions).toEqual([{ label: { 'en': 'Correct answer', 'zh-Hans': '回答正确' }, name: 'locomo.correct', primary: true }])
+    expect(summary.scoreDefinitions).toEqual(summary.projects[0]?.scoreDefinitions)
+    expect(summary.headline.headline).toMatchObject({ kind: 'score', score: { mean: 0.75, name: 'locomo.correct' } })
+    expect(summary.projects[0]?.headline?.headline).toMatchObject({ kind: 'score', score: { mean: 0.75, name: 'locomo.correct' } })
+    expect(stripAnsi(formatVievalCliRunOutput(output))).toContain('Correct answer 75% · completed 100%')
     expect(spans.some(span => span.name === 'vieval.case' && span.attributes?.some(attribute => attribute.key === 'benchmark.locomo.category'))).toBe(true)
   })
 
@@ -805,6 +857,7 @@ describeTask('otel-task', () => {
     context.telemetry?.addEvent('case-context-observed', {
       'vieval.case.fixture': 'otel-case',
     })
+    context.recordScore('otel.correct', 1)
   })
 })
 `,
@@ -905,11 +958,11 @@ export default defineConfig({
         }>
       }>
     }
-    const exactMetric = metricsArtifact.resourceMetrics?.[0]?.scopeMetrics?.[0]?.metrics?.find(metric => metric.name === 'vieval.score.exact')
+    const scoreMetric = metricsArtifact.resourceMetrics?.[0]?.scopeMetrics?.[0]?.metrics?.find(metric => metric.name === 'vieval.score.otel.correct')
 
     expect(output.projects[0]!.reportDirectory).toBeDefined()
     expect(output.projects[0]?.caseSummary?.passed).toBe(1)
-    expect(exactMetric?.gauge?.dataPoints?.length).toBeGreaterThan(0)
+    expect(scoreMetric?.gauge?.dataPoints?.length).toBeGreaterThan(0)
     expect(openTelemetrySpanCalls).toEqual(expect.arrayContaining([
       {
         attributes: expect.objectContaining({
@@ -978,7 +1031,7 @@ export default defineEval({
     id: 'executor-task',
     run() {
       return {
-        scores: [{ kind: 'exact', score: 1 }],
+        scores: [${fixtureScoreSource}],
       }
     },
   }),
@@ -1016,7 +1069,7 @@ export default defineConfig({
           id: task.id,
           inferenceExecutorId: task.inferenceExecutor.id,
           matrix: task.matrix,
-          scores: [{ kind: 'exact', score: 1 }],
+          scores: [${fixtureScoreSource}],
         }
       },
     },
@@ -1146,47 +1199,89 @@ export default defineConfig({
 
   /**
    * @example
-   * it('formats final project hybrid score for terminal readability') verifies score precision stays concise.
+   * it('prints the primary score with its label and the completion rate next to it', () => {})
    */
-  it('formats final project hybrid score for terminal readability', () => {
+  it('prints the primary score with its label and the completion rate next to it', () => {
     const summary = stripAnsi(formatVievalCliRunOutput({
       configFilePath: '/tmp/vieval.config.ts',
       projects: [
-        {
-          caseSummary: {
-            errored: 0,
-            failed: 0,
-            passed: 1986,
-            skipped: 0,
-            timeout: 0,
-            total: 1986,
+        projectSummaryOf({
+          headline: {
+            completion: summaryOf('completion', { n: 155, sum: 150, unscored: { errored: 4, timeout: 1 } }),
+            headline: { kind: 'score', score: summaryOf('tts.pass', { n: 150, sum: 131.25 }) },
           },
-          discoveredEvalFileCount: 1,
-          durationMs: 9_986_250,
-          entryCount: 1,
-          errorMessage: null,
-          executed: true,
-          matrixSummary: null,
-          name: 'locomo-lobehub',
-          result: {
-            inferenceExecutors: [],
-            overall: {
-              coverage: null,
-              exactAverage: 0.3851948392189298,
-              hybridAverage: 0.3851948392189298,
-              judgeAverage: null,
-              runCount: 1,
-              strictExactAverage: 0.3851948392189298,
-            },
-            runs: [],
+          name: 'tts-speech-formula',
+          scoreDefinitions: [{ label: { 'en': 'Pass', 'zh-Hans': '通过' }, name: 'tts.pass', primary: true }],
+        }),
+        projectSummaryOf({
+          headline: {
+            completion: summaryOf('completion', { n: 4, sum: 4 }),
+            headline: { kind: 'score', score: summaryOf('locomo.correct', { n: 3, sum: 1.155584517656789 }) },
           },
-          taskCount: 1,
-        },
+          name: 'locomo',
+          scoreDefinitions: [{ label: { 'zh-Hans': '回答正确' }, name: 'locomo.correct' }],
+        }),
+        projectSummaryOf({
+          headline: {
+            completion: summaryOf('completion', { n: 2, sum: 2 }),
+            headline: { kind: 'score', score: summaryOf('unlabeled.score', { n: 2, sum: 2 }) },
+          },
+          name: 'unlabeled',
+        }),
       ],
     }))
 
-    expect(summary).toContain('hybrid 0.385')
-    expect(summary).not.toContain('0.3851948392189298')
+    /**
+     * @example
+     * expect(summary).toContain('Pass 87.5% · completed 96.8% (4 errored, 1 timed out)')
+     */
+    expect(summary).toContain('Pass 87.5% · completed 96.8% (4 errored, 1 timed out)')
+    // Without an `en` label, the first label is shown.
+    expect(summary).toContain('回答正确 38.5% · completed 100%')
+    expect(summary).toContain('unlabeled.score 100% · completed 100%')
+    expect(summary).not.toContain('0.385')
+  })
+
+  /**
+   * @example
+   * it('prints the share of passed cases when no score was recorded, and each task when primary scores differ', () => {})
+   */
+  it('prints the share of passed cases when no score was recorded, and each task when primary scores differ', () => {
+    const summary = stripAnsi(formatVievalCliRunOutput({
+      configFilePath: '/tmp/vieval.config.ts',
+      projects: [
+        projectSummaryOf({
+          headline: {
+            completion: summaryOf('completion', { n: 4, sum: 4 }),
+            headline: { kind: 'passed-cases', score: summaryOf('passed', { n: 4, sum: 2 }) },
+          },
+          name: 'unscored-project',
+        }),
+        projectSummaryOf({
+          headline: {
+            completion: summaryOf('completion', { n: 3, sum: 2, unscored: { timeout: 1 } }),
+            headline: {
+              kind: 'per-task',
+              tasks: [
+                { score: summaryOf('a.correct', { n: 1, sum: 1 }), taskId: 'evals/a.eval.ts' },
+                { score: summaryOf('b.natural', { n: 1, sum: 0.5 }), taskId: 'evals/b.eval.ts' },
+              ],
+            },
+          },
+          name: 'mixed-project',
+          scoreDefinitions: [{ label: 'Natural reading', name: 'b.natural', primary: true }],
+        }),
+      ],
+    }))
+
+    /**
+     * @example
+     * expect(summary).toContain('passed 50% · completed 100%')
+     */
+    expect(summary).toContain('passed 50% · completed 100%')
+    expect(summary).toContain('primary scores differ per task · completed 66.7% (1 timed out)')
+    expect(summary).toContain('evals/a.eval.ts  a.correct 100%')
+    expect(summary).toContain('evals/b.eval.ts  Natural reading 50%')
   })
 
   it('reports skipped/passed/failed counts together when mixed', () => {
@@ -1200,18 +1295,7 @@ export default defineConfig({
           executed: true,
           matrixSummary: null,
           name: 'passed-project',
-          result: {
-            inferenceExecutors: [],
-            overall: {
-              coverage: null,
-              exactAverage: 1,
-              hybridAverage: 1,
-              judgeAverage: null,
-              runCount: 1,
-              strictExactAverage: 1,
-            },
-            runs: [],
-          },
+          result: resultOf(passedHeadline, 1),
           taskCount: 1,
         },
         {
@@ -1258,7 +1342,8 @@ export default defineConfig({
     })
     expect(output.projects[0]?.matrixSummary).not.toBeNull()
     expect(output.projects[0].result?.overall.runCount).toBe(2)
-    expect(output.projects[0].result?.overall.hybridAverage).toBe(1)
+    // One task declares a primary score; the other records none, so it does not change the headline.
+    expect(output.projects[0].result?.overall.headline.headline).toMatchObject({ kind: 'score', score: { mean: 1, name: 'task_default.models_resolved' } })
   })
 
   it('runs projects concurrently up to the run-wide project pool while each project keeps its task pool', async () => {
@@ -1822,7 +1907,8 @@ describeTask('cli-case-concurrency', (task) => {
       // Only `flaky › provider` ran: the wrong answer is a result, and `stable` had nothing left, so it was skipped.
       expect(resumed.projects[0]?.caseSummary).toEqual({ errored: 0, failed: 0, passed: 1, skipped: 0, timeout: 0, total: 1 })
       expect(resumed.projects[0]?.taskCount).toBe(1)
-      expect(resumed.projects[0]?.result?.overall.exactAverage).toBe(1)
+      // The resume fixture records no score, so its headline is the share of passed cases.
+      expect(resumed.projects[0]?.result?.overall.headline.headline).toMatchObject({ kind: 'passed-cases', score: { mean: 1 } })
 
       const summary = JSON.parse(await readFile(join(resumed.projects[0]!.reportDirectory!, 'run-summary.json'), 'utf-8')) as RunSummaryFile
       expect(summary.resumedFrom).toBe('attempt-first')
@@ -1997,18 +2083,7 @@ describeTask('failed-case-task', () => {
             runRows: 8,
           },
           name: 'example-api-config-matrix',
-          result: {
-            inferenceExecutors: [],
-            overall: {
-              coverage: null,
-              exactAverage: 1,
-              hybridAverage: 1,
-              judgeAverage: null,
-              runCount: 288,
-              strictExactAverage: 1,
-            },
-            runs: [],
-          },
+          result: resultOf(passedHeadline, 288),
           taskCount: 288,
         },
       ],
@@ -2039,12 +2114,8 @@ export default defineEval({
     run() {
       const score = process.env.VIEVAL_TEST_ENV_KEY === 'from-config' ? 1 : 0
       return {
-        scores: [
-          {
-            kind: 'exact',
-            score,
-          },
-        ],
+        primary: 'env.applied',
+        scores: [{ mean: score, n: 1, name: 'env.applied', sum: score, total: 1, unscored: {} }],
       }
     },
   }),
@@ -2094,7 +2165,7 @@ export default defineConfig({
     expect(output.projects).toHaveLength(1)
     expect(output.projects[0].errorMessage).toBeNull()
     expect(output.projects[0].executed).toBe(true)
-    expect(output.projects[0].result?.overall.hybridAverage).toBe(1)
+    expect(output.projects[0].result?.overall.headline.headline).toMatchObject({ kind: 'score', score: { mean: 1, name: 'env.applied' } })
     expect(process.env.VIEVAL_TEST_ENV_KEY).toBe('outside-value')
 
     if (previousEnv == null) {
@@ -2510,7 +2581,7 @@ export default defineEval({
     id: 'exec-task',
     run() {
       return {
-        scores: [{ kind: 'exact', score: 1 }],
+        scores: [${fixtureScoreSource}],
       }
     },
   }),
@@ -2552,7 +2623,7 @@ export default defineConfig({
         id: 'exec-task',
         matrix: {},
         inferenceExecutorId: 'openai:gpt-4.1-mini',
-        scores: [{ kind: 'exact', score: 1 }],
+        scores: [${fixtureScoreSource}],
       }),
     },
     {

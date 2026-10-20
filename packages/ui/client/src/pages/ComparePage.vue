@@ -16,10 +16,10 @@ import StateView from '../components/StateView.vue'
 
 import { api } from '../api'
 import { useCatalog } from '../composables/useCatalog'
-import { formatScore } from '../format'
 import { levelIcons } from '../hierarchy'
 import { attemptLabel, experimentLabel, runLabel } from '../labels'
 import { href } from '../router'
+import { caseScoreText, gradersDiffer, graderText, headlineOf, headlineValue, headlineView, scoreLabel } from '../scores'
 
 /**
  * Comparisons: between experiments of a project, between attempts (runs) of an experiment, between chosen runs,
@@ -54,29 +54,33 @@ const matrixRuns = computed(() => catalog.runs.value.filter(run => run.counts.to
 /**
  * Matrix rows of one eval entry of a run as a {@link ComparisonResponse}: one column per task (matrix row such as
  * `model=…, repeat=…`), one row per case name. Only tasks of the same entry share cases, so each entry is compared
- * on its own.
+ * on its own. The rows compare the tasks' primary score when they share one (as the comparison endpoints do), else
+ * the case state alone.
  */
 function compareMatrixRows(snapshot: RunSnapshot, entryId: string | undefined): ComparisonResponse {
   const tasks = snapshot.tasks.filter(task => (task.entryId ?? task.id) === entryId)
   const columns = tasks.map(task => ({
     id: task.id,
     label: task.matrix == null ? task.displayName : Object.entries({ ...task.matrix.run, ...task.matrix.eval }).map(([key, value]) => `${key}=${value}`).join(', ') || task.displayName,
-    runs: [{ attemptId: snapshot.identity.attemptId, counts: task.caseCounts, exactAverage: task.scores.exact, experimentId: snapshot.identity.experimentId, hybridAverage: task.scores.hybrid, judgeAverage: task.scores.judge, runKey: snapshot.runKey, startedAt: task.startedAt, state: snapshot.state }],
+    runs: [{ attemptId: snapshot.identity.attemptId, counts: task.caseCounts, experimentId: snapshot.identity.experimentId, headline: headlineOf(task.scoring), runKey: snapshot.runKey, startedAt: task.startedAt, state: snapshot.state }],
+    scoreGraders: task.scoreGraders,
   }))
+  const primaries = new Set(tasks.map(task => task.scoring.primary))
+  const primary = primaries.size === 1 ? [...primaries][0] : undefined
   const rows = new Map<string, ComparisonResponse['rows'][number]>()
   for (const task of tasks) {
     for (const node of task.cases) {
       const row = rows.get(node.name) ?? { caseName: node.name, cells: {}, changed: false }
-      row.cells[task.id] = { exact: node.scores.exact, judge: node.scores.judge, roundCount: node.rounds.length, state: node.state }
+      row.cells[task.id] = { roundCount: node.rounds.length, scores: node.scores, state: node.state }
       rows.set(node.name, row)
     }
   }
   for (const row of rows.values()) {
     const cells = Object.values(row.cells)
-    row.changed = cells.length !== columns.length || new Set(cells.map(cell => `${cell.state}:${cell.exact}`)).size > 1
+    row.changed = cells.length !== columns.length || new Set(cells.map(cell => `${cell.state}:${primary == null ? '' : cell.scores.values[primary]}`)).size > 1
   }
   const list = [...rows.values()]
-  return { columns, rows: list, summary: { changed: list.filter(row => row.changed).length, rows: list.length }, view: 'runs' }
+  return { columns, primary, rows: list, scoreDefinitions: snapshot.scoreDefinitions, summary: { changed: list.filter(row => row.changed).length, rows: list.length }, view: 'runs' }
 }
 
 // Same entry as the run page's snapshot (`useRunLive`): a run opened there compares at once.
@@ -116,11 +120,35 @@ const onlyChanged = shallowRef(false)
 const search = shallowRef('')
 const rows = computed(() => (result.value?.rows ?? []).filter(row => (!onlyChanged.value || row.changed) && row.caseName.toLowerCase().includes(search.value.toLowerCase())))
 
+const scoreDefinitions = computed(() => result.value?.scoreDefinitions ?? [])
+/** Label of the score the columns are compared by: the shared primary score, else the headline of passed cases. */
+const primaryLabel = computed(() => (result.value?.primary == null ? 'Passed cases' : scoreLabel(result.value.primary, scoreDefinitions.value)))
+/** Each column's headline next to its completion rate: a score over fewer completed cases is not comparable. */
 const chart = computed<BarDatum[]>(() => (result.value?.columns ?? []).map((column) => {
   const run = column.runs.at(-1)
-  const passRate = run == null || run.counts.total === 0 ? null : run.counts.passed / run.counts.total
-  return { href: run && view.value !== 'matrix' ? href({ name: 'run', runKey: run.runKey }) : undefined, label: columnLabel(column), values: [run?.exactAverage ?? null, passRate] }
+  return { href: run && view.value !== 'matrix' ? href({ name: 'run', runKey: run.runKey }) : undefined, label: columnLabel(column), values: [headlineValue(run?.headline), run?.headline?.completion.mean ?? null] }
 }))
+const chartSeries = computed(() => {
+  const headline = result.value?.columns.map(column => column.runs.at(-1)?.headline).find(item => item != null)
+  return [headline == null ? primaryLabel.value : headlineView(headline, scoreDefinitions.value).label, 'completed']
+})
+
+/**
+ * Graders of the primary score per column, when they differ in kind, model, or version: the values then do not
+ * measure the same thing, so the comparison warns. Each column lists the graders its score records carried (a
+ * record's own grader, for example a judge model set by a matrix axis, else the definition's), so the matrix view
+ * warns about matrix rows judged by different models too.
+ */
+const graderWarning = computed(() => {
+  const primary = result.value?.primary
+  if (primary == null)
+    return undefined
+  const columns = (result.value?.columns ?? []).map(column => ({ graders: column.scoreGraders[primary] ?? [], label: columnLabel(column) }))
+  const all = columns.flatMap(column => column.graders)
+  if (!all.some(grader => gradersDiffer(grader, all[0])))
+    return undefined
+  return columns.filter(column => column.graders.length > 0).map(column => `${column.label}: ${column.graders.map(graderText).join(' / ')}`).join(' · ')
+})
 
 const title = computed(() => ({ attempts: 'Attempts of an experiment', experiments: 'Experiments of a project', matrix: 'Matrix rows of a run', runs: 'Chosen runs' } as Record<string, string>)[view.value ?? ''] ?? 'Comparisons')
 const position = computed(() => ({ experiment: query.value.experiment, project: query.value.project, runKey: query.value.run, workspace: query.value.workspace }))
@@ -179,7 +207,8 @@ const position = computed(() => ({ experiment: query.value.experiment, project: 
         v-for="column in result?.columns"
         :key="column.id"
         :href="column.runs.at(-1) && view !== 'matrix' ? href({ name: 'run', runKey: column.runs.at(-1)!.runKey }) : undefined"
-        :score="column.runs.at(-1)?.exactAverage"
+        :headline="column.runs.at(-1)?.headline"
+        :definitions="scoreDefinitions"
         :state="column.runs.at(-1)?.state"
         :counts="column.runs.at(-1)?.counts"
         :title="columnLabel(column)"
@@ -191,12 +220,17 @@ const position = computed(() => ({ experiment: query.value.experiment, project: 
       </ScoreCard>
     </section>
 
+    <div v-if="graderWarning" role="status" :class="['flex items-start gap-2 mb-4 rounded px-3 py-2 text-sm state-interrupted']" data-testid="compare-grader-warning">
+      <span class="i-mingcute-warning-line mt-0.5 shrink-0" aria-hidden="true" />
+      <span>The columns graded {{ primaryLabel }} differently, so its values do not measure the same thing. <span :class="['mono text-xs']">{{ graderWarning }}</span></span>
+    </div>
+
     <section :class="['card mb-4']">
       <h2 class="card-title">
-        <span class="i-mingcute-chart-horizontal-line" aria-hidden="true" />Exact score and pass rate per column
+        <span class="i-mingcute-chart-horizontal-line" aria-hidden="true" />Headline and completion rate per column
       </h2>
       <div class="p-3">
-        <BarChart :data="chart" :series="['exact score', 'pass rate']" />
+        <BarChart :data="chart" :series="chartSeries" />
       </div>
     </section>
 
@@ -212,7 +246,7 @@ const position = computed(() => ({ experiment: query.value.experiment, project: 
             <thead :class="['sticky top-0 bg-white dark:bg-neutral-900 z-1']">
               <tr :class="['border-b border-neutral-200/50 dark:border-neutral-800/50']">
                 <th class="th">
-                  Case
+                  Case <span :class="['font-normal muted']">· {{ primaryLabel }}</span><span v-if="graderWarning" class="i-mingcute-warning-line text-amber-600 ml-1 align-[-0.15em]" :title="`Graders differ: ${graderWarning}`" data-testid="compare-grader-warning-icon" />
                 </th>
                 <th v-for="column in result?.columns" :key="column.id" :class="['th text-xs max-w-40 truncate']" :title="column.label">
                   {{ columnLabel(column) }}
@@ -227,7 +261,7 @@ const position = computed(() => ({ experiment: query.value.experiment, project: 
                 <td v-for="column in result?.columns" :key="column.id" class="td">
                   <span v-if="row.cells[column.id]" :class="['inline-flex items-center gap-1']">
                     <StateBadge :state="row.cells[column.id]!.state" icon-only />
-                    <span class="text-xs mono">{{ formatScore(row.cells[column.id]!.exact) }}</span>
+                    <span v-if="result?.primary" class="text-xs mono">{{ caseScoreText(row.cells[column.id]!.scores, result.primary) }}</span>
                     <span v-if="row.cells[column.id]!.roundCount > 1" class="text-xs muted">×{{ row.cells[column.id]!.roundCount }}</span>
                   </span>
                   <span v-else class="text-xs muted">not run</span>

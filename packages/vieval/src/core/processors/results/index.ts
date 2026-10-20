@@ -1,9 +1,9 @@
 import type { AggregatedRunResults } from '../../runner/aggregate'
-import type { HybridThresholdPolicyOptions, ResultPolicyViolation } from './policies/hybrid-threshold'
 import type { MaxFailedRunsPolicyOptions } from './policies/max-failed-runs'
+import type { PolicyScore, ResultPolicyViolation, ScoreThresholdPolicyOptions } from './policies/score-threshold'
 
-import { evaluateHybridThresholdPolicy } from './policies/hybrid-threshold'
 import { evaluateMaxFailedRunsPolicy } from './policies/max-failed-runs'
+import { evaluateScoreThresholdPolicy } from './policies/score-threshold'
 
 /**
  * Configures result-processing policies for eval gating.
@@ -16,7 +16,7 @@ export interface ProcessRunResultsOptions {
   /**
    * Threshold policy options.
    */
-  threshold?: HybridThresholdPolicyOptions
+  threshold?: ScoreThresholdPolicyOptions
 }
 
 /**
@@ -41,7 +41,7 @@ export interface ResultGateDecision {
  * {@link runScheduledTasks}
  *   -> {@link aggregateRunResults}
  *     -> {@link processRunResults}
- *       -> {@link evaluateHybridThresholdPolicy}
+ *       -> {@link evaluateScoreThresholdPolicy}
  *       -> {@link evaluateMaxFailedRunsPolicy}
  *         -> {@link ResultGateDecision}
  */
@@ -49,7 +49,7 @@ export function processRunResults(
   results: AggregatedRunResults,
   options: ProcessRunResultsOptions = {},
 ): ResultGateDecision {
-  const thresholdViolations = evaluateHybridThresholdPolicy(results, options.threshold)
+  const thresholdViolations = evaluateScoreThresholdPolicy(results, options.threshold)
   const maxFailedRunsViolations = evaluateMaxFailedRunsPolicy(results, options.maxFailedRuns)
 
   const violations = [
@@ -64,7 +64,8 @@ export function processRunResults(
 }
 
 export type {
-  HybridThresholdPolicyOptions,
   MaxFailedRunsPolicyOptions,
+  PolicyScore,
   ResultPolicyViolation,
+  ScoreThresholdPolicyOptions,
 }

@@ -6,6 +6,7 @@ import { computed, nextTick, shallowRef, watch } from 'vue'
 
 import CountsBar from '../components/CountsBar.vue'
 import ExperimentName from '../components/ExperimentName.vue'
+import HeadlineScore from '../components/HeadlineScore.vue'
 import IdLabel from '../components/IdLabel.vue'
 import IdMenu from '../components/IdMenu.vue'
 import MatrixView from '../components/MatrixView.vue'
@@ -17,10 +18,11 @@ import TimeAgo from '../components/TimeAgo.vue'
 import ViewTabs from '../components/ViewTabs.vue'
 
 import { useCatalog } from '../composables/useCatalog'
-import { formatDuration, formatScore } from '../format'
+import { formatDuration } from '../format'
 import { levelIcons } from '../hierarchy'
 import { attemptDate, attemptLabel, differingAxes, experimentLabel, formatAxisValues, mergeMatrices, shortRunHash } from '../labels'
 import { href, navigate } from '../router'
+import { headlineValue, headlineView } from '../scores'
 
 /**
  * One experiment: its attempts newest first as list rows (one per run: state, duration, cases, score) and the matrix
@@ -46,7 +48,12 @@ const scope = computed(() => ({ experiment: props.experiment, project: props.pro
 const runs = computed(() => catalog.runsIn(scope.value))
 const matrix = computed(() => mergeMatrices(runs.value.map(run => run.matrix)))
 const title = computed(() => experimentLabel(props.experiment, matrix.value).text)
-const trend = computed(() => runs.value.map(run => run.exactAverage).toReversed())
+const trend = computed(() => runs.value.map(run => headlineValue(run.headline)).toReversed())
+/** What the trend shows: the headline label of the newest run. */
+const trendLabel = computed(() => {
+  const newest = runs.value[0]
+  return newest?.headline == null ? 'score' : headlineView(newest.headline, newest.headlineDefinitions).label
+})
 
 /** Attempts newest first, each with its runs (one per attempt unless a run was repeated under the same label). */
 const attempts = computed(() => {
@@ -71,13 +78,13 @@ const expectedCounts = (run: (typeof runs.value)[number]) => ({ ...run.counts, t
 const isPartial = (run: (typeof runs.value)[number]) => run.state !== 'running' && run.caseTotal != null && run.counts.total < run.caseTotal
 
 /**
- * Grid of a run row. Wide screens: one line with select, attempt, run, duration, cases, exact score, menu (the header
- * uses the same columns). Narrow screens: select, attempt, exact score, and menu on the first line, the run and its
+ * Grid of a run row. Wide screens: one line with select, attempt, run, duration, cases, headline score, menu (the
+ * header uses the same columns). Narrow screens: select, attempt, score, and menu on the first line, the run and its
  * duration below the attempt, then the cases.
  */
 const rowGrid = [
   'grid items-center gap-x-3 gap-y-1.5 grid-cols-[1rem_minmax(0,1fr)_auto_1.75rem]',
-  'md:(gap-x-4 grid-cols-[1rem_minmax(14rem,1.6fr)_minmax(9rem,1fr)_5rem_minmax(12rem,2fr)_4rem_1.75rem])',
+  'md:(gap-x-4 grid-cols-[1rem_minmax(14rem,1.6fr)_minmax(9rem,1fr)_5rem_minmax(12rem,2fr)_8rem_1.75rem])',
 ]
 const selected = shallowRef<string[]>([])
 function duration(run: { endedAt?: string, startedAt?: string }): number | undefined {
@@ -106,7 +113,7 @@ watch([() => props.attempt, () => attempts.value.length], async ([attempt]) => {
     </template>
     <template #actions>
       <!-- Phones need the width for the name; every attempt row below shows its score. -->
-      <Sparkline :class="['max-md:hidden']" :values="trend" :label="`exact score of ${runs.length} runs`" :width="140" :height="32" />
+      <Sparkline :class="['max-md:hidden']" :values="trend" :label="`${trendLabel} of ${runs.length} runs`" :width="140" :height="32" />
     </template>
   </PageHeader>
 
@@ -122,7 +129,7 @@ watch([() => props.attempt, () => attempts.value.length], async ([attempt]) => {
         <section :class="['card']">
           <div :class="[...rowGrid, 'max-md:hidden px-3 py-1.5 border-b border-neutral-200/50 dark:border-neutral-800/50', 'text-xs font-medium muted']" aria-hidden="true">
             <span /><span>Attempt</span><span>Run</span><span>Duration</span><span>Cases</span><span class="text-right">
-              Exact
+              Score
             </span><span />
           </div>
           <ol>
@@ -164,7 +171,7 @@ watch([() => props.attempt, () => attempts.value.length], async ([attempt]) => {
                   <CountsBar :class="['flex-1']" :counts="expectedCounts(run)" />
                   <span v-if="isPartial(run)" :class="['badge state-interrupted shrink-0']" :title="`${run.counts.total} of ${run.caseTotal} expected cases ran`" data-testid="attempt-partial">{{ run.counts.total }} / {{ run.caseTotal }}</span>
                 </span>
-                <span :class="['text-right tabular-nums font-semibold max-md:(row-start-1 col-start-3)']">{{ formatScore(run.exactAverage) }}</span>
+                <HeadlineScore :class="['relative z-1 justify-self-end max-md:(row-start-1 col-start-3)']" :result="run.headline" :definitions="run.headlineDefinitions" size="sm" align="end" />
                 <!-- IdMenu renders no element of its own; the wrapper carries the grid placement. -->
                 <span :class="['flex max-md:(row-start-1 col-start-4)']"><IdMenu :id="run.runKey" kind="run" /></span>
               </div>

@@ -1,21 +1,5 @@
 import type { MetricDefinedData } from '../events'
-
-/**
- * Tracks which metric metadata a task already announced.
- *
- * Use when:
- * - `recordMetric` must decide whether to emit `metric.defined` before a value
- */
-export interface MetricAnnouncements {
-  /**
-   * Resolves the name and metadata of one `recordMetric` call.
-   *
-   * Returns:
-   * - `name` of the metric, and `defined` when its metadata is new or changed for this task (to emit before the
-   *   value); a definition's fields are overridden by inline `metadata` field by field
-   */
-  resolve: (metric: MetricDefinition | string, metadata: MetricMetadata | undefined) => { defined?: MetricDefinedData, name: string }
-}
+import type { Announcements } from './announcements'
 
 /**
  * One metric declared once with {@link defineMetric}; pass it to `context.recordMetric` instead of its name.
@@ -32,33 +16,6 @@ export interface MetricDefinition extends MetricMetadata {
  * (`{ en: 'Agent steps', 'zh-Hans': 'Agent 步数' }`).
  */
 export type MetricMetadata = Omit<MetricDefinedData, 'name'>
-
-/**
- * Creates the announcement tracker of one task.
- *
- * Use when:
- * - a task starts running its cases; every case of the task shares the tracker, so metadata is announced once
- *
- * Returns:
- * - a tracker that announces metadata on first use and again when it differs from the last announcement
- */
-export function createMetricAnnouncements(): MetricAnnouncements {
-  const announced = new Map<string, string>()
-  return {
-    resolve(metric, metadata) {
-      const name = typeof metric === 'string' ? metric : metric.name
-      const defined: MetricDefinedData = { ...(typeof metric === 'string' ? {} : metric), ...metadata, name }
-      if (Object.keys(defined).length === 1)
-        return { name }
-      // Field order differs between a definition and inline metadata, so the comparison key sorts the fields.
-      const key = JSON.stringify(Object.entries(defined).sort(([a], [b]) => a.localeCompare(b)))
-      if (announced.get(name) === key)
-        return { name }
-      announced.set(name, key)
-      return { defined, name }
-    },
-  }
-}
 
 /**
  * Declares one metric with the text and unit viewers show for it.
@@ -85,4 +42,26 @@ export function createMetricAnnouncements(): MetricAnnouncements {
  */
 export function defineMetric(name: string, metadata: MetricMetadata = {}): MetricDefinition {
   return Object.freeze({ ...metadata, name })
+}
+
+/**
+ * Resolves the name and the `metric.defined` payload of one `recordMetric` call.
+ *
+ * Use when:
+ * - `recordMetric` must decide whether to emit `metric.defined` before a value
+ *
+ * Returns:
+ * - `name` of the metric, and `defined` when its metadata is new or changed for the task (to emit before the value);
+ *   a definition's fields are overridden by inline `metadata` field by field
+ */
+export function resolveMetricAnnouncement(
+  announcements: Announcements<MetricDefinedData>,
+  metric: MetricDefinition | string,
+  metadata: MetricMetadata | undefined,
+): { defined?: MetricDefinedData, name: string } {
+  const name = typeof metric === 'string' ? metric : metric.name
+  const defined: MetricDefinedData = { ...(typeof metric === 'string' ? {} : metric), ...metadata, name }
+  if (Object.keys(defined).length === 1 || !announcements.announce(defined))
+    return { name }
+  return { defined, name }
 }

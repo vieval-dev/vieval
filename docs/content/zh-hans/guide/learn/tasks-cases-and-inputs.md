@@ -85,7 +85,7 @@ caseOf(..., { input }) 或 casesFromInputs(...)
 
 在参与比较的每一份报告中，`benchmark.case.id` 都不能重复，即使这些用例来自不同任务或项目。如果出现重复值，比较命令会报错，而不会自行猜测应该如何配对。
 
-报告选择器可以读取 `caseName`、`caseId` 等用例字段，也可以读取分数和已记录的指标。比较用例时，Vieval 默认依次尝试 `benchmark.case.id`、`vieval.case.id` 和自动生成的 `caseId`。
+报告选择器可以读取 `caseName`、`caseId` 等用例字段，也可以按名称读取分数（`scores.<name>`）和已记录的指标。比较用例时，Vieval 默认依次尝试 `benchmark.case.id`、`vieval.case.id` 和自动生成的 `caseId`。
 
 ::: warning 在任务或评测中注册用例
 `caseOf` 和 `casesFromInputs` 必须在 `describeTask` 或 `describeEval` 的回调中调用。在其他位置调用时，Vieval 会在加载评测文件时抛出错误。

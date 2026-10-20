@@ -16,10 +16,10 @@ import type { RunHandle } from './store'
 import { readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { hybridAverage } from 'vieval/core/scoring'
+import { poolScoreSummaries } from 'vieval/core/scoring'
 
 import { sumInference } from '../shared/inference'
-import { average, buildProjectNodes, buildTaskNodes, caseKeyOf, currentPosition, estimateProgress, scoreRounds, toCaseNode } from '../shared/reduce'
+import { buildProjectNodes, buildTaskNodes, caseKeyOf, countedScores, countingDefinitions, currentPosition, estimateProgress, pickScoreDefinitions, resolveTaskHeadline, scoreRounds, toCaseNode } from '../shared/reduce'
 import { ViewerError } from './errors'
 import { classifyPreview, contentTypeFromName } from './files'
 
@@ -27,7 +27,7 @@ import { classifyPreview, contentTypeFromName } from './files'
 export const MAX_LOG_LIMIT = 5000
 
 /**
- * Case detail: tree node plus input, output, metrics, artifacts, evidence links, inference events.
+ * Case detail: tree node plus input, output, metrics, score records, artifacts, evidence links, inference events.
  */
 export async function buildCaseDetail(handle: RunHandle, evidence: EvidenceService, taskId: string, caseId: string): Promise<CaseDetail> {
   const reducer = handle.reducer()
@@ -44,6 +44,8 @@ export async function buildCaseDetail(handle: RunHandle, evidence: EvidenceServi
     metricDefinitions: definitionsOf(reducer, reduced.metrics.map(metric => metric.name)),
     metrics: [...reduced.metrics],
     output: lastRound?.output,
+    scoreDefinitions: [...(reducer.tasks.get(taskId)?.scoreDefinitions.values() ?? [])],
+    scoreRecords: reduced.scoreRecords.map(entry => ({ ...entry })),
     taskDisplayName: reducer.tasks.get(taskId)?.displayName ?? taskId,
   }
 }
@@ -63,7 +65,10 @@ export function buildLogs(handle: RunHandle, query: { caseId?: string, limit: nu
 }
 
 /**
- * Metrics of a run grouped by name: numeric series with summaries, other values as lists.
+ * Metrics of a run grouped by name: numeric series with summaries, other values as lists, and the scores beside them.
+ *
+ * Scores are one point per case: the value its last round counts with (the rule of `scoreCases`), so a failed case
+ * shows 0 and an unscored one shows nothing. Each score's summary pools the selected cases of every task.
  */
 export function buildMetrics(handle: RunHandle, filter: { caseId?: string, taskId?: string }): MetricsResponse {
   const reducer = handle.reducer()
@@ -80,6 +85,31 @@ export function buildMetrics(handle: RunHandle, filter: { caseId?: string, taskI
   }
   const cases = [...reducer.cases.values()].filter(reduced => (filter.taskId == null || reduced.taskId === filter.taskId) && (filter.caseId == null || reduced.caseId === filter.caseId))
   const inference = sumInference(cases.flatMap(reduced => reduced.inference))
+
+  const terminated = reducer.run().terminated
+  const scorePoints = new Map<string, MetricsResponse['scores'][number]['points']>()
+  const scoreSummaries: MetricsResponse['scores'][number]['summary'][] = []
+  for (const [taskId, taskCases] of Map.groupBy(cases, reduced => reduced.taskId)) {
+    const task = reducer.tasks.get(taskId)
+    const taskDefinitions = task?.scoreDefinitions ?? new Map()
+    // Every score of the task, also those only unselected cases recorded, so the selection counts like the task does.
+    const taskRounds = (task?.caseKeys ?? []).flatMap(key => toCaseNode(reducer.cases.get(key)!, { evidenceLinkCount: 0, terminated }).rounds)
+    const definitions = countingDefinitions(scoreRounds(taskRounds, [...taskDefinitions.values()]), taskDefinitions)
+    const lastRounds = taskCases.flatMap((reduced) => {
+      const round = toCaseNode(reduced, { evidenceLinkCount: 0, terminated }).rounds.at(-1)
+      return round == null ? [] : [{ reduced, round }]
+    })
+    scoreSummaries.push(...scoreRounds(lastRounds.map(({ round }) => round), definitions).scores)
+    for (const { reduced, round } of lastRounds) {
+      for (const [name, value] of Object.entries(countedScores(round, definitions))) {
+        const points = scorePoints.get(name) ?? []
+        points.push({ caseId: reduced.caseId, roundIndex: round.roundIndex, taskId, value })
+        scorePoints.set(name, points)
+      }
+    }
+  }
+  const scores = poolScoreSummaries(scoreSummaries).map(summary => ({ name: summary.name, points: scorePoints.get(summary.name) ?? [], summary }))
+
   return {
     definitions: definitionsOf(reducer, [...numeric.keys(), ...nonNumeric.keys()]),
     inference,
@@ -101,6 +131,8 @@ export function buildMetrics(handle: RunHandle, filter: { caseId?: string, taskI
         summary: { avg: sum / points.length, count: points.length, max, min, sum },
       }
     }).sort((left, right) => left.name.localeCompare(right.name)),
+    scoreDefinitions: pickScoreDefinitions(reducer.scoreDefinitions, scores.map(score => score.name)),
+    scores,
   }
 }
 
@@ -120,28 +152,31 @@ export function buildProgress(handle: RunHandle, now: number): ProgressResponse 
 
 /**
  * Scores per task, per round, per case, and overall.
+ *
+ * Overall scores pool the cases of every task (`poolScoreSummaries`); they are not a mean of task means, so a large
+ * task weighs more than a small one.
  */
 export function buildScores(handle: RunHandle): ScoresResponse {
   const reducer = handle.reducer()
   const tasks = buildTaskNodes(reducer, () => 0)
   const byRound: ScoresResponse['byRound'] = []
   for (const task of tasks) {
+    const definitions = countingDefinitions(task.scoring, reducer.tasks.get(task.id)?.scoreDefinitions ?? new Map())
     const rounds = Map.groupBy(task.cases.flatMap(node => node.rounds), round => round.roundIndex)
     for (const [roundIndex, list] of [...rounds].sort((left, right) => left[0] - right[0])) {
-      byRound.push({ roundIndex, taskId: task.id, ...scoreRounds(list) })
+      byRound.push({ roundIndex, scoring: scoreRounds(list, definitions), taskId: task.id })
     }
   }
-  const exactValues = tasks.map(task => task.scores.exact).filter((value): value is number => value != null)
-  const judgeValues = tasks.map(task => task.scores.judge).filter((value): value is number => value != null)
-  const exact = average(exactValues)
-  const judge = average(judgeValues)
-  const summary = handle.summary()
   return {
     byRound,
-    byTask: tasks.map(task => ({ displayName: task.displayName, matrix: task.matrix, taskId: task.id, ...task.scores })),
+    byTask: tasks.map(task => ({ displayName: task.displayName, matrix: task.matrix, scoring: task.scoring, taskId: task.id })),
     cases: tasks.flatMap(task => task.cases.map(node => ({ caseId: node.caseId, name: node.name, scores: node.scores, state: node.state, taskId: node.taskId }))),
-    overall: { exact, hybrid: hybridAverage(exact, judge), judge },
-    summary: summary == null ? undefined : { exact: summary.exactAverage, hybrid: summary.hybridAverage, judge: summary.judgeAverage },
+    definitions: [...reducer.scoreDefinitions.values()],
+    overall: {
+      headline: resolveTaskHeadline(tasks),
+      scores: poolScoreSummaries(tasks.flatMap(task => task.scoring.scores)),
+    },
+    summary: handle.summary()?.headline,
   }
 }
 
@@ -153,16 +188,19 @@ export function buildSnapshot(handle: RunHandle, evidence: EvidenceService, now:
   const counts = evidence.countByCase(reducer)
   const run = reducer.run()
   const summary = handle.summary()
+  const tasks = buildTaskNodes(reducer, key => counts.get(key) ?? 0)
   return {
     current: currentPosition(reducer, now),
     endedAt: run.endedAt,
     eventCounts: { ...reducer.eventCounts },
+    headline: resolveTaskHeadline(tasks),
     identity: reducer.identity() ?? { attemptId: 'unknown-attempt', experimentId: 'unknown-experiment', runId: handle.runKey, workspaceId: 'unknown-workspace' },
     interruptSignal: run.interruptSignal ?? summary?.interruptSignal,
     parseErrors: handle.parseErrors(),
     progress: estimateProgress(reducer, now),
     projects: buildProjectNodes(reducer),
     runKey: handle.runKey,
+    scoreDefinitions: [...reducer.scoreDefinitions.values()],
     seq: reducer.seq(),
     seqGaps: reducer.seqGaps(),
     source: handle.source(),
@@ -172,11 +210,9 @@ export function buildSnapshot(handle: RunHandle, evidence: EvidenceService, now:
       ? undefined
       : {
           caseSummary: summary.caseSummary,
-          exactAverage: summary.exactAverage,
-          hybridAverage: summary.hybridAverage,
-          judgeAverage: summary.judgeAverage,
+          headline: summary.headline,
         },
-    tasks: buildTaskNodes(reducer, key => counts.get(key) ?? 0),
+    tasks,
   }
 }
 

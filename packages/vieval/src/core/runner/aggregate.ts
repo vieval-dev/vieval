@@ -1,40 +1,16 @@
-import type { CaseCoverage } from '../scoring'
+import type { HeadlineResult, ScoreSummary } from '../scoring'
 import type { ScheduledTaskMatrix } from './schedule'
 
-import { hybridAverage, strictExactOf } from '../scoring'
+import { emptyScoreSummary, poolScoreSummaries, resolveHeadline } from '../scoring'
 
 /**
- * Stores inferenceExecutor-level score aggregates across multiple runs.
+ * Score summaries of the runs of one inference executor.
  */
-export interface AggregatedProviderSummary {
-  /**
-   * Measured and settled cases summed over the runs, or `null` when no run reported its cases.
-   */
-  coverage: CaseCoverage | null
-  /**
-   * Mean of all exact-match scores over measured cases, or `null` when absent.
-   */
-  exactAverage: null | number
-  /**
-   * Hybrid average derived from the inferenceExecutor exact and judge means.
-   */
-  hybridAverage: null | number
+export interface AggregatedProviderSummary extends AggregatedScoreSummary {
   /**
    * Stable inferenceExecutor id.
    */
   inferenceExecutorId: string
-  /**
-   * Mean of all judge-based scores or `null` when absent.
-   */
-  judgeAverage: null | number
-  /**
-   * Number of runs included in this inferenceExecutor bucket.
-   */
-  runCount: number
-  /**
-   * Mean of the per-run strict exact scores, where a case without a result scores `0`, or `null` when absent.
-   */
-  strictExactAverage: null | number
 }
 
 /**
@@ -48,34 +24,25 @@ export interface AggregatedRunResults {
   /**
    * Overall summary across every run.
    */
-  overall: Omit<AggregatedProviderSummary, 'inferenceExecutorId'>
+  overall: AggregatedScoreSummary
   /**
-   * Per-run normalized score summaries.
+   * Per-run summaries.
    */
   runs: AggregatedRunSummary[]
 }
 
 /**
- * Stores the per-run score averages after normalization.
+ * Score summaries of one run.
  */
 export interface AggregatedRunSummary {
   /**
-   * Measured and settled cases of this run, or `null` when the task did not report its cases.
+   * Completion rate of the run, or `null` when the task did not report its cases.
    */
-  coverage: CaseCoverage | null
+  completion: null | ScoreSummary
   /**
    * Collected eval entry id.
    */
   entryId: string
-  /**
-   * Mean of exact-match scores over measured cases, or `null` when absent.
-   */
-  exactAverage: null | number
-  /**
-   * Hybrid average. Uses both families when present, otherwise falls back to the
-   * single available family.
-   */
-  hybridAverage: null | number
   /**
    * Stable run id.
    */
@@ -85,17 +52,43 @@ export interface AggregatedRunSummary {
    */
   inferenceExecutorId: string
   /**
-   * Mean of judge-based scores or `null` when absent.
-   */
-  judgeAverage: null | number
-  /**
    * Concrete matrix selection used by the run.
    */
   matrix: ScheduledTaskMatrix
   /**
-   * Mean of the per-run strict exact scores, where a case without a result scores `0`, or `null` when absent.
+   * Share of passed cases, or `null` when the task did not report its cases.
    */
-  strictExactAverage: null | number
+  passed: null | ScoreSummary
+  /**
+   * Name of the run's headline score, when it has one.
+   */
+  primary?: string
+  /**
+   * One summary per score of the run.
+   */
+  scores: ScoreSummary[]
+}
+
+/**
+ * Score summaries pooled over a group of runs: one inference executor, or every run.
+ */
+export interface AggregatedScoreSummary {
+  /**
+   * Completion rate pooled over the runs that reported their cases, or `null` when none did.
+   */
+  completion: null | ScoreSummary
+  /**
+   * Headline of the group, resolved with {@link resolveHeadline}.
+   */
+  headline: HeadlineResult
+  /**
+   * Number of runs in the group.
+   */
+  runCount: number
+  /**
+   * Each score pooled by name over the runs, in first-seen order.
+   */
+  scores: ScoreSummary[]
 }
 
 /**
@@ -103,9 +96,9 @@ export interface AggregatedRunSummary {
  */
 export interface RunResult {
   /**
-   * Measured and settled cases of the run, when the task reports them (the task DSL always does).
+   * Completion rate of the run, when the task reports its cases (the task DSL always does).
    */
-  coverage?: CaseCoverage
+  completion?: ScoreSummary
   /**
    * Collected eval entry id.
    */
@@ -123,94 +116,59 @@ export interface RunResult {
    */
   matrix: ScheduledTaskMatrix
   /**
-   * Raw scores emitted by the eval.
+   * Share of passed cases, when the task reports its cases.
    */
-  scores: readonly RunScore[]
-}
-
-/**
- * Represents one normalized score emitted by a completed eval run.
- */
-export interface RunScore {
+  passed?: ScoreSummary
   /**
-   * Score family used for aggregation.
+   * Name of the run's headline score, when it has one.
    */
-  kind: RunScoreKind
+  primary?: string
   /**
-   * Normalized score in the `0..1` range.
+   * One summary per score emitted by the eval.
    */
-  score: number
+  scores: readonly ScoreSummary[]
 }
 
 /**
- * Identifies the scoring family for a single eval score.
- */
-export type RunScoreKind = 'exact' | 'judge'
-
-interface ScoreBuckets {
-  exact: number[]
-  judge: number[]
-}
-
-/**
- * Aggregates exact-match and judge-based scores into hybrid runner summaries.
+ * Pools the score summaries of runner results per run, per inference executor, and overall.
  *
  * Call stack:
  *
  * {@link runScheduledTasks}
  *   -> {@link aggregateRunResults}
- *     -> {@link createRunSummary}
- *     -> {@link createProviderSummary}
- *       -> `report output`
+ *     -> {@link poolScoreSummaries}
+ *     -> {@link resolveHeadline}
+ *       -> `run-summary.json`
  *
  * Use when:
- * - a runner batch mixes deterministic exact checks with judge-based grading
- * - inferenceExecutor comparison should preserve both score families and one hybrid view
+ * - a runner batch ends and its runs are summarized for reports, the CLI, and comparisons
  *
  * Expects:
- * - each score to be normalized to the `0..1` range before aggregation
- * - `scores.kind` to use only `'exact'` or `'judge'`
+ * - score values in `0..1`; summaries of one name pool their cases, so a large run weighs more than a small one
+ *
+ * Returns:
+ * - per-run summaries, per-executor summaries sorted by id, and the overall summary, each group with its headline
  */
 export function aggregateRunResults(results: readonly RunResult[]): AggregatedRunResults {
-  const runs = results.map(createRunSummary)
-
-  const inferenceExecutorIds = Array.from(new Set(results.map(result => result.inferenceExecutorId)))
-  const inferenceExecutors = inferenceExecutorIds
-    .map((inferenceExecutorId) => {
-      const providerResults = results.filter(result => result.inferenceExecutorId === inferenceExecutorId)
-      return createProviderSummary(inferenceExecutorId, providerResults)
-    })
-    .sort((left, right) => left.inferenceExecutorId.localeCompare(right.inferenceExecutorId))
-
-  const overall = createProviderSummary(
-    'overall',
-    results,
-  )
-
-  const { inferenceExecutorId: _overallId, ...overallSummary } = overall
+  const inferenceExecutorIds = Array.from(new Set(results.map(result => result.inferenceExecutorId))).sort()
 
   return {
-    inferenceExecutors,
-    overall: overallSummary,
-    runs,
+    inferenceExecutors: inferenceExecutorIds.map(inferenceExecutorId => ({
+      inferenceExecutorId,
+      ...summarizeGroup(results.filter(result => result.inferenceExecutorId === inferenceExecutorId)),
+    })),
+    overall: summarizeGroup(results),
+    runs: results.map(result => ({
+      completion: result.completion ?? null,
+      entryId: result.entryId,
+      id: result.id,
+      inferenceExecutorId: result.inferenceExecutorId,
+      matrix: cloneScheduledTaskMatrix(result.matrix),
+      passed: result.passed ?? null,
+      ...(result.primary == null ? {} : { primary: result.primary }),
+      scores: [...result.scores],
+    })),
   }
-}
-
-function assertKnownScoreKind(kind: string): RunScoreKind {
-  if (kind === 'exact' || kind === 'judge') {
-    return kind
-  }
-
-  throw new TypeError(`Unknown eval score kind "${kind}".`)
-}
-
-function average(scores: readonly number[]): null | number {
-  if (scores.length === 0) {
-    return null
-  }
-
-  const total = scores.reduce((sum, score) => sum + score, 0)
-  return total / scores.length
 }
 
 function cloneScheduledTaskMatrix(matrix: ScheduledTaskMatrix): ScheduledTaskMatrix {
@@ -227,100 +185,19 @@ function cloneScheduledTaskMatrix(matrix: ScheduledTaskMatrix): ScheduledTaskMat
   }
 }
 
-function collectScoreBuckets(scores: readonly RunScore[]): ScoreBuckets {
-  const buckets: ScoreBuckets = {
-    exact: [],
-    judge: [],
-  }
-
-  for (const score of scores) {
-    const kind = assertKnownScoreKind(score.kind)
-
-    if (kind === 'exact') {
-      buckets.exact.push(score.score)
-      continue
-    }
-
-    buckets.judge.push(score.score)
-  }
-
-  return buckets
-}
-
-function createProviderSummary(inferenceExecutorId: string, results: readonly RunResult[]): AggregatedProviderSummary {
-  const exactScores: number[] = []
-  const judgeScores: number[] = []
-  const strictExactScores: number[] = []
-  const coverages = results.flatMap(result => result.coverage == null ? [] : [result.coverage])
-
-  for (const result of results) {
-    const buckets = collectScoreBuckets(result.scores)
-    exactScores.push(...buckets.exact)
-    judgeScores.push(...buckets.judge)
-
-    strictExactScores.push(...strictExactScoresOf(buckets.exact, result.coverage))
-  }
-
-  const exactAverage = average(exactScores)
-  const judgeAverage = average(judgeScores)
-
+function summarizeGroup(results: readonly RunResult[]): AggregatedScoreSummary {
+  const completions = results.flatMap(result => result.completion == null ? [] : [result.completion])
   return {
-    coverage: coverages.length === 0
-      ? null
-      : {
-          measured: coverages.reduce((sum, coverage) => sum + coverage.measured, 0),
-          total: coverages.reduce((sum, coverage) => sum + coverage.total, 0),
-        },
-    exactAverage,
-    hybridAverage: hybridAverage(exactAverage, judgeAverage),
-    inferenceExecutorId,
-    judgeAverage,
+    completion: completions.length === 0 ? null : poolScoreSummaries(completions)[0]!,
+    // A run is one task under one matrix row, so its eval entry identifies the task for per-task headlines.
+    headline: resolveHeadline(results.map(result => ({
+      completion: result.completion ?? emptyScoreSummary('completion'),
+      passed: result.passed ?? emptyScoreSummary('passed'),
+      ...(result.primary == null ? {} : { primary: result.primary }),
+      scores: [...result.scores],
+      taskId: result.entryId,
+    }))),
     runCount: results.length,
-    strictExactAverage: average(strictExactScores),
+    scores: poolScoreSummaries(results.flatMap(result => result.scores)),
   }
-}
-
-function createRunSummary(result: RunResult): AggregatedRunSummary {
-  const buckets = collectScoreBuckets(result.scores)
-  const exactAverage = average(buckets.exact)
-  const judgeAverage = average(buckets.judge)
-
-  return {
-    coverage: result.coverage == null ? null : { ...result.coverage },
-    entryId: result.entryId,
-    exactAverage,
-    hybridAverage: hybridAverage(exactAverage, judgeAverage),
-    id: result.id,
-    inferenceExecutorId: result.inferenceExecutorId,
-    judgeAverage,
-    matrix: cloneScheduledTaskMatrix(result.matrix),
-    strictExactAverage: runStrictExact(exactAverage, result.coverage),
-  }
-}
-
-/**
- * Strict exact score of one run. A run without coverage (a custom executor) has no unmeasured cases to count,
- * so its strict score equals its exact score.
- */
-function runStrictExact(exactAverage: null | number, coverage: CaseCoverage | undefined): null | number {
-  return coverage == null ? exactAverage : strictExactOf(exactAverage, coverage)
-}
-
-/**
- * Exact scores of one run scaled to strict scores, so pooling them across runs mirrors how `exactAverage` pools the
- * exact scores: each score shrinks by the run's measured share, and a run that settled cases without measuring any
- * adds one `0`.
- */
-function strictExactScoresOf(exactScores: readonly number[], coverage: CaseCoverage | undefined): number[] {
-  if (coverage == null) {
-    return [...exactScores]
-  }
-  if (coverage.total === 0) {
-    return []
-  }
-  if (exactScores.length === 0) {
-    return [0]
-  }
-
-  return exactScores.map(score => score * coverage.measured / coverage.total)
 }

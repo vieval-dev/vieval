@@ -1,10 +1,11 @@
-import type { CaseCounts, RunListItem, RunSnapshot } from '../../src/shared/contract'
+import type { CaseCounts, HeadlineResult, RunListItem, RunSnapshot, ScoreDefinition } from '../../src/shared/contract'
 import type { HierarchyPosition } from './hierarchy'
 import type { MatrixChip } from './labels'
 
 import { formatDuration } from './format'
 import { attemptDate, attemptLabel, experimentLabel, mergeMatrices, runLabel } from './labels'
 import { href } from './router'
+import { headlineOf, headlineView, scoreLabel } from './scores'
 
 /** Levels whose breadcrumb segment can switch to a sibling. */
 export type SwitchableLevel = 'attempt' | 'experiment' | 'project' | 'run' | 'workspace'
@@ -15,12 +16,15 @@ export interface SwitcherOption {
   counts?: CaseCounts
   /** Short facts, for example "3 experiments · 12 runs". */
   detail?: string
-  exact?: null | number
   href: string
   /** Full id; searchable and shown as the tooltip. */
   id: string
   /** Readable name (`labels.ts`). */
   label: string
+  /** Headline value of the option (the primary score, the passed cases, or the completion rate), from 0 to 1. */
+  score?: null | number
+  /** What `score` is, for example `Pass`; its tooltip. */
+  scoreLabel?: string
   /** State of the newest run below the option. */
   state?: string
   /** Start of the newest run below the option (ISO). */
@@ -56,15 +60,16 @@ export function filterOptions(options: readonly SwitcherOption[], query: string)
  * - the snapshot the page already holds (`useRunLive`); no request is made
  *
  * Returns:
- * - tasks in run order, or the cases of `taskId` in case order; `undefined` without a snapshot
+ * - tasks in run order with their headline, or the cases of `taskId` in case order with their value of the task's
+ *   primary score; `undefined` without a snapshot
  */
 export function runSwitcherOptions(snapshot: RunSnapshot | undefined, level: 'case' | 'task', taskId?: string): SwitcherOption[] | undefined {
   if (snapshot == null)
     return undefined
   if (level === 'task') {
     return snapshot.tasks.map(task => ({
+      ...headlineScore(headlineOf(task.scoring), snapshot.scoreDefinitions),
       counts: task.caseCounts,
-      exact: task.scores.exact,
       href: href({ name: 'task', runKey: snapshot.runKey, taskId: task.id }),
       id: task.id,
       label: task.displayName,
@@ -72,9 +77,12 @@ export function runSwitcherOptions(snapshot: RunSnapshot | undefined, level: 'ca
       time: task.startedAt,
     }))
   }
-  return snapshot.tasks.find(task => task.id === taskId)?.cases.map(node => ({
+  const task = snapshot.tasks.find(item => item.id === taskId)
+  const primary = task?.scoring.primary
+  return task?.cases.map(node => ({
     detail: [`#${node.index + 1}`, node.durationMs == null ? undefined : formatDuration(node.durationMs)].filter(Boolean).join(' · '),
-    exact: node.scores.exact,
+    // The case's own recorded value of the task's primary score.
+    ...(primary == null ? {} : { score: node.scores.values[primary] ?? null, scoreLabel: scoreLabel(primary, snapshot.scoreDefinitions) }),
     href: href({ caseId: node.caseId, name: 'case', runKey: snapshot.runKey, taskId: node.taskId }),
     id: node.caseId,
     label: node.name,
@@ -113,7 +121,7 @@ export function switcherOptions(position: HierarchyPosition, runs: readonly RunL
   if (workspace != null && project != null) {
     result.project = group(inWorkspace, run => run.projectSegment).map(([id, list]) => ({
       detail: `${new Set(list.map(run => run.experimentId)).size} experiment(s) · ${list.length} run(s)`,
-      exact: list[0]!.exactAverage,
+      ...runScore(list[0]!),
       href: href({ name: 'scope', project: id, workspace }),
       id,
       label: id,
@@ -128,7 +136,7 @@ export function switcherOptions(position: HierarchyPosition, runs: readonly RunL
       return {
         chips: label.textIsMatrix ? undefined : label.chips,
         detail: `${new Set(list.map(run => run.attemptId)).size} attempt(s)`,
-        exact: list[0]!.exactAverage,
+        ...runScore(list[0]!),
         href: href({ experiment: id, name: 'scope', project, workspace }),
         id,
         label: label.text,
@@ -141,7 +149,7 @@ export function switcherOptions(position: HierarchyPosition, runs: readonly RunL
   if (workspace != null && project != null && experiment != null && attempt != null) {
     result.attempt = group(inExperiment, run => run.attemptId).map(([id, list]) => ({
       counts: list[0]!.counts,
-      exact: list[0]!.exactAverage,
+      ...runScore(list[0]!),
       href: href({ attempt: id, experiment, name: 'scope', project, workspace }),
       id,
       label: attemptLabel(id),
@@ -155,7 +163,7 @@ export function switcherOptions(position: HierarchyPosition, runs: readonly RunL
     result.run = siblings.map(run => ({
       counts: run.counts,
       detail: attemptLabel(run.attemptId),
-      exact: run.exactAverage,
+      ...runScore(run),
       href: href({ name: 'run', runKey: run.runKey }),
       id: run.runKey,
       label: runLabel(run),
@@ -177,4 +185,16 @@ function group(runs: readonly RunListItem[], key: (run: RunListItem) => string):
       list.push(run)
   }
   return [...groups.entries()]
+}
+
+/** The headline value and label of an option; `per-task` headlines show the completion rate (see `headlineView`). */
+function headlineScore(result: HeadlineResult | null, definitions: readonly ScoreDefinition[]): Pick<SwitcherOption, 'score' | 'scoreLabel'> {
+  if (result == null)
+    return { score: null }
+  const view = headlineView(result, definitions)
+  return { score: view.summary.mean, scoreLabel: view.label }
+}
+
+function runScore(run: RunListItem): Pick<SwitcherOption, 'score' | 'scoreLabel'> {
+  return headlineScore(run.headline, run.headlineDefinitions)
 }

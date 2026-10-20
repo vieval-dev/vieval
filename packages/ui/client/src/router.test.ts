@@ -21,6 +21,17 @@ describe('router', () => {
 
   /**
    * @example
+   * expect(parseRoute(href(route)).grader).toBe('judge')
+   */
+  it('keeps the grader a case\'s inference tab is narrowed to', () => {
+    const route = { caseId: '0:a', grader: 'judge', name: 'case', runKey: 'run-1-a', tab: 'inference', taskId: 't' } as const
+
+    expect(href(route)).toBe('#/runs/run-1-a/case?caseId=0%3Aa&grader=judge&tab=inference&taskId=t')
+    expect(parseRoute(href(route))).toEqual(route)
+  })
+
+  /**
+   * @example
    * expect(parseRoute('#/?workspace=w&project=p')).toEqual({ name: 'scope', workspace: 'w', project: 'p', … })
    */
   it('decodes hierarchy scopes and comparisons', () => {

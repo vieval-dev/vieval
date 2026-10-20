@@ -1,4 +1,6 @@
+import type { RunHandle, RunSummaryInfo } from '../src/server/store'
 import type { RunEvent } from '../src/shared/contract'
+import type { RunReducer } from '../src/shared/reduce'
 
 import { cp, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -15,7 +17,7 @@ export const fixturesDirectory = fileURLToPath(new URL('./fixtures/', import.met
 export const OSWORLD_RUNS = {
   /** Interrupted by SIGINT after 18 cases; has `run-summary.json`, `cases.jsonl`, `otlp/`. */
   archived: 'default-workspace/osworld-kubernetes/matrix-run-model-gpt-5.5-repeat-1/attempt-2026-10-11T19-14-05-991Z/run-1791746045991-a77ba0a4',
-  /** Event schema version 1. */
+  /** Event schema version 1: written by an older vieval, listed as unsupported. */
   legacy: 'default-workspace/osworld-kubernetes/matrix-run-model-gpt-5.5-repeat-1/attempt-2026-10-10T18-20-50-009Z/run-1791656450009-5299b70e',
   /** Still running when copied: `events.jsonl` only, seq 1..150 of 360 cases. */
   running: 'default-workspace/osworld-kubernetes/matrix-run-model-gpt-5.5-repeat-1/attempt-2026-10-11T19-31-43-580Z/run-1791747103580-dd3a8517',
@@ -60,12 +62,34 @@ export function createEnvelopeFactory(runId = 'run-test') {
       event,
       experimentId: 'exp-a',
       runId,
-      schemaVersion: 2,
+      schemaVersion: 3,
       seq,
       time,
       workspaceId: 'ws-a',
       ...scope,
     }
+  }
+}
+
+/**
+ * A run handle over a reducer built in the test, as the in-process bus gives one, for view builders.
+ */
+export function createReducerHandle(reducer: RunReducer, options: { runKey?: string, summary?: RunSummaryInfo } = {}): RunHandle {
+  return {
+    artifactsRoot: () => undefined,
+    parseErrors: () => 0,
+    projectSegment: 'demo',
+    reducer: () => reducer,
+    refresh: async () => {},
+    reportDirectory: undefined,
+    reportPath: undefined,
+    reportRoot: undefined,
+    runKey: options.runKey ?? reducer.identity()?.runId ?? 'run-test',
+    source: () => 'live-bus',
+    state: () => reducer.run().terminated ? 'ended' : 'running',
+    subscribe: () => () => {},
+    summary: () => options.summary,
+    unsupportedVersion: () => undefined,
   }
 }
 

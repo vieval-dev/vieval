@@ -2,8 +2,9 @@ import type { TaskRunStorage } from '../config'
 import type { AggregatedRunResults, ScheduledTask, ScheduledTaskExecutor, TaskExecutionContext } from '../core/runner'
 import type { RunEventBus } from '../core/runner/event-bus'
 import type { Scheduler, SchedulerConcurrencyConfig } from '../core/scheduler/types'
+import type { HeadlineResult, ScoreSummary } from '../core/scoring'
 import type { TelemetryRuntime } from '../core/telemetry'
-import type { RunEventEmitter, RunEventEnvelope } from '../events'
+import type { RunEventEmitter, RunEventEnvelope, ScoreDefinedData } from '../events'
 import type { CliProjectConcurrencyConfig, CliProjectExecutorContext, LoadVievalCliConfigOptions, NormalizedCliProjectConfig } from './config'
 import type { InterruptSignal } from './interrupt'
 import type { ReportEventLog } from './report-log'
@@ -29,7 +30,7 @@ import { collectEvalEntries, createFilesystemTaskCacheRuntime, createRunnerSched
 import { createProcessOutputInterceptor } from '../core/runner/case-output'
 import { createRunEventBus } from '../core/runner/event-bus'
 import { createNoopTelemetryRuntime, createOpenTelemetryRuntime } from '../core/telemetry'
-import { caseEnded, caseEndedDataSchema, caseOutput, caseOutputDataSchema, caseRequeued, caseRequeuedDataSchema, caseStarted, caseStartedDataSchema, projectEnded, projectStarted, runEnded, runInterrupted, runStarted, taskEnded, taskEndedDataSchema, taskQueued, taskQueuedDataSchema, taskStarted } from '../events'
+import { caseEnded, caseEndedDataSchema, caseOutput, caseOutputDataSchema, caseRequeued, caseRequeuedDataSchema, caseStarted, caseStartedDataSchema, projectEnded, projectStarted, runEnded, runInterrupted, runStarted, scoreDefined, taskEnded, taskEndedDataSchema, taskQueued, taskQueuedDataSchema, taskStarted } from '../events'
 import { loadVievalCliConfig } from './config'
 import { discoverEvalFiles } from './discovery'
 import { exitCodeFromSignal, listenForInterrupt } from './interrupt'
@@ -93,6 +94,11 @@ export interface CliProjectSummary {
   result: AggregatedRunResults | null
   /** Run id of this project's run; every project of an invocation runs as its own run. */
   runId?: string
+  /**
+   * Latest `score.defined` of each score name the project's tasks announced, in first-announced order. Labels the
+   * headline; empty for a custom executor that does not emit score events.
+   */
+  scoreDefinitions?: ScoreDefinedData[]
   taskCount: number
 }
 
@@ -424,6 +430,49 @@ export function createRunReporter(options: RunVievalCliReporterOptions | undefin
 }
 
 /**
+ * Formats the completion rate shown next to every headline.
+ *
+ * Before:
+ * - completion 30/31 with `{ errored: 1 }`; 4/4 with no unscored counts
+ *
+ * After:
+ * - "completed 96.8% (1 errored)"; "completed 100%"
+ */
+export function formatCompletion(completion: ScoreSummary): string {
+  const errored = completion.unscored.errored ?? 0
+  const timedOut = completion.unscored.timeout ?? 0
+  const details = [
+    ...(errored === 0 ? [] : [`${errored} errored`]),
+    ...(timedOut === 0 ? [] : [`${timedOut} timed out`]),
+  ]
+  return `completed ${formatPercent(completion.mean)}${details.length === 0 ? '' : ` (${details.join(', ')})`}`
+}
+
+/**
+ * Formats a resolved headline with the label of its score.
+ *
+ * Use when:
+ * - the run summary line or the comparison leaderboard shows what a project scored
+ *
+ * Expects:
+ * - `definitions` to hold the project's `score.defined` payloads; a score without one is shown by its name
+ *
+ * Returns:
+ * - `score`: `<label> <mean%>`, for example `Pass 87.5%`
+ * - `passed-cases`: `passed <rate%>`, because no score was recorded
+ * - `per-task`: `primary scores differ per task`; callers list each task's primary score below it
+ */
+export function formatHeadline(result: HeadlineResult, definitions: readonly ScoreDefinedData[]): string {
+  if (result.headline.kind === 'score') {
+    return formatScore(result.headline.score, definitions)
+  }
+  if (result.headline.kind === 'passed-cases') {
+    return `passed ${formatPercent(result.headline.score.mean)}`
+  }
+  return 'primary scores differ per task'
+}
+
+/**
  * Formats CLI run output as human-readable lines.
  */
 export function formatVievalCliRunOutput(output: CliRunOutput): string {
@@ -499,7 +548,7 @@ export function formatVievalCliRunOutput(output: CliRunOutput): string {
     if (!project.executed) {
       skippedProjects += 1
       const countLabel = colors.dim(`(${project.taskCount} tasks)`)
-      const detailsLabel = colors.dim(` ${project.discoveredEvalFileCount} files, ${project.entryCount} entries, 0 runs, hybrid n/a`)
+      const detailsLabel = colors.dim(` ${project.discoveredEvalFileCount} files, ${project.entryCount} entries, 0 runs`)
       const matrixSummary = formatMatrixSummary(project.matrixSummary)
       lines.push(` ${colors.dim('○')} ${badge}${countLabel}${detailsLabel}${formatDuration(project.durationMs, colors)}`)
       if (matrixSummary != null) {
@@ -518,17 +567,23 @@ export function formatVievalCliRunOutput(output: CliRunOutput): string {
     else {
       passedProjects += 1
     }
-    const hybridAverageLabel = formatHybridAverage(project.result?.overall.hybridAverage)
     const runCount = project.result?.overall.runCount ?? 0
     const countLabel = colors.dim(`(${project.taskCount} tasks)`)
     const caseSummaryLabel = project.caseSummary == null
       ? ''
       : `, cases ${project.caseSummary.passed} passed | ${project.caseSummary.failed} failed | ${project.caseSummary.errored} errored | ${project.caseSummary.timeout} timeout`
-    const coverage = project.result?.overall.coverage
-    const coverageLabel = coverage == null || coverage.total === 0 ? '' : `, coverage ${formatHybridAverage(coverage.measured / coverage.total)}`
-    const detailsLabel = colors.dim(` ${project.discoveredEvalFileCount} files, ${project.entryCount} entries, ${runCount} runs${caseSummaryLabel}, hybrid ${hybridAverageLabel}${coverageLabel}`)
+    const detailsLabel = colors.dim(` ${project.discoveredEvalFileCount} files, ${project.entryCount} entries, ${runCount} runs${caseSummaryLabel}`)
     const matrixSummary = formatMatrixSummary(project.matrixSummary)
     lines.push(` ${hasFailedCases ? colors.red('❯') : colors.green('✓')} ${badge}${countLabel}${detailsLabel}${formatDuration(project.durationMs, colors)}`)
+    const headline = project.result?.overall.headline
+    if (headline != null) {
+      lines.push(`   ${formatHeadline(headline, project.scoreDefinitions ?? [])} · ${formatCompletion(headline.completion)}`)
+      if (headline.headline.kind === 'per-task') {
+        for (const task of headline.headline.tasks) {
+          lines.push(`     ${colors.dim(task.taskId)}  ${formatScore(task.score, project.scoreDefinitions ?? [])}`)
+        }
+      }
+    }
     if (matrixSummary != null) {
       lines.push(`   ${colors.dim(matrixSummary)}`)
     }
@@ -1046,11 +1101,13 @@ function createAutoTaskExecutor(): ScheduledTaskExecutor {
     })
 
     return {
-      ...(output.coverage == null ? {} : { coverage: { ...output.coverage } }),
+      ...(output.completion == null ? {} : { completion: output.completion }),
       entryId: task.entry.id,
       id: task.id,
       inferenceExecutorId: task.inferenceExecutor.id,
       matrix: task.matrix,
+      ...(output.passed == null ? {} : { passed: output.passed }),
+      ...(output.primary == null ? {} : { primary: output.primary }),
       scores: [...output.scores],
     }
   }
@@ -1293,6 +1350,7 @@ async function executePreparedProject(
   const settledTaskIds = new Set<string>()
   const projectEvents = bus.scope({ projectId: prepared.name })
   const caseSummary = subscribeProjectCaseSummary(bus, prepared.name)
+  const scoreDefinitions = subscribeProjectScoreDefinitions(bus, prepared.name)
   const rawTaskExecutor = prepared.project.executor ?? createAutoTaskExecutor()
   const taskExecutor: ScheduledTaskExecutor = async (task, context) => {
     const result = await telemetry.withSpan('vieval.task', {
@@ -1356,6 +1414,7 @@ async function executePreparedProject(
       matrixSummary: createProjectMatrixSummary(prepared.tasks),
       name: prepared.name,
       result: aggregated,
+      scoreDefinitions: [...scoreDefinitions.values()],
       taskCount: prepared.tasks.length,
     }
   }
@@ -1391,6 +1450,7 @@ async function executePreparedProject(
       matrixSummary: createProjectMatrixSummary(prepared.tasks),
       name: prepared.name,
       result: null,
+      scoreDefinitions: [...scoreDefinitions.values()],
       taskCount: prepared.tasks.length,
     }
   }
@@ -1449,12 +1509,33 @@ function formatDuration(durationMs: number | undefined, colors: CliColorPalette)
   return color(` ${rounded}${colors.dim('ms')}`)
 }
 
-function formatHybridAverage(hybridAverage: null | number | undefined): string {
-  if (hybridAverage == null) {
+/**
+ * Normalizes a `0..1` value into a percentage with at most one decimal.
+ *
+ * Before:
+ * - 0.875, 1, null
+ *
+ * After:
+ * - "87.5%", "100%", "n/a"
+ */
+function formatPercent(value: null | number): string {
+  if (value == null) {
     return 'n/a'
   }
 
-  return hybridAverage.toFixed(3).replace(/\.?0+$/, '')
+  return `${(value * 100).toFixed(1).replace(/\.0$/, '')}%`
+}
+
+/**
+ * Formats one score summary as `<label> <mean%>`; the label is the definition's `en` text, else its first text,
+ * else the score name.
+ */
+function formatScore(score: ScoreSummary, definitions: readonly ScoreDefinedData[]): string {
+  const label = definitions.find(definition => definition.name === score.name)?.label
+  const text = label == null
+    ? score.name
+    : typeof label === 'string' ? label : label.en ?? Object.values(label)[0] ?? score.name
+  return `${text} ${formatPercent(score.mean)}`
 }
 
 /**
@@ -1822,6 +1903,22 @@ function subscribeProjectCaseSummary(bus: RunEventBus, projectName: string): {
     failures,
     toSummary: () => ({ ...counters, total: seenCaseIds.size }),
   }
+}
+
+/**
+ * Keeps the latest `score.defined` of each score name of one project.
+ *
+ * Returns:
+ * - a map filled as tasks announce scores; a later announcement of a name replaces the earlier one, as in viewers
+ */
+function subscribeProjectScoreDefinitions(bus: RunEventBus, projectName: string): Map<string, ScoreDefinedData> {
+  const definitions = new Map<string, ScoreDefinedData>()
+  bus.on(scoreDefined, ({ data, projectId }) => {
+    if (projectId === projectName) {
+      definitions.set(data.name, data)
+    }
+  })
+  return definitions
 }
 
 /**

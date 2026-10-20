@@ -79,7 +79,7 @@ An explicit `caseOf` name is under your control. Keep it stable when the scenari
 
 For `casesFromInputs`, generated names use the prefix plus a one-based position: `<prefix> #1`, `<prefix> #2`, and so on. Inserting or reordering rows changes those generated names and IDs. If reports must compare the same logical sample across changing dataset order, carry a unique identifier in the input and emit it as `benchmark.case.id` as shown above. That value must be unique across every case in each compared report, including cases from other tasks or projects. Duplicate comparison keys are rejected rather than matched ambiguously.
 
-Report selectors can address direct case fields such as `caseName` and `caseId`, scores, or emitted metric names. Default case comparison looks for `benchmark.case.id`, then `vieval.case.id`, and finally the generated `caseId`.
+Report selectors can address direct case fields such as `caseName` and `caseId`, scores by name (`scores.<name>`), or emitted metric names. Default case comparison looks for `benchmark.case.id`, then `vieval.case.id`, and finally the generated `caseId`.
 
 ::: warning Keep registration inside the task
 `caseOf` and `casesFromInputs` require an active `describeTask` scope. Calling either function outside that scope throws during evaluation-module loading.

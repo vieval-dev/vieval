@@ -8,22 +8,23 @@ type Tone = 'comment' | 'function' | 'keyword' | 'plain' | 'string'
 
 /** Tokens per line of the sample eval file; the shape follows `docs/content/en/guide/learn/tasks-cases-and-inputs.md`. */
 const lines: [string, Tone][][] = [
-  [['import', 'keyword'], [' { describeTask, expect } ', 'plain'], ['from', 'keyword'], [' \'vieval\'', 'string']],
+  [['import', 'keyword'], [' { defineScore, describeTask, expect } ', 'plain'], ['from', 'keyword'], [' \'vieval\'', 'string']],
   [],
   [['const', 'keyword'], [' inputs = ', 'plain'], ['await', 'keyword'], [' loadEpisodes', 'function'], ['(', 'plain'], ['\'s3://evals\'', 'string'], [')', 'plain']],
+  [['const', 'keyword'], [' solved = ', 'plain'], ['defineScore', 'function'], ['(', 'plain'], ['\'desktop.solved\'', 'string'], [', { primary: ', 'plain'], ['true', 'keyword'], [' })', 'plain']],
   [],
   [['describeTask', 'function'], ['(', 'plain'], ['\'desktop\'', 'string'], [', ({ casesFromInputs }) => {', 'plain']],
   [['  casesFromInputs', 'function'], ['(', 'plain'], ['\'episode\'', 'string'], [', inputs, ', 'plain'], ['async', 'keyword'], [' (ctx) => {', 'plain']],
   [['    const', 'keyword'], [' { task, goal } = ctx.matrix.inputs', 'plain']],
   [['    const', 'keyword'], [' run = ', 'plain'], ['await', 'keyword'], [' agent.', 'plain'], ['play', 'function'], ['(task)', 'plain']],
   [['    expect', 'function'], ['(run.state).', 'plain'], ['toEqual', 'function'], ['(goal)', 'plain']],
-  [['    ctx.', 'plain'], ['recordScore', 'function'], ['(', 'plain'], ['await', 'keyword'], [' judge', 'function'], ['(run))', 'plain']],
+  [['    ctx.', 'plain'], ['recordScore', 'function'], ['(solved, ', 'plain'], ['await', 'keyword'], [' judge', 'function'], ['(run))', 'plain']],
   [['  })', 'plain']],
   [['})', 'plain']],
 ]
 
 /** Lines each case passes through, in order: read inputs, run the agent, assert, score. */
-const CASE_LINES = [6, 7, 8, 9]
+const CASE_LINES = [7, 8, 9, 10]
 const LINE_HEIGHT_EM = 1.8
 const BEAT = 420
 

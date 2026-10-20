@@ -12,6 +12,7 @@ import { createRunEventBus } from '../core/runner/event-bus'
 import { createScheduler } from '../core/scheduler/runtime'
 import { caseEnded, caseEndedDataSchema, caseStarted, caseStartedDataSchema, metricRecorded, scoreRecorded } from '../events'
 import { defineMetric } from './metrics'
+import { defineScore } from './scores'
 import { caseOf, casesFromInputs, describeEval, describeTask } from './task'
 
 /**
@@ -152,7 +153,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
       },
     })
 
-    expect(runResult?.scores[0]?.score).toBe(1)
+    expect(runResult?.passed?.mean).toBe(1)
   })
 
   it('supports builder-form case registration and casesFromInputs', async () => {
@@ -184,7 +185,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
       },
     })
 
-    expect(runResult?.scores[0]?.score).toBe(1)
+    expect(runResult?.passed?.mean).toBe(1)
   })
 
   it('emits reporter hooks around each case without changing the score average', async () => {
@@ -244,7 +245,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
       { errorMessage: 'boom', errorName: 'AssertionError', index: 1, name: 'case-2', state: 'failed', total: 2 },
       { index: 0, name: 'case-1', state: 'passed', total: 2 },
     ])
-    expect(runResult?.scores[0]?.score).toBe(0.5)
+    expect(runResult?.passed?.mean).toBe(0.5)
   })
 
   it('exposes scoped task matrix context with run, eval, and row ids in case callbacks', async () => {
@@ -277,7 +278,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
       },
     })
 
-    expect(runResult?.scores[0]?.score).toBe(1)
+    expect(runResult?.passed?.mean).toBe(1)
   })
 
   it('isolates nested matrix objects between case callbacks', async () => {
@@ -316,7 +317,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
       },
     })
 
-    expect(runResult?.scores[0]?.score).toBe(1)
+    expect(runResult?.passed?.mean).toBe(1)
   })
 
   it('throws when caseOf is called outside describeTask', () => {
@@ -355,21 +356,28 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
       },
     })
 
-    expect(runResult?.scores[0]?.score).toBe(1)
+    expect(runResult?.passed?.mean).toBe(1)
   })
 
-  it('supports custom exact/judge scores while keeping describeTask case semantics', async () => {
+  /**
+   * @example
+   * correct 0.8 / 0.2 and natural 0.6 / 0.4 -> each score averaged by name; pass (all) derived 0 for both cases.
+   */
+  it('summarizes named scores and derives a combined primary score when each case try settles', async () => {
+    const correct = defineScore('correct')
+    const natural = defineScore('natural')
+    const pass = defineScore('pass', { combine: { all: [correct, { atLeast: 0.5, score: natural }] }, primary: true })
     const taskDefinition = describeTask('dsl-custom-scores', () => {
       caseOf('case-1', (context) => {
-        context.recordScore(0.8)
-        context.recordScore(0.6, 'judge')
+        context.recordScore(correct, 1)
+        context.recordScore(natural, 0.6)
       }, { input: {} })
 
       caseOf('case-2', (context) => {
-        context.recordScore(0.2)
-        context.recordScore(0.4, 'judge')
+        context.recordScore(correct, 0.2)
+        context.recordScore(natural, 0.4)
       }, { input: {} })
-    })
+    }, { scores: [pass] })
 
     const runResult = await taskDefinition.task?.run({
       cache: createTestTaskCacheRuntime(),
@@ -392,9 +400,11 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
       },
     })
 
-    expect(runResult?.scores).toEqual([
-      { kind: 'exact', score: 0.5 },
-      { kind: 'judge', score: 0.5 },
+    expect(runResult?.primary).toBe('pass')
+    expect(runResult?.scores.map(summary => [summary.name, summary.mean, summary.n])).toEqual([
+      ['correct', 0.6, 2],
+      ['natural', 0.5, 2],
+      ['pass', 0.5, 2],
     ])
   })
 
@@ -494,7 +504,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const taskDefinition = describeTask('dsl-reporter-event-isolation', () => {
       caseOf('case-1', (context) => {
-        context.recordScore(0.42)
+        context.recordScore('quality', 0.42)
         context.recordMetric('customMetric', 0.9)
       }, { input: {} })
     })
@@ -518,7 +528,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
     })
 
     expect(onEvent).toHaveBeenCalledTimes(2)
-    expect(runResult?.scores).toEqual([{ kind: 'exact', score: 0.42 }])
+    expect(runResult?.scores).toEqual([{ mean: 0.42, n: 1, name: 'quality', sum: 0.42, total: 1, unscored: {} }])
   })
 
   /**
@@ -540,7 +550,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const taskDefinition = describeTask('dsl-case-telemetry', () => {
       caseOf('case-1', (context) => {
-        context.recordScore(0.75, 'exact')
+        context.recordScore('quality', 0.75, { grader: { id: 'judge', kind: 'model', model: 'gpt-5.5' }, rationale: 'mostly right' })
         context.recordMetric('benchmark.id', 'locomo')
         context.recordMetric('benchmark.tags', ['retrieval', 'qa'])
       }, { input: {} })
@@ -567,7 +577,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
       telemetry,
     })
 
-    expect(runResult?.scores).toEqual([{ kind: 'exact', score: 0.75 }])
+    expect(runResult?.scores).toEqual([{ mean: 0.75, n: 1, name: 'quality', sum: 0.75, total: 1, unscored: {} }])
     expect(spanCalls).toEqual([{
       attributes: {
         'vieval.case.id': '0:case-1',
@@ -580,8 +590,10 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
     expect(reporterEvents).toContainEqual({
       caseId: '0:case-1',
       data: {
-        kind: 'exact',
-        score: 0.75,
+        grader: { id: 'judge', kind: 'model', model: 'gpt-5.5' },
+        name: 'quality',
+        rationale: 'mostly right',
+        value: 0.75,
       },
       event: 'score.recorded',
     })
@@ -594,7 +606,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
       event: 'metric.recorded',
     })
     expect(telemetry.addEvent).toHaveBeenCalledWith('vieval.case.score', {
-      'vieval.score.kind': 'exact',
+      'vieval.score.name': 'quality',
       'vieval.score.value': 0.75,
     })
     expect(telemetry.addEvent).toHaveBeenCalledWith('vieval.case.metric', {
@@ -648,9 +660,9 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     expect(rejectedErrors).toHaveLength(1)
     expect(errorMessageFrom(rejectedErrors[0])).toBe('case exploded')
-    // The errored case measured nothing: no exact score, and coverage counts it as settled but unmeasured.
+    // The errored case measured nothing: no score, and the completion rate counts it as settled without a result.
     expect(runResult?.scores).toEqual([])
-    expect(runResult?.coverage).toEqual({ measured: 0, total: 1 })
+    expect(runResult?.completion).toMatchObject({ n: 1, sum: 0 })
   })
 
   it('supports caseOf without input by exposing undefined inputs in context', async () => {
@@ -681,7 +693,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
       },
     })
 
-    expect(runResult?.scores[0]?.score).toBe(1)
+    expect(runResult?.passed?.mean).toBe(1)
   })
 
   it('preserves task-local concurrency metadata on the produced task definition', () => {
@@ -943,7 +955,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
       },
     ])
     expect(runResult?.scores).toEqual([])
-    expect(runResult?.coverage).toEqual({ measured: 0, total: 1 })
+    expect(runResult?.completion).toMatchObject({ n: 1, sum: 0 })
   })
 
   it('retries a failing case within the same task attempt until it passes', async () => {
@@ -993,7 +1005,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
       { autoRetry: 2, retryIndex: 1 },
       { autoRetry: 2, retryIndex: 2 },
     ])
-    expect(runResult?.scores[0]?.score).toBe(1)
+    expect(runResult?.passed?.mean).toBe(1)
   })
 
   /**
@@ -1068,7 +1080,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
       expect(runs).toBe(3)
       expect(startedAt).toEqual([0, 500, 1500])
-      expect(runResult.scores[0]?.score).toBe(1)
+      expect(runResult.passed?.mean).toBe(1)
     }
     finally {
       vi.useRealTimers()
@@ -1148,7 +1160,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
       expect(retryDelayIndexes).toEqual([1, 2])
       expect(startedAt).toEqual([0, 100, 300])
-      expect(runResult.scores[0]?.score).toBe(1)
+      expect(runResult.passed?.mean).toBe(1)
     }
     finally {
       vi.useRealTimers()
@@ -1190,8 +1202,8 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
     await waitForExpectation(() => {
       expect(states).toEqual({ crash: 'errored', right: 'passed', wrong: 'failed' })
     })
-    expect(runResult.scores).toEqual([{ kind: 'exact', score: 0.5 }])
-    expect(runResult.coverage).toEqual({ measured: 2, total: 3 })
+    expect(runResult.scores).toEqual([])
+    expect(runResult.completion).toMatchObject({ n: 3, sum: 2 })
   })
 
   /**
@@ -1216,8 +1228,8 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
       },
     })
 
-    expect(runResult.scores).toEqual([{ kind: 'exact', score: 0 }])
-    expect(runResult.coverage).toEqual({ measured: 1, total: 1 })
+    expect(runResult.scores).toEqual([])
+    expect(runResult.completion).toMatchObject({ n: 1, sum: 1 })
   })
 
   /**
@@ -1273,8 +1285,8 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
       ])
     })
     // Only the final run of `flaky` counts: three results, all passed.
-    expect(runResult.scores).toEqual([{ kind: 'exact', score: 1 }])
-    expect(runResult.coverage).toEqual({ measured: 3, total: 3 })
+    expect(runResult.scores).toEqual([])
+    expect(runResult.completion).toMatchObject({ n: 3, sum: 3 })
   })
 
   /**
@@ -1312,7 +1324,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
     await waitForExpectation(() => {
       expect(requeues).toEqual([1, 2])
     })
-    expect(runResult.coverage).toEqual({ measured: 0, total: 1 })
+    expect(runResult.completion).toMatchObject({ n: 1, sum: 0 })
   })
 
   /**
@@ -1341,7 +1353,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
     })
 
     expect(runs).toBe(1)
-    expect(runResult.scores).toEqual([{ kind: 'exact', score: 0 }])
+    expect(runResult.scores).toEqual([])
   })
 
   /**
@@ -1412,7 +1424,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     expect(erroredRuns).toBe(2)
     expect(failedRuns).toBe(1)
-    expect(runResult.scores).toEqual([{ kind: 'exact', score: 0.5 }])
+    expect(runResult.scores).toEqual([])
   })
 
   /**
@@ -1455,7 +1467,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     expect(delayErrors).toEqual([failure])
     expect(runs).toBe(2)
-    expect(runResult.scores[0]?.score).toBe(1)
+    expect(runResult.passed?.mean).toBe(1)
   })
 
   /**
@@ -1502,7 +1514,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
       { message: 'rate limited', retryIndex: 1 },
       { message: 'wrong answer', retryIndex: 2 },
     ])
-    expect(runResult.scores[0]?.score).toBe(0)
+    expect(runResult.passed?.mean).toBe(0)
   })
 
   it('starts the next auto attempt only after the current task attempt fully settles', async () => {
@@ -1571,25 +1583,28 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
 
     const runResult = await runPromise
 
-    expect(runResult.scores[0]?.score).toBe(0.75)
+    // Both cases end passed in the second attempt; the passed share counts each case once by its final state.
+    expect(runResult.passed).toMatchObject({ mean: 1, n: 2 })
   })
 
   /**
    * it('scores auto attempts as independent evidence') verifies task-level attempt aggregation.
    *
    * @example
-   * autoAttempt: 1 with first attempt failing and second attempt passing -> exact score 0.5.
+   * autoAttempt: 1 with first attempt failing and second attempt passing -> score 0.5 over 2 outcomes, while the
+   * case counts once by its final state: passed 1 of 1.
    */
   it('scores auto attempts as independent evidence instead of replacing earlier failures', async () => {
     let runs = 0
 
     const taskDefinition = describeTask('dsl-auto-attempt-evidence', () => {
-      caseOf('flaky-case', async () => {
+      caseOf('flaky-case', async (context) => {
         runs += 1
 
         if (runs === 1) {
           throw createAssertionError('first-attempt-failed')
         }
+        context.recordScore('correct', 1)
       }, {
         autoAttempt: 1,
         input: 'flaky',
@@ -1616,7 +1631,8 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
     })
 
     expect(runs).toBe(2)
-    expect(runResult?.scores[0]?.score).toBe(0.5)
+    expect(runResult?.scores).toEqual([{ mean: 0.5, n: 2, name: 'correct', sum: 1, total: 2, unscored: {} }])
+    expect(runResult?.passed).toMatchObject({ mean: 1, n: 1 })
   })
 
   /**
@@ -1662,7 +1678,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
     })
 
     expect(runs).toBe(2)
-    expect(runResult?.scores[0]?.score).toBe(1)
+    expect(runResult?.passed?.mean).toBe(1)
   })
 
   /**
@@ -1816,7 +1832,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
     })
 
     expect(peak).toBe(1)
-    expect(runResult.scores[0]?.score).toBe(1)
+    expect(runResult.passed?.mean).toBe(1)
   })
 
   /**
@@ -2065,7 +2081,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
       },
     })
 
-    expect(runResult?.scores[0]?.score).toBe(1)
+    expect(runResult?.passed?.mean).toBe(1)
   })
 
   /**
@@ -2163,5 +2179,167 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
      * expect(endedCases.map(data => [data.state, data.errorMessage])).toEqual([['errored', 'Run interrupted by SIGTERM.']])
      */
     expect(endedCases.map(data => [data.state, data.errorMessage])).toEqual([['errored', 'Run interrupted by SIGTERM.']])
+  })
+})
+
+describe('describeTask named scores', () => {
+  async function runTask(taskDefinition: ReturnType<typeof describeTask>, emitted: Array<{ caseId?: string, data: unknown, event: string }>) {
+    return await taskDefinition.task!.run({
+      cache: createTestTaskCacheRuntime(),
+      events: createTestRunEvents({ onAny: envelope => emitted.push(toEmitted(envelope)) }),
+      models: createTestModels(),
+      task: {
+        entry: { description: 'd', directory: 'x', filePath: '/tmp/x.eval.ts', id: 'x', name: 'x' },
+        id: 'task-named-scores',
+        inferenceExecutor: { id: 'openai:gpt-4.1-mini' },
+        matrix: createScheduledTaskMatrix(),
+      },
+    })
+  }
+
+  /**
+   * @example
+   * scores: [pass] announces correct, natural, then pass (inputs first) before any case, without a case id.
+   */
+  it('announces the scores option before the first case, inputs of a derived score first', async () => {
+    const correct = defineScore('correct', { label: { 'en': 'Correct', 'zh-Hans': '正确' } })
+    const natural = defineScore('natural', { grader: { id: 'judge', kind: 'model' } })
+    const pass = defineScore('pass', { combine: { all: [correct, natural] }, primary: true })
+    const emitted: Array<{ caseId?: string, data: unknown, event: string }> = []
+
+    await runTask(describeTask('scores-announced', () => {
+      caseOf('case-1', (context) => {
+        context.recordScore(correct, 1)
+        context.recordScore(natural, 1)
+      })
+    }, { scores: [pass] }), emitted)
+
+    const defined = emitted.filter(event => event.event === 'score.defined')
+    expect(defined.map(event => (event.data as { name: string }).name)).toEqual(['correct', 'natural', 'pass'])
+    expect(defined.every(event => event.caseId == null)).toBe(true)
+    expect(defined[2]!.data).toEqual({ combine: { inputs: [{ name: 'correct' }, { name: 'natural' }], kind: 'all' }, name: 'pass', primary: true })
+    expect(emitted.findIndex(event => event.event === 'score.defined')).toBeLessThan(emitted.findIndex(event => event.event === 'case.started'))
+  })
+
+  /**
+   * @example
+   * the derived `pass` is emitted with `derived: true` after the recorded values and before `case.ended`.
+   */
+  it('emits derived scores when the try settles, before case.ended', async () => {
+    const correct = defineScore('correct')
+    const pass = defineScore('pass', { combine: { all: [correct] }, primary: true })
+    const emitted: Array<{ caseId?: string, data: unknown, event: string }> = []
+
+    const runResult = await runTask(describeTask('scores-derived', () => {
+      caseOf('case-1', context => context.recordScore(correct, 1))
+    }, { scores: [pass] }), emitted)
+
+    const caseEvents = emitted.filter(event => event.caseId === '0:case-1').map(event => [event.event, event.data])
+    expect(caseEvents.filter(([event]) => event === 'score.recorded' || event === 'case.ended').map(([event]) => event)).toEqual(['score.recorded', 'score.recorded', 'case.ended'])
+    expect(caseEvents.find(([event, data]) => event === 'score.recorded' && (data as { derived?: boolean }).derived === true)?.[1]).toEqual({ derived: true, name: 'pass', value: 1 })
+    expect(runResult.primary).toBe('pass')
+    expect(runResult.scores.find(summary => summary.name === 'pass')?.mean).toBe(1)
+  })
+
+  /**
+   * @example
+   * recordUnscored(natural, 'grader_failed') -> not counted, reason summed; derived pass unscored 'input_unscored'.
+   */
+  it('records unscored values without counting them and marks derived scores unscored', async () => {
+    const correct = defineScore('correct')
+    const natural = defineScore('natural')
+    const pass = defineScore('pass', { combine: { all: [correct, natural] }, primary: true })
+    const emitted: Array<{ caseId?: string, data: unknown, event: string }> = []
+
+    const runResult = await runTask(describeTask('scores-unscored', () => {
+      caseOf('graded', (context) => {
+        context.recordScore(correct, 1)
+        context.recordScore(natural, 1)
+      })
+      caseOf('judge-broke', (context) => {
+        context.recordScore(correct, 1)
+        context.recordUnscored(natural, 'grader_failed', { rationale: 'the judge answer was not JSON' })
+      })
+    }, { scores: [pass] }), emitted)
+
+    expect(emitted).toContainEqual({ caseId: '1:judge-broke', data: { name: 'natural', rationale: 'the judge answer was not JSON', unscored: { reason: 'grader_failed' } }, event: 'score.recorded' })
+    expect(runResult.scores.find(summary => summary.name === 'natural')).toEqual({ mean: 1, n: 1, name: 'natural', sum: 1, total: 2, unscored: { grader_failed: 1 } })
+    expect(runResult.scores.find(summary => summary.name === 'pass')).toEqual({ mean: 1, n: 1, name: 'pass', sum: 1, total: 2, unscored: { input_unscored: 1 } })
+    expect(runResult.passed).toMatchObject({ n: 2, sum: 2 })
+  })
+
+  /**
+   * @example
+   * recordScore(pass, 1) for a derived score -> the case errors with a message naming the score.
+   */
+  it('rejects recording a derived score', async () => {
+    const correct = defineScore('correct')
+    const pass = defineScore('pass', { combine: { all: [correct] } })
+    const ended: CaseEndedData[] = []
+
+    await describeTask('scores-derived-recorded', () => {
+      caseOf('case-1', context => context.recordScore(pass, 1))
+    }).task!.run({
+      cache: createTestTaskCacheRuntime(),
+      events: createTestRunEvents({ onCaseEnd: data => ended.push(data) }),
+      models: createTestModels(),
+      task: { entry: { description: 'd', directory: 'x', filePath: '/tmp/x.eval.ts', id: 'x', name: 'x' }, id: 'x', inferenceExecutor: { id: 'openai:gpt-4.1-mini' }, matrix: createScheduledTaskMatrix() },
+    })
+
+    await waitForExpectation(() => {
+      expect(ended.map(data => [data.state, data.errorMessage])).toEqual([['errored', 'Score "pass" is derived from other scores; the runtime computes it when the case try settles.']])
+    })
+  })
+
+  /**
+   * @example
+   * two primary scores in one task -> the task run throws when the second is announced.
+   */
+  it('rejects a second primary score in one task', async () => {
+    const first = defineScore('first', { primary: true })
+    const second = defineScore('second', { primary: true })
+
+    await expect(runTask(describeTask('scores-two-primaries', () => {
+      caseOf('case-1', () => {})
+    }, { scores: [first, second] }), [])).rejects.toThrow('Score "second" is primary, but score "first" of the same task already is.')
+  })
+
+  /**
+   * @example
+   * --case selects nothing -> no scores (the old implicit exact 1 is gone).
+   */
+  it('returns no scores for an empty case selection', async () => {
+    const runResult = await describeTask('scores-empty-selection', () => {
+      caseOf('case-1', () => {})
+    }).task!.run({
+      cache: createTestTaskCacheRuntime(),
+      models: createTestModels(),
+      selectsCase: () => false,
+      task: { entry: { description: 'd', directory: 'x', filePath: '/tmp/x.eval.ts', id: 'x', name: 'x' }, id: 'x', inferenceExecutor: { id: 'openai:gpt-4.1-mini' }, matrix: createScheduledTaskMatrix() },
+    })
+
+    expect(runResult).toEqual({ scores: [] })
+  })
+
+  /**
+   * @example
+   * an errored case with errors: 'zero' counts as 0; the default leaves it out; completion shows it.
+   */
+  it('applies errors: zero per score and reports the errored case in the completion rate', async () => {
+    const strict = defineScore('strict', { errors: 'zero' })
+    const lenient = defineScore('lenient')
+
+    const runResult = await runTask(describeTask('scores-errors', () => {
+      caseOf('ok', (context) => {
+        context.recordScore(strict, 1)
+        context.recordScore(lenient, 1)
+      })
+      caseOf('provider-down', () => {
+        throw new Error('fetch failed')
+      })
+    }, { scores: [strict, lenient] }), [])
+
+    expect(runResult.scores.map(summary => [summary.name, summary.mean, summary.n, summary.total])).toEqual([['strict', 0.5, 2, 2], ['lenient', 1, 1, 2]])
+    expect(runResult.completion).toEqual({ mean: 0.5, n: 2, name: 'completion', sum: 1, total: 2, unscored: { errored: 1 } })
   })
 })

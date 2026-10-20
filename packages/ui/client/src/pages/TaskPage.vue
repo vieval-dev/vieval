@@ -16,6 +16,7 @@ import AnimatedContent from '../components/AnimatedContent.vue'
 import BarChart from '../components/BarChart.vue'
 import CaseMetricsPanel from '../components/CaseMetricsPanel.vue'
 import CountsBar from '../components/CountsBar.vue'
+import HeadlineScore from '../components/HeadlineScore.vue'
 import MetricBesideCard from '../components/MetricBesideCard.vue'
 import PageHeader from '../components/PageHeader.vue'
 import ScoreBar from '../components/ScoreBar.vue'
@@ -23,16 +24,18 @@ import StateBadge from '../components/StateBadge.vue'
 import StateView from '../components/StateView.vue'
 
 import { api } from '../api'
-import { buildCaseTable, metricDefinition, metricLabel } from '../caseMetrics'
+import { buildCaseTable, columnDefinitions, formatColumnValue, metricDefinition, metricLabel } from '../caseMetrics'
 import { useRunLive } from '../composables/useRunLive'
 import { useStatusFavicon } from '../composables/useStatusFavicon'
-import { formatDuration, formatScore, formatTick, formatTime } from '../format'
+import { formatDuration, formatScore, formatTime } from '../format'
 import { levelIcons } from '../hierarchy'
 import { href } from '../router'
+import { headlineOf, scoreLabel, unscoredReasonLabel } from '../scores'
 import { runSwitcherOptions } from '../switcher'
 
 /**
- * One task (a matrix row of an eval entry): matrix values, scores per auto-attempt round, and all its cases.
+ * One task (a matrix row of an eval entry): matrix values, its headline and scores, scores per auto-attempt round, and
+ * all its cases, sorted by the primary score (lowest first) until another order is picked.
  */
 const props = defineProps<{ route: Extract<Route, { name: 'task' }>, run?: RunListItem }>()
 
@@ -52,6 +55,8 @@ const roundChart = computed<BarDatum[]>(() => rounds.value.map(round => ({ label
 const filter = shallowRef('')
 /** Cases picked in the case metrics charts; `undefined` while nothing is picked there. Clearing it clears the charts. */
 const picked = shallowRef<ReadonlySet<string>>()
+/** Only the cases without a result (errored, timed out): set from the headline's completion rate. */
+const onlyErrored = shallowRef(false)
 
 // The same query as the case metrics panel (one cache entry): the list shows and sorts by the cases' metrics.
 const metrics = useQuery({
@@ -61,11 +66,16 @@ const metrics = useQuery({
 watch(live.refreshKey, () => void metrics.refetch())
 const table = computed(() => buildCaseTable(task.value?.cases ?? [], metrics.data.value))
 const rowsByKey = computed(() => new Map(table.value.rows.map(row => [row.key, row])))
-const definitions = computed(() => new Map((metrics.data.value?.definitions ?? []).map(definition => [definition.name, definition])))
+const definitions = computed(() => columnDefinitions(metrics.data.value?.definitions ?? [], metrics.data.value?.scoreDefinitions ?? []))
 const labelOf = (name: string) => metricLabel(name, definitions.value)
+const scoreDefinitions = computed(() => metrics.data.value?.scoreDefinitions ?? live.snapshot.value?.scoreDefinitions ?? [])
+/** The score the task is read by, as the server resolved it; the list sorts and the charts color by it. */
+const primary = computed(() => task.value?.scoring.primary)
+/** The task's scores other than the primary one, with their means, beside the headline. */
+const otherScores = computed(() => (task.value?.scoring.scores ?? []).filter(summary => summary.name !== primary.value))
 
-/** Built-in values the list always shows (state, exact, duration) or that no column needs. */
-const BUILT_IN_COLUMNS = new Set(['duration_s', 'exact', 'group', 'judge', 'state'])
+/** Built-in values the list always shows (state, the primary score, duration) or that no column needs. */
+const BUILT_IN_COLUMNS = new Set(['duration_s', 'group', 'state'])
 /**
  * Metrics the list can show as columns: every string metric (a stratum, but also a case id with a value per case, too
  * many values for a chart axis) and every numeric one, as long as it is not the same for every case (a matrix value of
@@ -74,7 +84,7 @@ const BUILT_IN_COLUMNS = new Set(['duration_s', 'exact', 'group', 'judge', 'stat
 const columnOptions = computed(() => [
   ...new Set(table.value.rows.flatMap(row => Object.keys(row.categories))),
   ...table.value.groups.flatMap(group => [group.representative, ...group.members.map(member => member.name)]),
-].filter(name => !BUILT_IN_COLUMNS.has(name) && new Set(table.value.rows.map(row => row.numbers[name] ?? row.categories[name])).size > 1))
+].filter(name => !BUILT_IN_COLUMNS.has(name) && name !== primary.value && new Set(table.value.rows.map(row => row.numbers[name] ?? row.categories[name])).size > 1))
 const pickedColumns = shallowRef<string[]>([])
 /** The column option under the pointer or the keyboard, described beside the open menu. */
 const highlightedColumn = shallowRef<BesideTarget>()
@@ -91,7 +101,7 @@ const rowMinWidth = computed(() => (columns.value.length === 0 ? undefined : `${
  * Order of the list: as recorded, by score, by duration, or by a numeric column. Cases without the value go last
  * either way, so "lowest first" never opens on cases that have no score.
  */
-type SortKey = 'duration:desc' | 'exact:asc' | 'exact:desc' | 'index' | `metric:${string}:asc` | `metric:${string}:desc`
+type SortKey = 'duration:desc' | 'index' | 'score:asc' | 'score:desc' | `metric:${string}:asc` | `metric:${string}:desc`
 /** Phones put the picked columns on the line under the name, after the score. */
 function columnLine(key: string): string {
   return columns.value.map(name => `${labelOf(name)} ${columnValue(key, name)}`).join(' · ')
@@ -100,13 +110,25 @@ function columnLine(key: string): string {
 function columnValue(key: string, name: string): string {
   const row = rowsByKey.value.get(key)
   const value = row?.numbers[name] ?? row?.categories[name]
-  return value == null ? '—' : typeof value === 'number' ? formatTick(value) : value
+  return value == null ? '—' : typeof value === 'number' ? formatColumnValue(value, metricDefinition(name, definitions.value)) : value
 }
-const sortKey = shallowRef<SortKey>('index')
+// `undefined` until the viewer picks an order: a task with a primary score opens on its lowest-scored cases.
+const pickedSort = shallowRef<SortKey>()
+const sortKey = computed<SortKey>({
+  get: () => pickedSort.value ?? (primary.value == null ? 'index' : 'score:asc'),
+  set: (value) => {
+    pickedSort.value = value
+  },
+})
+const primaryLabel = computed(() => (primary.value == null ? undefined : scoreLabel(primary.value, scoreDefinitions.value)))
 const sortOptions = computed<{ label: string, value: SortKey }[]>(() => [
   { label: 'Recorded order', value: 'index' },
-  { label: 'Score, lowest first', value: 'exact:asc' },
-  { label: 'Score, highest first', value: 'exact:desc' },
+  ...(primaryLabel.value == null
+    ? []
+    : [
+        { label: `${primaryLabel.value}, lowest first`, value: 'score:asc' as const },
+        { label: `${primaryLabel.value}, highest first`, value: 'score:desc' as const },
+      ]),
   { label: 'Duration, longest first', value: 'duration:desc' },
   ...columns.value.filter(name => table.value.groups.some(group => group.representative === name || group.members.some(member => member.name === name))).flatMap(name => [
     { label: `${labelOf(name)}, lowest first`, value: `metric:${name}:asc` as const },
@@ -114,10 +136,10 @@ const sortOptions = computed<{ label: string, value: SortKey }[]>(() => [
   ]),
 ])
 const sortLabel = computed(() => sortOptions.value.find(option => option.value === sortKey.value)?.label ?? 'Recorded order')
-function sortValue(node: { durationMs?: number, key: string, scores: { exact?: number } }): number | undefined {
+function sortValue(node: { durationMs?: number, key: string }): number | undefined {
   const key = sortKey.value
-  if (key.startsWith('exact'))
-    return node.scores.exact
+  if (key.startsWith('score:'))
+    return primary.value == null ? undefined : rowsByKey.value.get(node.key)?.numbers[primary.value]
   if (key.startsWith('duration'))
     return node.durationMs
   if (key.startsWith('metric:'))
@@ -126,7 +148,9 @@ function sortValue(node: { durationMs?: number, key: string, scores: { exact?: n
 }
 
 const cases = computed(() => {
-  const list = (task.value?.cases ?? []).filter(node => (picked.value == null || picked.value.has(node.key)) && node.name.toLowerCase().includes(filter.value.toLowerCase()))
+  const list = (task.value?.cases ?? []).filter(node => (picked.value == null || picked.value.has(node.key))
+    && (!onlyErrored.value || node.state === 'errored' || node.state === 'timeout')
+    && node.name.toLowerCase().includes(filter.value.toLowerCase()))
   if (sortKey.value === 'index')
     return list
   const direction = sortKey.value.endsWith(':desc') ? -1 : 1
@@ -138,6 +162,17 @@ const cases = computed(() => {
     return (left - right) * direction || a.index - b.index
   })
 })
+/**
+ * A case's primary score on its row: the counted value (a failed case scores 0), the unscored reason, or `—`; with
+ * the score's label once, in the column title, on wide screens.
+ */
+function caseScore(node: { key: string, scores: { unscored: Record<string, string> } }): string {
+  if (primary.value == null)
+    return ''
+  const reason = node.scores.unscored[primary.value]
+  return reason == null ? formatScore(rowsByKey.value.get(node.key)?.numbers[primary.value]) : unscoredReasonLabel(reason)
+}
+
 // Once per second: running cases show how long they have run, in whole seconds.
 const now = useTimestamp({ scheduler: callback => useIntervalFn(callback, 1000) })
 
@@ -182,16 +217,28 @@ const position = computed(() => ({
         </div>
         <div>
           <div class="text-xs muted">
-            {{ task.scores.judge == null ? 'Exact' : 'Exact / judge / hybrid' }}
-          </div><b class="tabular-nums">{{ formatScore(task.scores.exact) }}<template v-if="task.scores.judge != null"> / {{ formatScore(task.scores.judge) }} / {{ formatScore(task.scores.hybrid) }}</template></b>
+            Headline
+          </div>
+          <!-- A completion rate below 100% narrows the case list to the cases without a result. -->
+          <HeadlineScore :result="headlineOf(task.scoring)" :definitions="scoreDefinitions" @errors="onlyErrored = true" />
+        </div>
+        <div v-if="otherScores.length > 0">
+          <div class="text-xs muted">
+            Other scores
+          </div>
+          <ul :class="['m-0 p-0 list-none grid gap-0.5']" data-testid="task-other-scores">
+            <li v-for="summary in otherScores" :key="summary.name" :class="['flex items-baseline gap-2']">
+              <span>{{ scoreLabel(summary.name, scoreDefinitions) }}</span><b :class="['tabular-nums ml-auto']">{{ formatScore(summary.mean) }}</b>
+            </li>
+          </ul>
         </div>
         <!-- Where the mean comes from: how many cases scored what. -->
-        <div v-if="task.cases.some(node => node.scores.exact != null)" :class="['min-w-40 max-md:(min-w-0 w-full)']">
+        <div v-if="primary && table.rows.some(row => row.numbers[primary!] != null)" :class="['min-w-40 max-md:(min-w-0 w-full)']">
           <div class="text-xs muted">
-            Scores per case
+            {{ primaryLabel }} per case
           </div>
           <div :class="['flex items-center h-6']">
-            <ScoreBar :class="['w-full']" :scores="task.cases.map(node => node.scores.exact)" />
+            <ScoreBar :class="['w-full']" :scores="table.rows.map(row => row.numbers[primary!])" />
           </div>
         </div>
         <div :class="['min-w-64 max-md:(min-w-0 w-full)']">
@@ -248,6 +295,9 @@ const position = computed(() => ({
           <button v-if="picked" type="button" :class="['btn btn-active text-xs py-0.5! font-normal']" data-testid="case-list-picked" @click="picked = undefined">
             <span class="i-mingcute-filter-line" aria-hidden="true" />{{ picked.size }} picked in the charts<span class="i-mingcute-close-line" aria-label="Clear the selection" />
           </button>
+          <button v-if="onlyErrored" type="button" :class="['btn btn-active text-xs py-0.5! font-normal']" data-testid="case-list-errored" @click="onlyErrored = false">
+            <span class="i-mingcute-filter-line" aria-hidden="true" />without a result<span class="i-mingcute-close-line" aria-label="Show every case" />
+          </button>
           <span :class="['flex flex-wrap items-center gap-2 ml-auto font-normal', 'max-md:(w-full ml-0)']">
             <DropdownMenuRoot>
               <DropdownMenuTrigger :class="['option-trigger text-xs! py-1!']" data-testid="case-list-sort">
@@ -303,7 +353,7 @@ const position = computed(() => ({
             <div v-if="columns.length > 0" :class="['sticky top-0 z-1 flex items-center gap-x-2 px-3 py-1 text-xs muted bg-white dark:bg-neutral-900 border-b border-neutral-100/70 dark:border-neutral-900', 'max-md:hidden']" :style="{ minWidth: rowMinWidth }">
               <span :class="['flex-1']" />
               <span v-for="name in columns" :key="name" :class="['shrink-0 truncate text-right']" :style="{ width: `${COLUMN_PX}px` }" :title="name">{{ labelOf(name) }}</span>
-              <span :class="['w-36 shrink-0 text-right']">exact · duration</span>
+              <span :class="['w-36 shrink-0 text-right truncate']">{{ primaryLabel ? `${primaryLabel} · duration` : 'duration' }}</span>
             </div>
             <div :style="{ height: `${virtualizer.getTotalSize()}px`, position: 'relative', minWidth: wide ? rowMinWidth : undefined }">
               <a
@@ -321,7 +371,7 @@ const position = computed(() => ({
                 </span>
                 <span v-for="name in columns" :key="name" :class="['shrink-0 truncate text-right text-xs mono', 'max-md:hidden', name === columns[0] && 'ml-auto']" :style="{ width: `${COLUMN_PX}px` }" :title="columnValue(cases[item.index]!.key, name)">{{ columnValue(cases[item.index]!.key, name) }}</span>
                 <!-- Phones: under the name (third grid column), aligned with it, with the picked columns after the score. -->
-                <span :class="['text-xs muted mono whitespace-nowrap', columns.length === 0 ? 'ml-auto' : 'w-36 shrink-0 text-right', 'max-md:(col-start-3 ml-0 w-auto text-left truncate)']" :title="columns.length > 0 ? columnLine(cases[item.index]!.key) : undefined"><template v-if="cases[item.index]!.state === 'running'"><span class="[color:var(--ink-running)]">running {{ formatDuration(Math.max(0, now - Date.parse(cases[item.index]!.rounds.at(-1)?.startedAt ?? cases[item.index]!.startedAt))) }}</span></template><template v-else>exact {{ formatScore(cases[item.index]!.scores.exact) }} · {{ formatDuration(cases[item.index]!.durationMs) }}<span v-if="!wide && columns.length > 0"> · {{ columnLine(cases[item.index]!.key) }}</span></template></span>
+                <span :class="['text-xs muted mono whitespace-nowrap', columns.length === 0 ? 'ml-auto' : 'w-36 shrink-0 text-right', 'max-md:(col-start-3 ml-0 w-auto text-left truncate)']" :title="columns.length > 0 ? columnLine(cases[item.index]!.key) : undefined"><template v-if="cases[item.index]!.state === 'running'"><span class="[color:var(--ink-running)]">running {{ formatDuration(Math.max(0, now - Date.parse(cases[item.index]!.rounds.at(-1)?.startedAt ?? cases[item.index]!.startedAt))) }}</span></template><template v-else><template v-if="primary">{{ wide && columns.length > 0 ? '' : `${primaryLabel} ` }}{{ caseScore(cases[item.index]!) }} · </template>{{ formatDuration(cases[item.index]!.durationMs) }}<span v-if="!wide && columns.length > 0"> · {{ columnLine(cases[item.index]!.key) }}</span></template></span>
               </a>
             </div>
           </div>

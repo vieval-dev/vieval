@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { MetricDefinition } from '../../../src/shared/contract'
 import type { CaseTable, MetricSeparation } from '../caseMetrics'
+import type { ColumnDefinition } from '../scores'
 import type { BesideTarget } from './MetricBesideCard.vue'
 
 import { DrawerContent, DrawerDescription, DrawerHandle, DrawerOverlay, DrawerPortal, DrawerRootNested, DrawerTitle } from 'vaul-vue'
@@ -17,7 +17,7 @@ import { localize } from '../localize'
  * desktop popover and the phone drawer, the same way AIRI's Live2D report shares its content.
  */
 const props = defineProps<{
-  definitionOf: (name: string) => MetricDefinition | undefined
+  definitionOf: (name: string) => ColumnDefinition | undefined
   /**
    * How a metric's details open: `hover` (desktop popover) floats them beside the row; `drawer` (phone) shows the
    * description as one line under the name and opens the details in a second drawer from an info button.

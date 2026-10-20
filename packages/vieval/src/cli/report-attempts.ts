@@ -1,14 +1,14 @@
-import type { RunSummaryFile } from './report-artifacts'
-
 import process from 'node:process'
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 
 import meow from 'meow'
 
 import { glob } from 'tinyglobby'
+
+import { readRunSummary } from './report-artifacts'
 
 const reportAttemptsHelpText = `
   Usage
@@ -31,8 +31,8 @@ export interface AttemptRow {
   attemptId: string
   /** Cases summed over the runs that wrote a `run-summary.json`. */
   cases: { errored: number, failed: number, passed: number, timeout: number, total: number }
-  /** Share of settled cases with a result, or `null` when no case settled. */
-  coverage: null | number
+  /** Completion rate: the share of settled cases with a result, or `null` when no case settled. */
+  completion: null | number
   experimentId: string
   /** Signal that interrupted the attempt, when a run recorded one. */
   interruptSignal?: string
@@ -58,7 +58,7 @@ export function formatAttemptsTable(rows: readonly AttemptRow[]): string {
     return 'No attempts found.'
   }
 
-  const header = ['EXPERIMENT', 'ATTEMPT', '', 'WORKSPACES', 'CASES', 'PASSED', 'FAILED', 'NO RESULT', 'COVERAGE', 'NOTES']
+  const header = ['EXPERIMENT', 'ATTEMPT', '', 'WORKSPACES', 'CASES', 'PASSED', 'FAILED', 'NO RESULT', 'COMPLETED', 'NOTES']
   const lines = rows.map((row) => {
     const notes = [
       ...(row.resumedFrom == null ? [] : [`resumed ${row.resumedFrom}`]),
@@ -74,7 +74,7 @@ export function formatAttemptsTable(rows: readonly AttemptRow[]): string {
       String(row.cases.passed),
       String(row.cases.failed),
       String(row.cases.errored + row.cases.timeout),
-      row.coverage == null ? '-' : `${(row.coverage * 100).toFixed(1)}%`,
+      row.completion == null ? '-' : `${(row.completion * 100).toFixed(1)}%`,
       notes.join('; '),
     ]
   })
@@ -113,7 +113,7 @@ export async function listAttempts(reportRoot: string, filters: { experiment?: s
     const row = rows.get(key) ?? {
       attemptId,
       cases: { errored: 0, failed: 0, passed: 0, timeout: 0, total: 0 },
-      coverage: null,
+      completion: null,
       experimentId,
       latest: false,
       modifiedAt: 0,
@@ -132,7 +132,7 @@ export async function listAttempts(reportRoot: string, filters: { experiment?: s
         row.unfinishedRuns += 1
         continue
       }
-      const summary = JSON.parse(readFileSync(summaryPath, 'utf-8')) as RunSummaryFile
+      const summary = readRunSummary(summaryPath)
       row.interruptSignal ??= summary.interruptSignal
       row.resumedFrom ??= summary.resumedFrom
       for (const project of summary.projects) {
@@ -147,7 +147,7 @@ export async function listAttempts(reportRoot: string, filters: { experiment?: s
   const seenExperiments = new Set<string>()
   for (const row of sorted) {
     const settled = row.cases.passed + row.cases.failed + row.cases.errored + row.cases.timeout
-    row.coverage = settled === 0 ? null : (row.cases.passed + row.cases.failed) / settled
+    row.completion = settled === 0 ? null : (row.cases.passed + row.cases.failed) / settled
     row.workspaces.sort()
     // Rows are newest first, so the first row of an experiment is the one `--resume` picks.
     row.latest = !seenExperiments.has(row.experimentId)

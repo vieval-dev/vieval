@@ -1,11 +1,14 @@
 import type { ScaleContinuousNumeric } from 'd3'
 
-import type { CaseNode, CaseState, MetricDefinition, MetricsResponse } from '../../src/shared/contract'
+import type { CaseNode, CaseState, MetricDefinition, MetricsResponse, ScoreDefinition } from '../../src/shared/contract'
+import type { ColumnDefinition } from './scores'
 
 import { scaleLinear, scaleSymlog } from 'd3'
 
 import { parseTaskId } from '../../src/shared/reduce'
+import { formatScore } from './format'
 import { localize } from './localize'
+import { primaryScoreName, scoreColumn } from './scores'
 
 /** One case of a task, flattened for the multi-metric charts (parallel coordinates, scatterplot matrix). */
 export interface CaseRow {
@@ -37,7 +40,11 @@ export interface CaseTable {
   groups: MetricGroup[]
   /** Numeric metrics whose largest value is far above the median; charts draw them on a symlog scale. */
   heavyTailed: Set<string>
+  /** Score the cases are read by (see {@link primaryScoreName}); `undefined` without one. */
+  primary?: string
   rows: CaseRow[]
+  /** Names of the scores among the numeric values, the primary score first; they are axes like any metric. */
+  scores: string[]
   /** Cases per value of each category axis, most frequent first (`state` in its usual order, passed first). */
   valueCounts: Record<string, Map<string, number>>
 }
@@ -82,7 +89,7 @@ export interface MetricSeparation {
    * metric alone (`0.5`: no better than a coin, `1`: every case of one outcome lies on one side).
    */
   auc: number
-  /** Which outcome has the larger values: a case state, or the lower / higher `exact` score. */
+  /** Which outcome has the larger values: a case state, or the lower / higher primary score. */
   higherIn: 'failed' | 'higher-scored' | 'lower-scored' | 'passed'
 }
 
@@ -98,13 +105,13 @@ export interface MetricSeparation {
  *   matched to cases by task id and case id
  *
  * Returns:
- * - one row per case with the value of its last round for every metric; built-in axes `duration_s`, `exact`,
- *   `judge` (when recorded), `state`, `group` (the name prefix before `/`, when names share that shape), and the
- *   eval `entry` and the run and eval matrix axes of the case's task (they split the cases only when several tasks
- *   are in the table)
+ * - one row per case with the value of its last round for every metric and every score (the counted value of
+ *   `metrics.scores`, else the recorded value of the case); built-in axes `duration_s`, `state`, `group` (the name
+ *   prefix before `/`, when names share that shape), and the eval `entry` and the run and eval matrix axes of the
+ *   case's task (they split the cases only when several tasks are in the table)
  * - metrics recorded as a list of numbers per case summarized as `<name>#mean` and `<name>#length`
  * - constant metrics split out, and correlated metrics (|r| ≥ 0.95 on `log1p` values) folded into the first of
- *   them in recording order, built-ins first
+ *   them in recording order: scores first (the primary leads), then the built-ins, then the recorded metrics
  */
 export function buildCaseTable(cases: readonly CaseNode[], metrics: MetricsResponse | undefined): CaseTable {
   // Keyed like `CaseNode.key` (task id, NUL, case id): one case id repeats in every task of a run (an OSWorld question
@@ -132,6 +139,32 @@ export function buildCaseTable(cases: readonly CaseNode[], metrics: MetricsRespo
       }
     }
   }
+  // Scores of the case's last round as the summaries count them (a failed case scores 0); a case left out of a score
+  // (errored, unscored) has no point and so no value.
+  const scoreNames: string[] = []
+  for (const series of metrics?.scores ?? []) {
+    scoreNames.push(series.name)
+    for (const point of series.points) {
+      const entry = entryOf(point.taskId, point.caseId)
+      const round = point.roundIndex ?? 0
+      if ((entry.rounds[series.name] ?? -1) <= round) {
+        entry.rounds[series.name] = round
+        entry.numbers[series.name] = point.value
+      }
+    }
+  }
+  // Without the metrics response (still loading), the cases' own recorded values stand in for the counted ones.
+  if (metrics == null) {
+    for (const node of cases) {
+      for (const [name, value] of Object.entries(node.scores.values)) {
+        if (!scoreNames.includes(name))
+          scoreNames.push(name)
+        entryOf(node.taskId, node.caseId).numbers[name] = value
+      }
+    }
+  }
+  const primary = primaryScoreName(metrics?.scoreDefinitions ?? [], scoreNames)
+  const scores = primary == null ? scoreNames : [primary, ...scoreNames.filter(name => name !== primary)]
   const derivedNames: string[] = []
   for (const series of metrics?.nonNumeric ?? []) {
     for (const point of series.values) {
@@ -166,10 +199,6 @@ export function buildCaseTable(cases: readonly CaseNode[], metrics: MetricsRespo
     const numbers: Record<string, number> = { ...recorded?.numbers }
     if (node.durationMs != null)
       numbers.duration_s = node.durationMs / 1000
-    if (node.scores.exact != null)
-      numbers.exact = node.scores.exact
-    if (node.scores.judge != null)
-      numbers.judge = node.scores.judge
     // Built-ins first (key order is the default axis order), and they win over a recorded metric of the same name.
     // The matrix axes of the case's task (`tts`, `asr`, …): one value per task, so they split only a run-wide table.
     // The eval entry too (`…/formula-speech/en`, by its last path segment): one entry per language or dataset split.
@@ -181,9 +210,8 @@ export function buildCaseTable(cases: readonly CaseNode[], metrics: MetricsRespo
     return { caseId: node.caseId, categories, key: node.key, name: node.name, numbers, state: node.state, taskId: node.taskId }
   })
 
-  const builtIns = ['duration_s', 'exact', 'judge']
   const recordedNames = [...(metrics?.numeric ?? []).map(series => series.name), ...derivedNames]
-  const numericNames = [...builtIns, ...recordedNames].filter((name, index, all) => all.indexOf(name) === index && rows.some(row => row.numbers[name] != null))
+  const numericNames = [...scores, 'duration_s', ...recordedNames].filter((name, index, all) => all.indexOf(name) === index && rows.some(row => row.numbers[name] != null))
 
   const constants: CaseTable['constants'] = []
   const groups: MetricGroup[] = []
@@ -246,11 +274,55 @@ export function buildCaseTable(cases: readonly CaseNode[], metrics: MetricsRespo
       : numericValues ? (value: string) => Number(value) : (value: string) => -counts.get(value)!
     valueCounts[name] = new Map([...counts].sort(([a], [b]) => order(a) - order(b)))
   }
-  return { categories, constants, duplicates, groups, heavyTailed, rows, valueCounts }
+  return { categories, constants, duplicates, groups, heavyTailed, primary, rows, scores: scores.filter(name => rows.some(row => row.numbers[name] != null)), valueCounts }
+}
+
+/**
+ * Definitions of every column of a case table by name: the metrics' `metric.defined`, and the scores' `score.defined`
+ * read as columns ({@link scoreColumn}); a score wins over a metric of the same name.
+ *
+ * Use when:
+ * - a chart, menu, or table labels and describes the columns of a {@link CaseTable} (`metricLabel`, `metricDefinition`)
+ */
+export function columnDefinitions(metricDefinitions: readonly MetricDefinition[], scoreDefinitions: readonly ScoreDefinition[]): Map<string, ColumnDefinition> {
+  return new Map<string, ColumnDefinition>([
+    ...metricDefinitions.map(definition => [definition.name, definition] as const),
+    ...scoreDefinitions.map(definition => [definition.name, scoreColumn(definition, scoreDefinitions)] as const),
+  ])
+}
+
+/**
+ * Formats one value of a column for people: a score as a percentage, a metric rounded with its unit.
+ *
+ * Before:
+ * - (0.875, score column), (48213, { unit: 'tokens' }), (1.23456, undefined)
+ *
+ * After:
+ * - "87.5%", "48.2K tokens", "1.23"
+ */
+export function formatColumnValue(value: number, definition: ColumnDefinition | undefined): string {
+  if (definition?.score != null)
+    return formatScore(value)
+  const text = Math.abs(value) >= 1000 ? new Intl.NumberFormat(undefined, { maximumFractionDigits: 1, notation: 'compact' }).format(value) : String(Math.round(value * 100) / 100)
+  return definition?.unit == null ? text : `${text} ${definition.unit}`
 }
 
 /** Separator between a list metric's name and its summary in a derived metric name; never part of a recorded name. */
 const DERIVED_SEPARATOR = '#'
+
+/**
+ * Stable offset in `-0.5..0.5` for one case, so a dot keeps its spot inside a band (or a line its place on a category
+ * axis) across redraws instead of jumping on every update. `salt` gives a case independent offsets per direction.
+ *
+ * Use when:
+ * - spreading many cases that share one value (a category, the free direction of a strip) so they stay countable
+ */
+export function caseOffset(key: string, salt = 0): number {
+  let hash = (salt + 1) * 2654435761
+  for (let index = 0; index < key.length; index++)
+    hash = Math.imul(hash ^ key.charCodeAt(index), 2654435761)
+  return ((hash >>> 0) % 1000) / 1000 - 0.5
+}
 
 /**
  * Pearson correlation of two metrics over the cases that recorded both, on `log1p` values so token counts that span
@@ -329,7 +401,7 @@ export function matchesFilters(row: CaseRow, filters: CaseFilters): boolean {
  * Definition of a metric for its hover card; a derived metric borrows the description of its list metric (and its
  * unit for the mean, not for the length).
  */
-export function metricDefinition(name: string, definitions: ReadonlyMap<string, MetricDefinition>): MetricDefinition | undefined {
+export function metricDefinition(name: string, definitions: ReadonlyMap<string, ColumnDefinition>): ColumnDefinition | undefined {
   const derived = parseDerivedMetric(name)
   const base = definitions.get(derived?.base ?? name)
   if (derived == null || base == null)
@@ -344,7 +416,7 @@ export function metricDefinition(name: string, definitions: ReadonlyMap<string, 
  * Use when:
  * - any chart, menu, or table names a metric of a {@link CaseTable}
  */
-export function metricLabel(name: string, definitions: ReadonlyMap<string, MetricDefinition>): string {
+export function metricLabel(name: string, definitions: ReadonlyMap<string, ColumnDefinition>): string {
   const derived = parseDerivedMetric(name)
   if (derived != null)
     return `${metricLabel(derived.base, definitions)} · ${derived.summary}`
@@ -388,65 +460,6 @@ export function parseDerivedMetric(name: string): undefined | { base: string, su
 }
 
 /**
- * Short label of a metric for a chart axis: the last dot segment, or more segments while two picked metrics would
- * share a label.
- *
- * Before:
- * - "osworld.model.usage.output_tokens_details.reasoning_tokens"
- *
- * After:
- * - "reasoning_tokens"
- */
-export function shortMetricName(name: string, all: readonly string[]): string {
-  const parts = name.split('.')
-  for (let take = 1; take < parts.length; take++) {
-    const label = parts.slice(-take).join('.')
-    if (all.every(other => other === name || (!other.endsWith(`.${label}`) && other !== label)))
-      return label
-  }
-  return name
-}
-
-/** The numbers of a recorded list value, or `undefined` when it is not a non-empty list of finite numbers. */
-function numbersOf(value: unknown): number[] | undefined {
-  if (!Array.isArray(value) || value.length === 0)
-    return undefined
-  return value.every(item => typeof item === 'number' && Number.isFinite(item)) ? value as number[] : undefined
-}
-
-/** Whether two categories split the cases the same way, value for value (`exact` 1/0 against `state` passed/failed). */
-function sameSplit(rows: readonly CaseRow[], left: string, right: string): boolean {
-  const forward = new Map<string, string>()
-  const backward = new Map<string, string>()
-  for (const row of rows) {
-    const a = row.categories[left] ?? ''
-    const b = row.categories[right] ?? ''
-    if ((forward.get(a) ?? b) !== b || (backward.get(b) ?? a) !== a)
-      return false
-    forward.set(a, b)
-    backward.set(b, a)
-  }
-  return true
-}
-
-/** Scores are the outcome itself, so ranking them by how they separate the outcome would explain nothing. */
-const OUTCOME_METRICS = new Set(['exact', 'judge'])
-
-/**
- * Stable offset in `-0.5..0.5` for one case, so a dot keeps its spot inside a band (or a line its place on a category
- * axis) across redraws instead of jumping on every update. `salt` gives a case independent offsets per direction.
- *
- * Use when:
- * - spreading many cases that share one value (a category, the free direction of a strip) so they stay countable
- */
-export function caseOffset(key: string, salt = 0): number {
-  let hash = (salt + 1) * 2654435761
-  for (let index = 0; index < key.length; index++)
-    hash = Math.imul(hash ^ key.charCodeAt(index), 2654435761)
-  return ((hash >>> 0) % 1000) / 1000 - 0.5
-}
-
-/**
  * Ranks numeric metrics by how well they separate failed from passed cases.
  *
  * Use when:
@@ -456,19 +469,20 @@ export function caseOffset(key: string, salt = 0): number {
  * - finished cases (`passed`, `failed`, `errored`, `timeout`); running and skipped cases are left out
  *
  * Returns:
- * - one entry per non-constant metric with values in both outcomes, except the score metrics; ties count half
+ * - one entry per non-constant metric with values in both outcomes, except the scores; ties count half
  *   (Mann–Whitney U), so a metric that is mostly 0 in both outcomes stays near `0.5`
  * - when no finished case failed (a scored eval, where a score of 0 is a result, not a failure), the outcomes are the
- *   cases below the mean `exact` score against the rest, so the ranking still explains what lowers the score
+ *   cases below the mean primary score against the rest, so the ranking still explains what lowers the score
  */
 export function separationOf(table: CaseTable): Map<string, MetricSeparation> {
   const result = new Map<string, MetricSeparation>()
   const finished = table.rows.filter(row => row.state === 'passed' || row.state === 'failed' || row.state === 'errored' || row.state === 'timeout')
-  const outcome = outcomeOf(finished)
+  const outcome = outcomeOf(finished, table.primary)
   if (outcome == null)
     return result
   for (const name of table.groups.flatMap(group => [group.representative, ...group.members.map(member => member.name)])) {
-    if (OUTCOME_METRICS.has(name))
+    // Scores are the outcome itself, so ranking them by how they separate the outcome would explain nothing.
+    if (table.scores.includes(name))
       continue
     const low: number[] = []
     const high: number[] = []
@@ -503,13 +517,42 @@ export function separationOf(table: CaseTable): Map<string, MetricSeparation> {
 }
 
 /**
- * The two outcomes the separation compares: failed against passed cases, or, with no failed case, cases below the
- * mean `exact` score against the rest. `undefined` when neither split has two sides.
+ * Short label of a metric for a chart axis: the last dot segment, or more segments while two picked metrics would
+ * share a label.
+ *
+ * Before:
+ * - "osworld.model.usage.output_tokens_details.reasoning_tokens"
+ *
+ * After:
+ * - "reasoning_tokens"
  */
-function outcomeOf(finished: readonly CaseRow[]): undefined | { high: MetricSeparation['higherIn'], low: MetricSeparation['higherIn'], sideOf: (row: CaseRow) => 'high' | 'low' | undefined } {
+export function shortMetricName(name: string, all: readonly string[]): string {
+  const parts = name.split('.')
+  for (let take = 1; take < parts.length; take++) {
+    const label = parts.slice(-take).join('.')
+    if (all.every(other => other === name || (!other.endsWith(`.${label}`) && other !== label)))
+      return label
+  }
+  return name
+}
+
+/** The numbers of a recorded list value, or `undefined` when it is not a non-empty list of finite numbers. */
+function numbersOf(value: unknown): number[] | undefined {
+  if (!Array.isArray(value) || value.length === 0)
+    return undefined
+  return value.every(item => typeof item === 'number' && Number.isFinite(item)) ? value as number[] : undefined
+}
+
+/**
+ * The two outcomes the separation compares: failed against passed cases, or, with no failed case, cases below the
+ * mean primary score against the rest. `undefined` when neither split has two sides.
+ */
+function outcomeOf(finished: readonly CaseRow[], primary: string | undefined): undefined | { high: MetricSeparation['higherIn'], low: MetricSeparation['higherIn'], sideOf: (row: CaseRow) => 'high' | 'low' | undefined } {
   if (finished.some(row => row.state === 'failed') && finished.some(row => row.state === 'passed'))
     return { high: 'passed', low: 'failed', sideOf: row => (row.state === 'passed' ? 'high' : 'low') }
-  const scores = finished.map(row => row.numbers.exact).filter((value): value is number => value != null)
+  if (primary == null)
+    return undefined
+  const scores = finished.map(row => row.numbers[primary]).filter((value): value is number => value != null)
   if (new Set(scores).size < 2)
     return undefined
   const mean = scores.reduce((sum, value) => sum + value, 0) / scores.length
@@ -517,8 +560,23 @@ function outcomeOf(finished: readonly CaseRow[]): undefined | { high: MetricSepa
     high: 'higher-scored',
     low: 'lower-scored',
     sideOf: (row) => {
-      const value = row.numbers.exact
+      const value = row.numbers[primary]
       return value == null ? undefined : value < mean ? 'low' : 'high'
     },
   }
+}
+
+/** Whether two categories split the cases the same way, value for value (a 1/0 score against `state` passed/failed). */
+function sameSplit(rows: readonly CaseRow[], left: string, right: string): boolean {
+  const forward = new Map<string, string>()
+  const backward = new Map<string, string>()
+  for (const row of rows) {
+    const a = row.categories[left] ?? ''
+    const b = row.categories[right] ?? ''
+    if ((forward.get(a) ?? b) !== b || (backward.get(b) ?? a) !== a)
+      return false
+    forward.set(a, b)
+    backward.set(b, a)
+  }
+  return true
 }

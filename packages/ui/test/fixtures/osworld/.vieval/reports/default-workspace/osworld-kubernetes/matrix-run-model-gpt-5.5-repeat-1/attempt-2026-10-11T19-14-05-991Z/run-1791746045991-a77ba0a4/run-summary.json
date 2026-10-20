@@ -2,6 +2,27 @@
   "attemptId": "attempt-2026-10-11T19-14-05-991Z",
   "configFilePath": "/home/user/Git/github.com/moeru-ai/auv-pr-258/evals/osworld/vieval.config.ts",
   "experimentId": "matrix-run-model-gpt-5.5-repeat-1",
+  "headline": {
+    "completion": {
+      "mean": 1,
+      "n": 18,
+      "name": "completion",
+      "sum": 18,
+      "total": 18,
+      "unscored": {}
+    },
+    "headline": {
+      "kind": "score",
+      "score": {
+        "mean": 0.6111111111111112,
+        "n": 18,
+        "name": "osworld.success",
+        "sum": 11,
+        "total": 18,
+        "unscored": {}
+      }
+    }
+  },
   "projects": [
     {
       "caseFailures": [
@@ -73,27 +94,104 @@
       "result": {
         "inferenceExecutors": [
           {
-            "exactAverage": 0.6111111111111112,
-            "hybridAverage": 0.6111111111111112,
-            "inferenceExecutorId": "default",
-            "judgeAverage": null,
-            "runCount": 1
+            "completion": {
+              "mean": 1,
+              "n": 18,
+              "name": "completion",
+              "sum": 18,
+              "total": 18,
+              "unscored": {}
+            },
+            "headline": {
+              "completion": {
+                "mean": 1,
+                "n": 18,
+                "name": "completion",
+                "sum": 18,
+                "total": 18,
+                "unscored": {}
+              },
+              "headline": {
+                "kind": "score",
+                "score": {
+                  "mean": 0.6111111111111112,
+                  "n": 18,
+                  "name": "osworld.success",
+                  "sum": 11,
+                  "total": 18,
+                  "unscored": {}
+                }
+              }
+            },
+            "runCount": 1,
+            "scores": [
+              {
+                "mean": 0.6111111111111112,
+                "n": 18,
+                "name": "osworld.success",
+                "sum": 11,
+                "total": 18,
+                "unscored": {}
+              }
+            ],
+            "inferenceExecutorId": "default"
           }
         ],
         "overall": {
-          "exactAverage": 0.6111111111111112,
-          "hybridAverage": 0.6111111111111112,
-          "judgeAverage": null,
-          "runCount": 1
+          "completion": {
+            "mean": 1,
+            "n": 18,
+            "name": "completion",
+            "sum": 18,
+            "total": 18,
+            "unscored": {}
+          },
+          "headline": {
+            "completion": {
+              "mean": 1,
+              "n": 18,
+              "name": "completion",
+              "sum": 18,
+              "total": 18,
+              "unscored": {}
+            },
+            "headline": {
+              "kind": "score",
+              "score": {
+                "mean": 0.6111111111111112,
+                "n": 18,
+                "name": "osworld.success",
+                "sum": 11,
+                "total": 18,
+                "unscored": {}
+              }
+            }
+          },
+          "runCount": 1,
+          "scores": [
+            {
+              "mean": 0.6111111111111112,
+              "n": 18,
+              "name": "osworld.success",
+              "sum": 11,
+              "total": 18,
+              "unscored": {}
+            }
+          ]
         },
         "runs": [
           {
+            "completion": {
+              "mean": 1,
+              "n": 18,
+              "name": "completion",
+              "sum": 18,
+              "total": 18,
+              "unscored": {}
+            },
             "entryId": "evals/osworld/eval/osworld",
-            "exactAverage": 0.6111111111111112,
-            "hybridAverage": 0.6111111111111112,
             "id": "evals%2Fosworld%2Feval%2Fosworld::default::run=model%3Dgpt-5.5%26repeat%3D1::eval=default",
             "inferenceExecutorId": "default",
-            "judgeAverage": null,
             "matrix": {
               "eval": {},
               "meta": {
@@ -104,7 +202,26 @@
                 "model": "gpt-5.5",
                 "repeat": "1"
               }
-            }
+            },
+            "passed": {
+              "mean": 0.6111111111111112,
+              "n": 18,
+              "name": "passed",
+              "sum": 11,
+              "total": 18,
+              "unscored": {}
+            },
+            "primary": "osworld.success",
+            "scores": [
+              {
+                "mean": 0.6111111111111112,
+                "n": 18,
+                "name": "osworld.success",
+                "sum": 11,
+                "total": 18,
+                "unscored": {}
+              }
+            ]
           }
         ]
       },
@@ -114,5 +231,7 @@
   "interruptSignal": "SIGINT",
   "reportDirectory": "__VIEVAL_DIR__/reports/default-workspace/osworld-kubernetes/matrix-run-model-gpt-5.5-repeat-1/attempt-2026-10-11T19-14-05-991Z/run-1791746045991-a77ba0a4",
   "runId": "run-1791746045991-a77ba0a4",
-  "workspaceId": "default-workspace"
+  "workspaceId": "default-workspace",
+  "scoreDefinitions": [],
+  "schemaVersion": 2
 }

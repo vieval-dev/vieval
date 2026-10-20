@@ -1,31 +1,47 @@
-import type { RunListItem, TaskNode } from '../shared/contract'
+import type { RunListItem, ScoreDefinition, TaskNode } from '../shared/contract'
+import type { RunReducer } from '../shared/reduce'
 
 import { describe, expect, it } from 'vitest'
 
-import { createEnvelopeFactory } from '../../test/helpers'
+import { createEnvelopeFactory, createReducerHandle } from '../../test/helpers'
 import { buildTaskNodes, createRunReducer } from '../shared/reduce'
-import { buildMatrix } from './compare'
+import { buildMatrix, compareRuns } from './compare'
 
 const TASK = 'evals%2Fdemo::default::run=tts%3Dofficial::eval=asr%3Dwhisper-1'
 const TASK_WITH_JUDGE = 'evals%2Fdemo::default::run=tts%3Dofficial::eval=judge%3Dgpt-5.5'
 
+/** Score every case of the test runs records, unless a case names other values. */
+const SCORE = 'demo.score'
+
 interface CaseResult {
-  exact?: number
+  /** Recorded score values by name. */
+  scores?: Record<string, number>
   state: 'errored' | 'failed' | 'passed'
 }
 
+interface TestRun {
+  item: RunListItem
+  reducer: RunReducer
+  scoreDefinitions: ReadonlyMap<string, ScoreDefinition>
+  tasks: TaskNode[]
+}
+
 /** One ended run of {@link TASK}: the given cases (named `<prefix>-<index>`) settle, out of `total` expected ones. */
-function runOf(runKey: string, startedAt: string, total: number, results: readonly CaseResult[], options: { prefix?: string, taskId?: string } = {}): { item: RunListItem, tasks: TaskNode[] } {
+function runOf(runKey: string, startedAt: string, total: number, results: readonly CaseResult[], options: { definitions?: ScoreDefinition[], prefix?: string, taskId?: string } = {}): TestRun {
   const { prefix = 'case', taskId = TASK } = options
   const envelope = createEnvelopeFactory(runKey)
   const reducer = createRunReducer()
   const taskScope = { projectId: 'demo', taskId }
   reducer.apply(envelope('task.started', {}, taskScope))
+  for (const definition of options.definitions ?? []) {
+    reducer.apply(envelope('score.defined', definition, taskScope))
+  }
   results.forEach((result, index) => {
     const scope = { caseId: `${index}:${prefix}-${index}`, projectId: 'demo', taskId }
     reducer.apply(envelope('case.started', { index, name: `${prefix}-${index}`, total }, scope))
-    if (result.exact != null)
-      reducer.apply(envelope('score.recorded', { kind: 'exact', score: result.exact }, scope))
+    for (const [name, value] of Object.entries(result.scores ?? {})) {
+      reducer.apply(envelope('score.recorded', { name, value }, scope))
+    }
     reducer.apply(envelope('case.ended', { index, name: `${prefix}-${index}`, state: result.state, total }, scope))
   })
   reducer.apply(envelope('task.ended', { state: 'passed' }, taskScope))
@@ -33,10 +49,9 @@ function runOf(runKey: string, startedAt: string, total: number, results: readon
     attemptId: `attempt-${runKey}`,
     counts: { errored: 0, failed: 0, passed: 0, requeued: 0, running: 0, skipped: 0, timeout: 0, total: 0 },
     evalMatrix: {},
-    exactAverage: null,
     experimentId: 'exp-a',
-    hybridAverage: null,
-    judgeAverage: null,
+    headline: null,
+    headlineDefinitions: [],
     lastSeq: 0,
     matrix: {},
     projectIds: ['demo'],
@@ -50,10 +65,10 @@ function runOf(runKey: string, startedAt: string, total: number, results: readon
     state: 'ended',
     workspaceId: 'ws-a',
   }
-  return { item, tasks: buildTaskNodes(reducer, () => 0) }
+  return { item, reducer, scoreDefinitions: reducer.scoreDefinitions, tasks: buildTaskNodes(reducer, () => 0) }
 }
 
-const scored = (count: number, exact: number): CaseResult[] => Array.from({ length: count }, () => ({ exact, state: 'passed' }))
+const scored = (count: number, value: number): CaseResult[] => Array.from({ length: count }, () => ({ scores: { [SCORE]: value }, state: 'passed' }))
 
 describe('buildMatrix', () => {
   // ROOT CAUSE:
@@ -178,5 +193,92 @@ describe('buildMatrix', () => {
     expect(cell.latest.runKey).toBe('run-formula-new')
     expect(cell.caseCount).toBe(3)
     expect(cell.history.map(point => point.coverage)).toEqual(['full', 'other', 'full'])
+  })
+
+  /**
+   * @example
+   * expect(cell.latest.caseScores).toEqual([1, 0, null])
+   */
+  it('scores each run of a cell by its primary score, with the completion rate next to it', () => {
+    const definitions = [{ label: 'Correct', name: 'demo.correct' }, { name: SCORE, primary: true }]
+    const old = runOf('run-old', '2026-10-19T06:36:00.000Z', 2, scored(2, 0.5), { definitions })
+    const fresh = runOf('run-new', '2026-10-19T07:00:00.000Z', 3, [
+      { scores: { 'demo.correct': 1, [SCORE]: 1 }, state: 'passed' },
+      { scores: { [SCORE]: 1 }, state: 'failed' },
+      { state: 'errored' },
+    ], { definitions })
+
+    const [cell] = buildMatrix([old, fresh]).cells
+    expect(cell.history.map(point => [point.runKey, point.score, point.completion])).toEqual([['run-old', 0.5, 1], ['run-new', 0.5, 2 / 3]])
+    expect(cell.latest.scoring.primary).toBe(SCORE)
+    // Per case, the value it counts with: the failed case 0, the errored one none.
+    expect(cell.latest.caseScores).toEqual([1, 0, null])
+  })
+
+  /**
+   * @example
+   * expect(buildMatrix(runs).scoreDefinitions.map(definition => definition.name)).toEqual(['demo.correct', 'demo.score'])
+   */
+  it('returns the newest definition of each score in the cells', () => {
+    const old = runOf('run-old', '2026-10-19T06:36:00.000Z', 1, scored(1, 1), { definitions: [{ label: 'Old', name: SCORE }] })
+    const fresh = runOf('run-new', '2026-10-19T07:00:00.000Z', 1, scored(1, 1), { definitions: [{ label: 'Correct', name: 'demo.correct' }, { label: 'New', name: SCORE }] })
+
+    expect(buildMatrix([old, fresh]).scoreDefinitions).toEqual([{ label: 'Correct', name: 'demo.correct' }, { label: 'New', name: SCORE }])
+  })
+})
+
+describe('compareRuns', () => {
+  /**
+   * @example
+   * expect(comparison.rows.map(row => [row.caseName, row.changed])).toEqual([['case-0', false], ['case-1', true], ['case-2', false]])
+   */
+  it('marks a row changed when the state or the value it counts with in the shared primary score differs', () => {
+    const left = runOf('run-a', '2026-10-19T06:36:00.000Z', 3, [
+      { scores: { 'demo.other': 0, [SCORE]: 1 }, state: 'passed' },
+      { scores: { [SCORE]: 0.5 }, state: 'passed' },
+      { scores: { [SCORE]: 1 }, state: 'failed' },
+    ], { definitions: [{ name: SCORE, primary: true }] })
+    const right = runOf('run-b', '2026-10-19T07:00:00.000Z', 3, [
+      // Another value of a score that is not primary does not change the row.
+      { scores: { 'demo.other': 1, [SCORE]: 1 }, state: 'passed' },
+      { scores: { [SCORE]: 1 }, state: 'passed' },
+      // Both failed: both count 0, whatever they recorded.
+      { scores: { [SCORE]: 0 }, state: 'failed' },
+    ], { definitions: [{ name: SCORE, primary: true }] })
+
+    const comparison = compareRuns([createReducerHandle(left.reducer), createReducerHandle(right.reducer)], Date.parse('2026-10-20T00:00:00.000Z'))
+    expect(comparison.primary).toBe(SCORE)
+    expect(comparison.rows.map(row => [row.caseName, row.changed])).toEqual([['case-0', false], ['case-1', true], ['case-2', false]])
+    expect(comparison.rows[0].cells['run-a']).toEqual({ roundCount: 1, scores: { unscored: {}, values: { 'demo.other': 0, [SCORE]: 1 } }, state: 'passed' })
+    expect(comparison.columns.map(column => column.runs[0].headline?.headline.kind)).toEqual(['score', 'score'])
+    expect(comparison.scoreDefinitions).toEqual([{ name: SCORE, primary: true }])
+  })
+
+  /**
+   * @example
+   * run-a judged by judge-a (definition), run-b by judge-b (definition) -> each column lists its own grader.
+   */
+  it('lists the graders of each column, so a comparison can tell columns judged by different models apart', () => {
+    const left = runOf('run-a', '2026-10-19T06:36:00.000Z', 1, scored(1, 1), { definitions: [{ grader: { kind: 'model', model: 'judge-a' }, name: SCORE, primary: true }] })
+    const right = runOf('run-b', '2026-10-19T07:00:00.000Z', 1, scored(1, 1), { definitions: [{ grader: { kind: 'model', model: 'judge-b' }, name: SCORE, primary: true }] })
+
+    const comparison = compareRuns([createReducerHandle(left.reducer), createReducerHandle(right.reducer)], Date.parse('2026-10-20T00:00:00.000Z'))
+    expect(comparison.columns.map(column => column.scoreGraders)).toEqual([
+      { [SCORE]: [{ kind: 'model', model: 'judge-a' }] },
+      { [SCORE]: [{ kind: 'model', model: 'judge-b' }] },
+    ])
+  })
+
+  /**
+   * @example
+   * expect(comparison.primary).toBeUndefined()
+   */
+  it('compares by state only when the columns have different primary scores', () => {
+    const left = runOf('run-a', '2026-10-19T06:36:00.000Z', 1, [{ scores: { 'demo.a': 1 }, state: 'passed' }])
+    const right = runOf('run-b', '2026-10-19T07:00:00.000Z', 1, [{ scores: { 'demo.b': 0 }, state: 'passed' }])
+
+    const comparison = compareRuns([createReducerHandle(left.reducer), createReducerHandle(right.reducer)], Date.parse('2026-10-20T00:00:00.000Z'))
+    expect(comparison.primary).toBeUndefined()
+    expect(comparison.rows.map(row => row.changed)).toEqual([false])
   })
 })

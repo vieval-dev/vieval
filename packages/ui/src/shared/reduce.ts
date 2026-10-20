@@ -1,10 +1,12 @@
-import type { CaseOutcomeScores, CaseOutcomeState } from 'vieval/core/scoring'
-import type { LocalizedText } from 'vieval/events'
+import type { CaseOutcomeState, HeadlineResult } from 'vieval/core/scoring'
+import type { Grader, LocalizedText, ScoreRecordedData } from 'vieval/events'
 
 import type {
   CaseCounts,
   CaseNode,
   CaseRound,
+  CaseScores,
+  CaseScoring,
   CaseState,
   CurrentPosition,
   LogLine,
@@ -14,12 +16,17 @@ import type {
   RunEvent,
   RunIdentity,
   RunProgress,
+  ScoreDefinition,
+  ScoreGraders,
   TaskMatrix,
   TaskNode,
   TryNode,
 } from './contract'
 
-import { scoreCaseOutcomes } from 'vieval/core/scoring'
+import { resolveHeadline, scoreCases } from 'vieval/core/scoring'
+import { scoreDefinedDataSchema, scoreRecordedDataSchema } from 'vieval/events'
+
+import * as v from 'valibot'
 
 /**
  * Result of {@link RunReducer.apply}.
@@ -63,6 +70,8 @@ export interface ReducedCase {
   name: string
   projectId?: string
   rounds: MutableRound[]
+  /** Every `score.recorded` of the case, in event order, with the round it was recorded in. */
+  scoreRecords: ReducedScoreRecord[]
   taskId: string
 }
 
@@ -78,6 +87,15 @@ export interface ReducedInferenceEvent {
 }
 
 /**
+ * One `score.recorded` event, attached to its case.
+ */
+export interface ReducedScoreRecord {
+  record: ScoreRecordedData
+  roundIndex?: number
+  seq: number
+}
+
+/**
  * Reduced state of one task.
  */
 export interface ReducedTask {
@@ -88,6 +106,8 @@ export interface ReducedTask {
   endedAt?: string
   id: string
   projectId: string
+  /** Latest `score.defined` of the task per score name, in the order the task first announced them. */
+  scoreDefinitions: Map<string, ScoreDefinition>
   startedAt?: string
   state: TaskNode['state']
 }
@@ -117,6 +137,8 @@ export interface RunReducer {
     terminated: boolean
     totalTasks?: number
   }
+  /** Latest `score.defined` per score name over every task of the run. */
+  readonly scoreDefinitions: ReadonlyMap<string, ScoreDefinition>
   readonly seq: () => number
   readonly seqGaps: () => number
   /**
@@ -148,7 +170,8 @@ interface MutableRound {
   requeueDelayMs?: number
   roundIndex: number
   roundIndexInferred: boolean
-  scores: { exact?: number, judge?: number }
+  /** Scores of the round's current (last) try; a new try of the round starts empty. */
+  scores: CaseScores
   startedAt: string
   state: CaseState
   tries: MutableTry[]
@@ -175,13 +198,17 @@ interface ReducedProject {
 }
 
 /**
- * Arithmetic mean, or `null` for no values (a score that was never recorded is not 0).
+ * Adds one grader of a score to `into`, unless a grader of the same kind, model, and version is there already.
+ *
+ * Use when:
+ * - graders of several task nodes are merged into one group, for example a comparison column
  */
-export function average(values: readonly number[]): null | number {
-  if (values.length === 0) {
-    return null
+export function addScoreGrader(into: ScoreGraders, name: string, grader: Grader): void {
+  const graders = into[name] ?? []
+  if (!graders.some(known => known.kind === grader.kind && known.model === grader.model && known.version === grader.version)) {
+    graders.push(grader)
   }
-  return values.reduce((sum, value) => sum + value, 0) / values.length
+  into[name] = graders
 }
 
 /**
@@ -233,7 +260,7 @@ export function buildTaskNodes(reducer: RunReducer, evidenceCount: (caseKey: str
       .map(key => reducer.cases.get(key)!)
       .map(reduced => toCaseNode(reduced, { evidenceLinkCount: evidenceCount(reduced.key), terminated }))
       .sort((left, right) => left.index - right.index)
-    const allRounds = cases.flatMap(node => node.rounds)
+    const allRounds = cases.flatMap(node => node.rounds.map(round => ({ ...round, caseId: node.caseId })))
     // A loop instead of `Math.max(...rounds)`: a task with many cases exceeds the engine's argument limit.
     let roundCount = 0
     for (const round of allRounds) {
@@ -253,7 +280,8 @@ export function buildTaskNodes(reducer: RunReducer, evidenceCount: (caseKey: str
       id: task.id,
       projectId: task.projectId,
       roundCount,
-      scores: scoreRounds(allRounds),
+      scoreGraders: collectScoreGraders(task.caseKeys.flatMap(key => reducer.cases.get(key)!.scoreRecords.map(({ record }) => record)), task.scoreDefinitions),
+      scoring: scoreRounds(allRounds, [...task.scoreDefinitions.values()]),
       startedAt: task.startedAt,
       state,
       ...parseTaskId(task.id),
@@ -266,6 +294,34 @@ export function buildTaskNodes(reducer: RunReducer, evidenceCount: (caseKey: str
  */
 export function caseKeyOf(taskId: string, caseId: string): string {
   return `${taskId}\u0000${caseId}`
+}
+
+/**
+ * Adds the graders of score records to `into`, by score name, each distinct grader once.
+ *
+ * Use when:
+ * - a task node or a comparison column says what produced its scores, so a comparison can tell when two columns
+ *   measured one score with different graders
+ *
+ * Expects:
+ * - `definitions` of the task the records belong to; a record without its own grader uses the definition's
+ *
+ * Returns:
+ * - `into`, with graders told apart by kind, model, and version (the fields that change what a value means);
+ *   derived records are skipped, because a derived score has no grader of its own
+ */
+export function collectScoreGraders(
+  records: Iterable<ScoreRecordedData>,
+  definitions: ReadonlyMap<string, ScoreDefinition>,
+  into: ScoreGraders = {},
+): ScoreGraders {
+  for (const record of records) {
+    const grader = record.derived === true ? undefined : record.grader ?? definitions.get(record.name)?.grader
+    if (grader != null) {
+      addScoreGrader(into, record.name, grader)
+    }
+  }
+  return into
 }
 
 /**
@@ -301,6 +357,38 @@ export function countCases(nodes: readonly Pick<CaseNode, 'state'>[]): CaseCount
 }
 
 /**
+ * Values one round counts with in each score of its task, by the rule of {@link scoreRounds}.
+ *
+ * Use when:
+ * - a per-case value must agree with the task's means, for example the spread under a matrix cell or a metric panel
+ *
+ * Expects:
+ * - `definitions` from {@link countingDefinitions}, so the round counts in the scores other rounds recorded
+ *
+ * Returns:
+ * - by score name: the recorded value of a passed round, 0 for a failed round (and for an errored one with
+ *   `errors: 'zero'`); a name the round does not count in (unscored, missing, excluded, still running) is absent
+ */
+export function countedScores(round: Pick<CaseRound, 'scores' | 'state'>, definitions: readonly ScoreDefinition[] = []): Record<string, number> {
+  // Scoring a group of one round reuses the one rule instead of restating the state table here.
+  return Object.fromEntries(scoreRounds([round], definitions).scores.flatMap(summary => summary.mean == null ? [] : [[summary.name, summary.mean]]))
+}
+
+/**
+ * Definitions that count a part of a task's rounds in every score of the task.
+ *
+ * Use when:
+ * - one round or a subset of rounds is scored apart from its task ({@link countedScores}, one auto attempt, one
+ *   selection of cases): a failed round counts 0 even in a score only other rounds of the task recorded
+ *
+ * Returns:
+ * - one definition per score of `scoring`, in its order: the task's `score.defined`, or a bare `{ name }`
+ */
+export function countingDefinitions(scoring: Pick<CaseScoring, 'scores'>, definitions: ReadonlyMap<string, ScoreDefinition>): ScoreDefinition[] {
+  return scoring.scores.map(summary => definitions.get(summary.name) ?? { name: summary.name })
+}
+
+/**
  * Creates an empty reducer.
  *
  * Use when:
@@ -320,6 +408,7 @@ export function createRunReducer(): RunReducer {
   const logs: LogLine[] = []
   const metrics: MetricEntry[] = []
   const metricDefinitions = new Map<string, MetricDefinition>()
+  const scoreDefinitions = new Map<string, ScoreDefinition>()
   let identity: RunIdentity | undefined
   let lastSeq = 0
   let seqGaps = 0
@@ -355,6 +444,7 @@ export function createRunReducer(): RunReducer {
         displayName: taskId,
         id: taskId,
         projectId: projectId ?? 'unknown-project',
+        scoreDefinitions: new Map(),
         state: 'queued',
       }
       tasks.set(taskId, task)
@@ -384,6 +474,7 @@ export function createRunReducer(): RunReducer {
         name: name ?? parseCaseName(envelope.caseId),
         projectId: envelope.projectId,
         rounds: [],
+        scoreRecords: [],
         taskId: envelope.taskId,
       }
       cases.set(key, reduced)
@@ -443,7 +534,7 @@ export function createRunReducer(): RunReducer {
       round = {
         roundIndex: attemptIndex ?? reduced.rounds.length,
         roundIndexInferred: attemptIndex == null,
-        scores: {},
+        scores: emptyCaseScores(),
         startedAt: envelope.time,
         state: 'running',
         tries: [],
@@ -473,6 +564,8 @@ export function createRunReducer(): RunReducer {
     }
     round.requeuedAt = undefined
     round.requeueDelayMs = undefined
+    // Scores belong to one try: a retry, or the run after a requeue, records its own.
+    round.scores = emptyCaseScores()
     round.state = 'running'
     round.tries.push({ autoRetry, requeueIndex, retryIndex, startedAt: envelope.time, state: 'running' })
   }
@@ -516,7 +609,7 @@ export function createRunReducer(): RunReducer {
       round = {
         roundIndex: attemptIndex ?? reduced.rounds.length,
         roundIndexInferred: attemptIndex == null,
-        scores: {},
+        scores: emptyCaseScores(),
         startedAt: envelope.time,
         state: 'running',
         tries: [{ autoRetry: 0, requeueIndex: 0, retryIndex: 0, startedAt: envelope.time, state: 'running' }],
@@ -713,12 +806,37 @@ export function createRunReducer(): RunReducer {
         startedAt ??= envelope.time
         totalTasks = asNumber(data.totalTasks) ?? totalTasks
         break
+      case 'score.defined': {
+        const parsed = v.safeParse(scoreDefinedDataSchema, envelope.data)
+        if (!parsed.success) {
+          break
+        }
+        scoreDefinitions.set(parsed.output.name, parsed.output)
+        if (envelope.taskId != null) {
+          ensureTask(envelope.taskId, envelope.projectId).scoreDefinitions.set(parsed.output.name, parsed.output)
+        }
+        break
+      }
       case 'score.recorded': {
+        const parsed = v.safeParse(scoreRecordedDataSchema, envelope.data)
         const reduced = ensureCase(envelope)
-        const round = reduced?.rounds.at(-1)
-        const score = asNumber(data.score)
-        if (round != null && score != null && (data.kind === 'exact' || data.kind === 'judge')) {
-          round.scores[data.kind] = score
+        if (!parsed.success || reduced == null) {
+          break
+        }
+        const record = parsed.output
+        const round = reduced.rounds.at(-1)
+        reduced.scoreRecords.push({ record, roundIndex: round?.roundIndex, seq: envelope.seq })
+        if (round == null) {
+          break
+        }
+        // The last record of a name in a try wins, whether it is a value or an unscored record.
+        delete round.scores.values[record.name]
+        delete round.scores.unscored[record.name]
+        if ('value' in record) {
+          round.scores.values[record.name] = record.value
+        }
+        else {
+          round.scores.unscored[record.name] = record.unscored.reason
         }
         break
       }
@@ -768,6 +886,7 @@ export function createRunReducer(): RunReducer {
     metrics,
     projects,
     run: () => ({ endedAt, interruptSignal, lastEvent, startedAt, terminated, totalTasks }),
+    scoreDefinitions,
     seq: () => lastSeq,
     seqGaps: () => seqGaps,
     settlements,
@@ -955,15 +1074,57 @@ export function parseTaskId(taskId: string): { entryId?: string, inferenceExecut
 }
 
 /**
- * Task score with the rule of `describeTask` (`scoreCaseOutcomes` of `vieval/core/scoring`), so the viewer and the
- * run summary agree: every settled round of every case contributes; errored, timed-out, and unfinished rounds stay out
- * of `exact` and lower `coverage`.
+ * Definitions of the named scores that have one, in the order of `names`, each name once.
+ *
+ * Use when:
+ * - a response carries the definitions of the scores it shows (labels, descriptions, combinations, graders)
  */
-export function scoreRounds(rounds: readonly Pick<CaseRound, 'scores' | 'state'>[]): CaseOutcomeScores {
-  // Running and requeued rounds have not ended, so they do not count yet.
-  return scoreCaseOutcomes(rounds.flatMap(round => round.state === 'running' || round.state === 'requeued'
+export function pickScoreDefinitions(definitions: ReadonlyMap<string, ScoreDefinition>, names: Iterable<string>): ScoreDefinition[] {
+  return [...new Set(names)].flatMap((name) => {
+    const definition = definitions.get(name)
+    return definition == null ? [] : [definition]
+  })
+}
+
+/**
+ * Headline of a group of tasks (a run), resolved with `resolveHeadline` of `vieval/core/scoring`.
+ *
+ * Use when:
+ * - a run's headline is shown before, or without, the one `run-summary.json` holds
+ *
+ * Expects:
+ * - task nodes from {@link buildTaskNodes}; tasks of one eval entry (matrix rows, executors) share their entry id, so
+ *   a run whose entries use different primary scores lists one headline per entry
+ *
+ * Returns:
+ * - `null` while no case settled, else the headline and the pooled completion rate
+ */
+export function resolveTaskHeadline(tasks: readonly Pick<TaskNode, 'entryId' | 'id' | 'scoring'>[]): HeadlineResult | null {
+  if (tasks.every(task => task.scoring.completion.total === 0)) {
+    return null
+  }
+  return resolveHeadline(tasks.map(task => ({ ...task.scoring, taskId: task.entryId ?? task.id })))
+}
+
+/**
+ * Scores of a group of rounds with the rule of `describeTask` (`scoreCases` of `vieval/core/scoring`), so the viewer
+ * and the run summary agree.
+ *
+ * Use when:
+ * - a task, a round of a task, or a selection of cases is shown with its scores
+ *
+ * Expects:
+ * - `definitions` of the task the rounds belong to, in declaration order
+ *
+ * Returns:
+ * - one summary per score, plus completion and passed; every settled round counts in the scores, an unfinished round
+ *   counts as errored, and running or requeued rounds are left out because they have not ended
+ * - completion and passed count the last round of each case once, when rounds carry their `caseId`
+ */
+export function scoreRounds(rounds: readonly (Pick<CaseRound, 'scores' | 'state'> & { caseId?: string })[], definitions: readonly ScoreDefinition[] = []): CaseScoring {
+  return scoreCases(rounds.flatMap(round => round.state === 'running' || round.state === 'requeued'
     ? []
-    : [{ scores: round.scores, state: toOutcomeState(round.state) }]))
+    : [{ ...(round.caseId == null ? {} : { caseId: round.caseId }), scores: round.scores.values, state: toOutcomeState(round.state), unscored: round.scores.unscored }]), definitions)
 }
 
 /**
@@ -990,7 +1151,7 @@ export function toCaseNode(reduced: ReducedCase, options: { evidenceLinkCount: n
     name: reduced.name,
     projectId: reduced.projectId,
     rounds,
-    scores: lastRound?.scores ?? {},
+    scores: lastRound?.scores ?? emptyCaseScores(),
     startedAt: firstStartedAt,
     state: lastRound?.state ?? (options.terminated ? 'unfinished' : 'running'),
     taskId: reduced.taskId,
@@ -1027,6 +1188,10 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined
+}
+
+function emptyCaseScores(): CaseScores {
+  return { unscored: {}, values: {} }
 }
 
 /**
@@ -1156,7 +1321,7 @@ function toRound(round: MutableRound, terminated: boolean): CaseRound {
     ...(unfinished || round.requeuedAt == null ? {} : { requeuedAt: round.requeuedAt }),
     roundIndex: round.roundIndex,
     roundIndexInferred: round.roundIndexInferred,
-    scores: { ...round.scores },
+    scores: { unscored: { ...round.scores.unscored }, values: { ...round.scores.values } },
     startedAt: round.startedAt,
     state: unfinished ? 'unfinished' : round.state,
     tries: round.tries.map(entry => ({

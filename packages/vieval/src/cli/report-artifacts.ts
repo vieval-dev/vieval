@@ -1,5 +1,6 @@
-import type { RunEventEnvelope } from '../events'
-import type { CliRunOutput } from './run'
+import type { HeadlineResult } from '../core/scoring'
+import type { RunEventEnvelope, ScoreDefinedData } from '../events'
+import type { CliProjectSummary, CliRunOutput } from './run'
 
 import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
@@ -9,8 +10,9 @@ import { glob } from 'tinyglobby'
 
 import * as v from 'valibot'
 
+import { emptyScoreSummary, resolveHeadline } from '../core/scoring'
 import { caseStarted, caseStartedDataSchema } from '../events'
-import { readReportEvents } from './report-log'
+import { OLDER_REPORT_MESSAGE, readReportEvents } from './report-log'
 import { buildLocalOtlpProjection } from './report-otlp'
 import { buildCaseRecords, buildMetricsSummary, encodeJsonl } from './report-records'
 
@@ -38,21 +40,43 @@ export interface ReportRunArtifact {
  * Content of one run's `run-summary.json`: the invocation output narrowed to the run's one project, plus the run's
  * own id and directory.
  */
-export interface RunSummaryFile extends CliRunOutput {
+export interface RunSummaryFile extends Omit<CliRunOutput, 'projects'> {
+  /**
+   * Headline of the run over every project, resolved with `resolveHeadline` from the projects' task runs.
+   */
+  headline: HeadlineResult
+  /** One summary per project; a run holds one project. */
+  projects: RunSummaryProject[]
   /** Directory of this run's report. */
   reportDirectory: string
   /** Id of this run (one project of the invocation). */
   runId: string
   /**
-   * Version of this file's shape; readers reject versions they do not know.
+   * Version of this file's shape; readers reject other versions.
    *
-   * 1: one project per run, `invocationId` shared by the runs of one invocation.
+   * - 1: one project per run, `invocationId` shared by the runs of one invocation.
+   * - 2: named scores. `result` holds `ScoreSummary` lists; each project has `scoreDefinitions` and `headline`, and
+   *   the run has `scoreDefinitions` and `headline`.
    */
   schemaVersion: typeof RUN_SUMMARY_SCHEMA_VERSION
+  /**
+   * Latest `score.defined` of each score name over every project, in first-announced order; labels {@link headline}.
+   */
+  scoreDefinitions: ScoreDefinedData[]
+}
+
+/**
+ * One project of {@link RunSummaryFile}.
+ */
+export interface RunSummaryProject extends CliProjectSummary {
+  /** Headline of the project (`result.overall.headline`), or `null` when the project has no result. */
+  headline: HeadlineResult | null
+  /** Latest `score.defined` of each score name the project announced. */
+  scoreDefinitions: NonNullable<CliProjectSummary['scoreDefinitions']>
 }
 
 /** Current version of {@link RunSummaryFile}. */
-export const RUN_SUMMARY_SCHEMA_VERSION = 1
+export const RUN_SUMMARY_SCHEMA_VERSION = 2
 
 /**
  * One line of `events.jsonl`.
@@ -99,10 +123,7 @@ export async function readReportArtifacts(reportPath: string): Promise<ReportRun
  */
 export function readReportRunArtifact(summaryFilePath: string): ReportRunArtifact {
   const reportDirectory = resolve(summaryFilePath, '..')
-  const summary = JSON.parse(readFileSync(summaryFilePath, 'utf-8')) as RunSummaryFile
-  if (summary.schemaVersion !== RUN_SUMMARY_SCHEMA_VERSION) {
-    throw new Error(`Unsupported run summary "${summaryFilePath}": schema version ${String(summary.schemaVersion ?? 'none')}, this vieval reads ${RUN_SUMMARY_SCHEMA_VERSION}. Use the vieval version that wrote it.`)
-  }
+  const summary = readRunSummary(summaryFilePath)
   const events = readReportEvents(resolve(reportDirectory, 'events.jsonl'))
 
   return {
@@ -112,6 +133,29 @@ export function readReportRunArtifact(summaryFilePath: string): ReportRunArtifac
     summary,
     summaryFilePath,
   }
+}
+
+/**
+ * Reads one `run-summary.json`.
+ *
+ * Use when:
+ * - a report command needs a run's official numbers, headline, or score definitions
+ *
+ * Returns:
+ * - the parsed summary
+ * - throws {@link OLDER_REPORT_MESSAGE} for a summary of an older schema version, and an unsupported-version error
+ *   for a newer one
+ */
+export function readRunSummary(summaryFilePath: string): RunSummaryFile {
+  const summary = JSON.parse(readFileSync(summaryFilePath, 'utf-8')) as Partial<RunSummaryFile>
+  const schemaVersion = summary.schemaVersion as number | undefined
+  if (schemaVersion == null || schemaVersion < RUN_SUMMARY_SCHEMA_VERSION) {
+    throw new Error(`${OLDER_REPORT_MESSAGE} ("${summaryFilePath}", run summary schema version ${String(schemaVersion ?? 'none')})`)
+  }
+  if (schemaVersion !== RUN_SUMMARY_SCHEMA_VERSION) {
+    throw new Error(`Unsupported run summary "${summaryFilePath}": schema version ${schemaVersion}, this vieval reads ${RUN_SUMMARY_SCHEMA_VERSION}. Use the vieval version that wrote it.`)
+  }
+  return summary as RunSummaryFile
 }
 
 /**
@@ -240,9 +284,17 @@ export async function writeRunReportArtifacts(
   const events = readReportEvents(resolve(reportDirectory, 'events.jsonl'))
   const persistedOutput: RunSummaryFile = {
     ...output,
+    headline: resolveRunHeadline(output.projects),
+    projects: output.projects.map(project => ({
+      ...project,
+      headline: project.result?.overall.headline ?? null,
+      scoreDefinitions: project.scoreDefinitions ?? [],
+    })),
     reportDirectory,
     runId: identity.runId,
     schemaVersion: RUN_SUMMARY_SCHEMA_VERSION,
+    // A later project's definition of a name replaces an earlier one, as viewers keep the latest per name.
+    scoreDefinitions: [...new Map(output.projects.flatMap(project => (project.scoreDefinitions ?? []).map(definition => [definition.name, definition] as const))).values()],
   }
 
   await mkdir(reportDirectory, { recursive: true })
@@ -272,6 +324,22 @@ export async function writeRunReportArtifacts(
   await writeFile(resolve(reportDirectory, 'otlp', 'metrics.json'), `${JSON.stringify(otlp.metrics, null, 2)}\n`, 'utf-8')
 
   return reportDirectory
+}
+
+/**
+ * Resolves the headline of a run over the task runs of every project.
+ *
+ * Expects:
+ * - task runs of all projects; the entry id names a task, as in `aggregateRunResults`
+ */
+function resolveRunHeadline(projects: readonly CliProjectSummary[]): HeadlineResult {
+  return resolveHeadline(projects.flatMap(project => (project.result?.runs ?? []).map(run => ({
+    completion: run.completion ?? emptyScoreSummary('completion'),
+    passed: run.passed ?? emptyScoreSummary('passed'),
+    ...(run.primary == null ? {} : { primary: run.primary }),
+    scores: run.scores,
+    taskId: run.entryId,
+  }))))
 }
 
 /**

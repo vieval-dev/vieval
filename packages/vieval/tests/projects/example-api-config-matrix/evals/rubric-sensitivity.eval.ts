@@ -1,4 +1,5 @@
 import { defineEval, defineTask } from '../../../../src/config'
+import { scoreCases } from '../../../../src/core/scoring'
 import { modelFromEval } from '../../../../src/plugins/chat-models'
 
 export default defineEval({
@@ -26,12 +27,13 @@ export default defineEval({
       const strictPenalty = rubric === 'strict' ? 0.05 : 0
       const hasJudge = judgeModel.id.length > 0
 
-      return {
-        scores: [{
-          kind: 'judge',
-          score: Math.max(0, (hasJudge ? 1 : 0) - strictPenalty),
-        }],
-      }
+      // A custom task runs no cases, so it reports its one measurement as one passed outcome and lets
+      // `scoreCases` build the summaries (`scores`, `primary`, `completion`, `passed`) of `TaskRunOutput`.
+      return scoreCases([{
+        scores: { 'rubric_sensitivity.rubric': Math.max(0, (hasJudge ? 1 : 0) - strictPenalty) },
+        state: 'passed',
+        unscored: {},
+      }])
     },
   }),
 })

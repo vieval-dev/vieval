@@ -68,29 +68,48 @@ describe('createEventTail', () => {
     expect(afterReplace.envelopes.map(item => item.seq)).toEqual([1, 2])
   })
 
-  it('counts invalid lines, detects legacy schema version 1, and tolerates a missing file', async () => {
+  /**
+   * @example
+   * expect(read.unsupportedVersion).toBe(1)
+   */
+  it('counts invalid lines, reports the schema version of an older vieval, and tolerates a missing file', async () => {
     const directory = await createTemporaryDirectory()
     const filePath = join(directory, 'events.jsonl')
     const tail = createEventTail(filePath)
-    expect(await tail.read()).toEqual({ envelopes: [], legacy: false, parseErrors: 0, partialBytes: 0, reset: false })
+    expect(await tail.read()).toEqual({ envelopes: [], parseErrors: 0, partialBytes: 0, reset: false })
 
     await writeFile(filePath, [
       '{not json',
       JSON.stringify({ event: 'x', schemaVersion: 3 }),
+      JSON.stringify({ event: 'x', schemaVersion: 4 }),
       JSON.stringify({ attemptId: 'a', data: {}, event: 'RunStarted', experimentId: 'e', runId: 'r', schemaVersion: 1, timestamp: 't', workspaceId: 'w' }),
       JSON.stringify({ event: 'run.started', schemaVersion: 2 }),
       '',
     ].join('\n'))
     const read = await tail.read()
-    expect(read.legacy).toBe(true)
+    // The first older line names the version; a newer or malformed line is only a parse error.
+    expect(read.unsupportedVersion).toBe(1)
     expect(read.parseErrors).toBe(3)
     expect(read.envelopes).toEqual([])
   })
 })
 
 describe('parseEventLine', () => {
-  it('parses valid version 2 envelopes', () => {
+  /**
+   * @example
+   * expect(parseEventLine(JSON.stringify(envelope))).toEqual(envelope)
+   */
+  it('parses valid version 3 envelopes', () => {
     const envelope = createEnvelopeFactory()('run.started', { totalTasks: 2 })
     expect(parseEventLine(JSON.stringify(envelope))).toEqual(envelope)
+  })
+
+  /**
+   * @example
+   * expect(parseEventLine('{"schemaVersion":2,...}')).toBe(2)
+   */
+  it('returns the schema version of an envelope written by an older vieval', () => {
+    const envelope = { ...createEnvelopeFactory()('score.recorded', { kind: 'exact', score: 1 }), schemaVersion: 2 }
+    expect(parseEventLine(JSON.stringify(envelope))).toBe(2)
   })
 })

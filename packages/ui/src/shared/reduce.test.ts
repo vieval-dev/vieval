@@ -1,7 +1,9 @@
+import type { CaseRound } from './contract'
+
 import { describe, expect, it } from 'vitest'
 
 import { createEnvelopeFactory } from '../../test/helpers'
-import { axisValues, buildTaskNodes, createRunReducer, currentPosition, estimateProgress, parseTaskId, scoreRounds } from './reduce'
+import { axisValues, buildTaskNodes, countedScores, createRunReducer, currentPosition, estimateProgress, parseTaskId, resolveTaskHeadline, scoreRounds } from './reduce'
 
 const TASK = 'evals%2Fdemo::default::run=model%3Dm%26repeat%3D1::eval=default'
 const scope = (caseId?: string) => ({ caseId, projectId: 'demo', taskId: TASK })
@@ -16,7 +18,7 @@ describe('createRunReducer', () => {
     reducer.apply(envelope('task.started', {}, scope()))
     reducer.apply(envelope('case.started', { index: 0, input: { id: 'a' }, name: 'chrome/a', total: 2 }, scope('0:chrome%2Fa')))
     reducer.apply(envelope('metric.recorded', { name: 'osworld.pod', value: 'pod-a' }, scope('0:chrome%2Fa')))
-    reducer.apply(envelope('score.recorded', { kind: 'exact', score: 0.5 }, scope('0:chrome%2Fa')))
+    reducer.apply(envelope('score.recorded', { name: 'osworld.success', value: 0.5 }, scope('0:chrome%2Fa')))
     reducer.apply(envelope('case.ended', { index: 0, name: 'chrome/a', state: 'passed', total: 2 }, scope('0:chrome%2Fa')))
 
     const [task] = buildTaskNodes(reducer, () => 0)
@@ -26,9 +28,10 @@ describe('createRunReducer', () => {
     expect(task.matrix).toEqual({ eval: {}, evalRowId: 'default', run: { model: 'm', repeat: '1' }, runRowId: 'model=m&repeat=1' })
     expect(task.cases).toHaveLength(1)
     expect(task.cases[0].state).toBe('passed')
-    expect(task.cases[0].scores).toEqual({ exact: 0.5 })
+    expect(task.cases[0].scores).toEqual({ unscored: {}, values: { 'osworld.success': 0.5 } })
     expect(task.cases[0].metricCount).toBe(1)
-    expect(task.scores.exact).toBe(0.5)
+    expect(task.scoring.primary).toBe('osworld.success')
+    expect(task.scoring.scores).toEqual([{ mean: 0.5, n: 1, name: 'osworld.success', sum: 0.5, total: 1, unscored: {} }])
     expect([...reducer.projects.keys()]).toEqual(['demo'])
   })
 
@@ -47,7 +50,8 @@ describe('createRunReducer', () => {
     let [task] = buildTaskNodes(reducer, () => 0)
     expect(task.cases[0].state).toBe('requeued')
     expect(task.caseCounts).toMatchObject({ errored: 0, requeued: 1 })
-    expect(task.scores.exact).toBeNull()
+    // A requeued round has not ended, so it does not count toward completion yet.
+    expect(task.scoring.completion.total).toBe(0)
     expect(currentPosition(reducer, 0).waiting).toEqual([expect.objectContaining({ delayMs: 30_000, name: 'a', requeue: 2, requeueIndex: 1 })])
     expect(estimateProgress(reducer, 0).cases.completed).toBe(0)
 
@@ -62,7 +66,8 @@ describe('createRunReducer', () => {
     expect(round.tries[0]!.errorMessage).toBe('Remote sent 429 response')
     expect(round.errorMessage).toBeUndefined()
     expect(task.cases[0].state).toBe('passed')
-    expect(task.scores.exact).toBe(1)
+    expect(task.scoring.passed.mean).toBe(1)
+    expect(task.scoring.completion.mean).toBe(1)
     expect(estimateProgress(reducer, 0).cases.completed).toBe(1)
     expect(currentPosition(reducer, 0).waiting).toEqual([])
   })
@@ -101,7 +106,7 @@ describe('createRunReducer', () => {
     expect(task.cases[0].errorName).toBe('APICallError')
     expect(task.cases[0].rounds[0]?.errorName).toBe('APICallError')
     expect(task.caseCounts.errored).toBe(1)
-    expect(task.scores.exact).toBeNull()
+    expect(task.scoring.completion).toMatchObject({ mean: 0, n: 1, total: 1, unscored: { errored: 1 } })
   })
 
   /**
@@ -144,8 +149,8 @@ describe('createRunReducer', () => {
     expect(attempt.state).toBe('passed')
     expect(retry.rounds[0].tries.map(entry => [entry.retryIndex, entry.state])).toEqual([[0, 'retried'], [1, 'passed']])
     expect(retry.rounds[1].tries.map(entry => [entry.retryIndex, entry.state])).toEqual([[0, 'passed']])
-    // describeTask averages every round: failed (0) + passed (1) + passed (1) + passed (1).
-    expect(task.scores.exact).toBe(0.75)
+    // The passed share counts each case once by its last round: both cases end passed.
+    expect(task.scoring.passed).toMatchObject({ mean: 1, n: 2 })
     expect(estimateProgress(reducer, Date.UTC(2026, 0, 1, 0, 1)).lowerBound).toBe(true)
   })
 
@@ -355,33 +360,175 @@ describe('axisValues', () => {
   })
 })
 
-describe('scoreRounds / parseTaskId', () => {
-  it('follows scoreCaseOutcomes: failed → 0, passed without score → 1, judge averaged separately', () => {
-    expect(scoreRounds([
-      { scores: {}, state: 'failed' },
-      { scores: {}, state: 'passed' },
-      { scores: { exact: 0.5, judge: 0.8 }, state: 'passed' },
-      { scores: {}, state: 'running' },
-    ])).toEqual({ coverage: { measured: 3, total: 3 }, exact: 0.5, hybrid: 0.65, judge: 0.8, strictExact: 0.5 })
+describe('named scores', () => {
+  const CORRECT = { description: { en: 'Matches the reference.' }, label: { 'en': 'Correct', 'zh-Hans': '正确' }, name: 'formula.correct' }
+  const PASS = { combine: { inputs: [{ name: 'formula.correct' }], kind: 'all' as const }, name: 'formula.pass', primary: true }
+
+  /**
+   * @example
+   * expect(reducer.scoreDefinitions.get('formula.correct')?.label).toEqual({ en: 'Correct answer' })
+   */
+  it('keeps the latest definition per name, in the order the task first announced them', () => {
+    const envelope = createEnvelopeFactory()
+    const reducer = createRunReducer()
+    reducer.apply(envelope('score.defined', CORRECT, scope()))
+    reducer.apply(envelope('score.defined', PASS, scope()))
+    reducer.apply(envelope('score.defined', { ...CORRECT, label: { en: 'Correct answer' } }, scope()))
+    reducer.apply(envelope('score.defined', { name: 42 }, scope()))
+
+    expect(reducer.scoreDefinitions.get('formula.correct')?.label).toEqual({ en: 'Correct answer' })
+    expect([...reducer.tasks.get(TASK)!.scoreDefinitions.keys()]).toEqual(['formula.correct', 'formula.pass'])
+    const [task] = buildTaskNodes(reducer, () => 0)
+    // A declared score is known, with its primary flag, before any case records it.
+    expect(task.scoring.primary).toBe('formula.pass')
+    expect(task.scoring.scores.map(score => score.name)).toEqual(['formula.correct', 'formula.pass'])
   })
 
   /**
    * @example
-   * errored and unfinished rounds stay out of exact and lower the coverage, as in the run summary of vieval.
+   * expect(round.scores).toEqual({ unscored: { 'formula.natural': 'grader_failed' }, values: { 'formula.correct': 1 } })
    */
-  it('leaves rounds without a result out of exact and counts them in coverage', () => {
-    const scores = scoreRounds([
-      { scores: {}, state: 'passed' },
-      { scores: {}, state: 'errored' },
-      { scores: {}, state: 'timeout' },
-      { scores: {}, state: 'unfinished' },
-    ])
+  it('keeps the last record per name of the last try of a round, and every record for the case detail', () => {
+    const envelope = createEnvelopeFactory()
+    const reducer = createRunReducer()
+    const caseScope = scope('0:a')
+    reducer.apply(envelope('case.started', { autoRetry: 1, index: 0, name: 'a', retryIndex: 0, total: 1 }, caseScope))
+    reducer.apply(envelope('score.recorded', { name: 'formula.correct', value: 0 }, caseScope))
+    reducer.apply(envelope('case.started', { autoRetry: 1, index: 0, name: 'a', retryIndex: 1, total: 1 }, caseScope))
+    reducer.apply(envelope('score.recorded', { name: 'formula.natural', value: 0.5 }, caseScope))
+    reducer.apply(envelope('score.recorded', { name: 'formula.natural', rationale: 'no verdict', unscored: { reason: 'grader_failed' } }, caseScope))
+    reducer.apply(envelope('score.recorded', { grader: { id: 'listener', kind: 'model', model: 'm' }, name: 'formula.correct', value: 1 }, caseScope))
+    reducer.apply(envelope('score.recorded', { name: 'formula.broken', value: 'high' }, caseScope))
+    reducer.apply(envelope('case.ended', { index: 0, name: 'a', state: 'passed', total: 1 }, caseScope))
 
-    expect(scores.exact).toBe(1)
-    expect(scores.coverage).toEqual({ measured: 1, total: 4 })
-    expect(scores.strictExact).toBe(0.25)
+    const [task] = buildTaskNodes(reducer, () => 0)
+    const [round] = task.cases[0].rounds
+    // The failed try's value is gone: the round's scores are those of its last try.
+    expect(round.scores).toEqual({ unscored: { 'formula.natural': 'grader_failed' }, values: { 'formula.correct': 1 } })
+    expect(task.cases[0].scores).toEqual(round.scores)
+    const records = reducer.cases.get(`${TASK}\u00000:a`)!.scoreRecords
+    expect(records.map(entry => [entry.seq, entry.roundIndex, entry.record.name])).toEqual([
+      [2, 0, 'formula.correct'],
+      [4, 0, 'formula.natural'],
+      [5, 0, 'formula.natural'],
+      [6, 0, 'formula.correct'],
+    ])
+    expect(records[2].record).toEqual({ name: 'formula.natural', rationale: 'no verdict', unscored: { reason: 'grader_failed' } })
+    expect(records[3].record).toMatchObject({ grader: { id: 'listener', kind: 'model', model: 'm' } })
+    expect(task.scoring.scores).toEqual([
+      { mean: 1, n: 1, name: 'formula.correct', sum: 1, total: 1, unscored: {} },
+      { mean: null, n: 0, name: 'formula.natural', sum: 0, total: 1, unscored: { grader_failed: 1 } },
+    ])
   })
 
+  /**
+   * @example
+   * expect(scoring.scores[0]).toMatchObject({ mean: 0.25, n: 4, total: 6 })
+   */
+  it('counts rounds with the rule of scoreCases: failed 0, errored excluded, unfinished as errored, running left out', () => {
+    const rounds: Pick<CaseRound, 'scores' | 'state'>[] = [
+      { scores: { unscored: {}, values: { s: 1 } }, state: 'passed' },
+      { scores: { unscored: {}, values: { s: 1 } }, state: 'failed' },
+      { scores: { unscored: {}, values: {} }, state: 'passed' },
+      { scores: { unscored: { s: 'refusal' }, values: {} }, state: 'passed' },
+      { scores: { unscored: {}, values: { s: 1 } }, state: 'errored' },
+      { scores: { unscored: {}, values: {} }, state: 'unfinished' },
+      { scores: { unscored: {}, values: { s: 1 } }, state: 'running' },
+      { scores: { unscored: {}, values: { s: 1 } }, state: 'skipped' },
+    ]
+    const scoring = scoreRounds(rounds)
+    // passed 1, failed 0; the passed round without a value and the unscored one do not count.
+    expect(scoring.scores).toEqual([{ mean: 0.5, n: 2, name: 's', sum: 1, total: 6, unscored: { refusal: 1 } }])
+    expect(scoring.completion).toMatchObject({ mean: 4 / 6, n: 6, total: 6, unscored: { errored: 2 } })
+    expect(scoring.passed.mean).toBe(3 / 6)
+
+    // `errors: 'zero'` counts the errored and the unfinished round as 0.
+    const zero = scoreRounds(rounds, [{ errors: 'zero', name: 's' }])
+    expect(zero.scores[0]).toMatchObject({ mean: 0.25, n: 4, sum: 1 })
+  })
+
+  /**
+   * @example
+   * expect(countedScores({ scores, state: 'failed' })).toEqual({ s: 0 })
+   */
+  it('returns the value one round counts with', () => {
+    const scores = { unscored: { u: 'refusal' }, values: { s: 0.5 } }
+    expect(countedScores({ scores, state: 'passed' })).toEqual({ s: 0.5 })
+    expect(countedScores({ scores, state: 'failed' })).toEqual({ s: 0, u: 0 })
+    expect(countedScores({ scores, state: 'errored' })).toEqual({})
+    expect(countedScores({ scores, state: 'errored' }, [{ errors: 'zero', name: 's' }])).toEqual({ s: 0 })
+  })
+
+  /**
+   * @example
+   * expect(resolveTaskHeadline(tasks)?.headline.kind).toBe('per-task')
+   */
+  it('resolves the run headline over the tasks, by eval entry', () => {
+    const envelope = createEnvelopeFactory()
+    const reducer = createRunReducer()
+    const other = 'evals%2Fother::default::run=model%3Dm::eval=default'
+    const otherScope = (caseId?: string) => ({ caseId, projectId: 'demo', taskId: other })
+    reducer.apply(envelope('case.started', { index: 0, name: 'a', total: 1 }, scope('0:a')))
+    expect(resolveTaskHeadline(buildTaskNodes(reducer, () => 0))).toBeNull()
+
+    reducer.apply(envelope('score.recorded', { name: 'demo.score', value: 1 }, scope('0:a')))
+    reducer.apply(envelope('case.ended', { index: 0, name: 'a', state: 'passed', total: 1 }, scope('0:a')))
+    expect(resolveTaskHeadline(buildTaskNodes(reducer, () => 0))?.headline).toEqual({ kind: 'score', score: { mean: 1, n: 1, name: 'demo.score', sum: 1, total: 1, unscored: {} } })
+
+    reducer.apply(envelope('case.started', { index: 0, name: 'b', total: 1 }, otherScope('0:b')))
+    reducer.apply(envelope('score.recorded', { name: 'other.score', value: 0 }, otherScope('0:b')))
+    reducer.apply(envelope('case.ended', { index: 0, name: 'b', state: 'passed', total: 1 }, otherScope('0:b')))
+    const headline = resolveTaskHeadline(buildTaskNodes(reducer, () => 0))
+    expect(headline?.completion).toMatchObject({ mean: 1, n: 2 })
+    expect(headline?.headline.kind === 'per-task' ? headline.headline.tasks.map(entry => [entry.taskId, entry.score.name]) : []).toEqual([['evals/demo', 'demo.score'], ['evals/other', 'other.score']])
+  })
+
+  /**
+   * @example
+   * expect(resolveTaskHeadline(tasks)?.headline).toMatchObject({ kind: 'passed-cases' })
+   */
+  it('falls back to the passed share when no task records a score', () => {
+    const envelope = createEnvelopeFactory()
+    const reducer = createRunReducer()
+    reducer.apply(envelope('case.started', { index: 0, name: 'a', total: 2 }, scope('0:a')))
+    reducer.apply(envelope('case.ended', { index: 0, name: 'a', state: 'passed', total: 2 }, scope('0:a')))
+    reducer.apply(envelope('case.started', { index: 1, name: 'b', total: 2 }, scope('1:b')))
+    reducer.apply(envelope('case.ended', { index: 1, name: 'b', state: 'failed', total: 2 }, scope('1:b')))
+    expect(resolveTaskHeadline(buildTaskNodes(reducer, () => 0))?.headline).toEqual({ kind: 'passed-cases', score: { mean: 0.5, n: 2, name: 'passed', sum: 1, total: 2, unscored: {} } })
+  })
+})
+
+describe('score graders', () => {
+  /**
+   * @example
+   * definition grader judge-a; one record overrides with judge-b; a derived record is skipped ->
+   * task.scoreGraders['formula.natural'] holds judge-a and judge-b once each.
+   */
+  it('lists each distinct grader of a score: the record\'s own, else the definition\'s', () => {
+    const envelope = createEnvelopeFactory()
+    const reducer = createRunReducer()
+    reducer.apply(envelope('score.defined', { grader: { id: 'judge', kind: 'model', model: 'judge-a' }, name: 'formula.natural' }, scope()))
+    reducer.apply(envelope('score.defined', { combine: { inputs: [{ name: 'formula.natural' }], kind: 'all' }, name: 'formula.pass' }, scope()))
+    for (const [index, grader] of [undefined, { id: 'judge', kind: 'model', model: 'judge-b' }, undefined].entries()) {
+      const caseScope = scope(`${index}:c${index}`)
+      reducer.apply(envelope('case.started', { index, name: `c${index}`, total: 3 }, caseScope))
+      reducer.apply(envelope('score.recorded', { ...(grader == null ? {} : { grader }), name: 'formula.natural', value: 1 }, caseScope))
+      reducer.apply(envelope('score.recorded', { derived: true, name: 'formula.pass', value: 1 }, caseScope))
+      reducer.apply(envelope('case.ended', { index, name: `c${index}`, state: 'passed', total: 3 }, caseScope))
+    }
+
+    const [task] = buildTaskNodes(reducer, () => 0)
+    expect(task.scoreGraders).toEqual({
+      'formula.natural': [{ id: 'judge', kind: 'model', model: 'judge-a' }, { id: 'judge', kind: 'model', model: 'judge-b' }],
+    })
+  })
+})
+
+describe('parseTaskId', () => {
+  /**
+   * @example
+   * expect(parseTaskId('custom')).toEqual({})
+   */
   it('returns no matrix for ids that are not scheduled task ids', () => {
     expect(parseTaskId('custom')).toEqual({})
   })

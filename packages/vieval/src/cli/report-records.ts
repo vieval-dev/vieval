@@ -1,10 +1,17 @@
-import type { CaseOutcomeState } from '../core/scoring'
-import type { CaseEndedData, CaseStartedData, RunEventEnvelope } from '../events'
+import type { CaseOutcomeState, ScoreSummary } from '../core/scoring'
+import type { CaseEndedData, CaseStartedData, Grader, RunEventEnvelope, ScoreDefinedData } from '../events'
+
+import { readFileSync } from 'node:fs'
+
+import { errorMessageFrom } from '@moeru/std'
 
 import * as v from 'valibot'
 
-import { isMeasuredState } from '../core/scoring'
-import { caseEnded, caseEndedDataSchema, caseStarted, caseStartedDataSchema, metricRecorded, metricRecordedDataSchema, scoreRecorded, scoreRecordedDataSchema } from '../events'
+import { caseEnded, caseEndedDataSchema, caseStarted, caseStartedDataSchema, metricRecorded, metricRecordedDataSchema, scoreDefined, scoreDefinedDataSchema, scoreRecorded, scoreRecordedDataSchema } from '../events'
+import { OLDER_REPORT_MESSAGE } from './report-log'
+
+/** Current version of {@link CaseRecord}; `cases.jsonl` readers reject other versions. */
+export const CASE_RECORD_SCHEMA_VERSION = 2
 
 /** Arguments for building normalized case records from report events. */
 export interface BuildCaseRecordsArgs {
@@ -28,12 +35,14 @@ export interface CaseAttemptRecord {
   errorMessage?: string
   /** Retries within this attempt. */
   retryCount: number
-  /** Score values of this attempt keyed by score kind. */
+  /** Counted score values of this attempt by score name, with the same rule as {@link CaseRecord.scores}. */
   scores: Record<string, number>
   /** Timestamp of the attempt's first `case.started`. */
   startedAt: string
   /** Terminal state of this attempt. */
   state: CaseRecordState
+  /** Scores this attempt recorded as unscored, by score name, with the reason. */
+  unscored: Record<string, string>
 }
 
 /** Scalar and array metric values persisted in case records. */
@@ -95,8 +104,17 @@ export interface CaseRecord {
   /** Run identity attached to the run. */
   runId: string
   /** Case record schema version. */
-  schemaVersion: 1
-  /** Score values keyed by score kind. */
+  schemaVersion: typeof CASE_RECORD_SCHEMA_VERSION
+  /** What each score record of the final outcome carried (rationale, grader, metadata), by score name. */
+  scoreDetails: Record<string, CaseScoreDetail>
+  /**
+   * Counted score values by score name, with the rule of `scoreCases`, so `cases.jsonl` and `run-summary.json`
+   * agree:
+   * - `passed`: the recorded value; a score the case did not record, or recorded as unscored, is absent
+   * - `failed`: 0 for every score of the task, whatever the case recorded
+   * - `errored` and `timeout`: 0 for scores declared `errors: 'zero'`, otherwise absent
+   * - `skipped`: no score
+   */
   scores: Record<string, number>
   /** ISO-ish case start timestamp, or the best event timestamp available. */
   startedAt: string
@@ -104,6 +122,8 @@ export interface CaseRecord {
   state: CaseRecordState
   /** Scheduled task id that owns the case. */
   taskId: string
+  /** Scores the final outcome recorded as unscored, by score name, with the reason. They never count. */
+  unscored: Record<string, string>
   /** Workspace identity attached to the run. */
   workspaceId: string
 }
@@ -111,31 +131,37 @@ export interface CaseRecord {
 /** Terminal state stored for one normalized case record. */
 export type CaseRecordState = CaseOutcomeState
 
-/** Generic metrics summary for overall scores and requested group facets. */
-export interface MetricsSummary {
-  /** Score aggregates keyed by `<groupKey>=<groupValue>`. */
-  groups: Record<string, ScoreSummary>
-  /** Overall score aggregates keyed by score kind. */
-  overall: ScoreSummary
+/**
+ * What one `score.recorded` of a case carried besides its value.
+ */
+export interface CaseScoreDetail {
+  /** Whether the runtime derived the value from other scores. */
+  derived?: boolean
+  /** What produced the value, when the record named it. */
+  grader?: Grader
+  /** Other details of the value. */
+  metadata?: Record<string, unknown>
+  /** Why the score has its value. */
+  rationale?: string
 }
 
-/** Generic score summary keyed by score kind. */
-export type ScoreSummary = Record<string, ScoreSummaryBucket>
+/** Content of `metrics-summary.json`: score summaries overall and per requested group facet. */
+export interface MetricsSummary {
+  /** Score summaries by score name, per group keyed by `<groupKey>=<groupValue>`. */
+  groups: Record<string, Record<string, ScoreSummary>>
+  /** Score summaries by score name over every record. */
+  overall: Record<string, ScoreSummary>
+}
 
-/** Score aggregate for one score kind. */
-export interface ScoreSummaryBucket {
-  /** Average score for this kind, or `0` when count is zero. */
-  average: number
-  /** Number of records that provided this score kind. */
-  count: number
-  /** Sum of all score values for this kind. */
-  sum: number
+/** One auto attempt as recorded, before the task's score names are known. */
+interface AttemptDraft extends Omit<CaseAttemptRecord, 'scores'> {
+  recorded: Record<string, number>
 }
 
 interface CaseDraft {
   attemptId: string
   attemptIndex?: number
-  attempts?: CaseAttemptRecord[]
+  attempts?: AttemptDraft[]
   attemptStartedAt?: string
   autoAttempt?: number
   caseId: string
@@ -149,11 +175,14 @@ interface CaseDraft {
   requeueCount: number
   retryCount: number
   runId: string
+  scoreDetails: Record<string, CaseScoreDetail>
+  /** Values the final outcome recorded (or the runtime derived), before the state rule counts them. */
   scores: Record<string, number>
   startCount: number
   startedAt?: string
   state?: CaseRecordState
   taskId: string
+  unscored: Record<string, string>
   workspaceId: string
 }
 
@@ -165,18 +194,30 @@ interface CaseDraft {
  * - report commands need one final record per observed case outcome
  *
  * Expects:
- * - events are schema 2 envelopes ordered by `seq`
- * - case events carry `taskId` and `caseId`; payloads that fail their event schema are skipped
+ * - events are schema 3 envelopes ordered by `seq`
+ * - case events carry `taskId` and `caseId`, `score.defined` carries `taskId`; payloads that fail their event schema
+ *   are skipped
  *
  * Returns:
- * - records for cases that emitted an end lifecycle event
+ * - records for cases that emitted an end lifecycle event, with scores counted by the state rule of `scoreCases`
+ *   over the task's scores: its `score.defined` names plus every name a case of the task recorded
  */
 export function buildCaseRecords(args: BuildCaseRecordsArgs): CaseRecord[] {
   const drafts = new Map<string, CaseDraft>()
   const completedKeys: string[] = []
+  const definitionsByTask = new Map<string, Map<string, ScoreDefinedData>>()
 
   for (const event of args.events) {
     const { caseId, taskId } = event
+    if (taskId != null && event.event === scoreDefined.id) {
+      const data = parseData(scoreDefinedDataSchema, event)
+      if (data != null) {
+        const definitions = definitionsByTask.get(taskId) ?? new Map<string, ScoreDefinedData>()
+        definitions.set(data.name, data)
+        definitionsByTask.set(taskId, definitions)
+      }
+      continue
+    }
     if (caseId == null || taskId == null) {
       continue
     }
@@ -196,7 +237,7 @@ export function buildCaseRecords(args: BuildCaseRecordsArgs): CaseRecord[] {
     else if (event.event === scoreRecorded.id) {
       const data = parseData(scoreRecordedDataSchema, event)
       if (data != null) {
-        getOrCreateDraft(drafts, event, args, caseId).scores[data.kind] = data.score
+        applyScoreRecord(getOrCreateDraft(drafts, event, args, caseId), data)
       }
     }
     else if (event.event === caseEnded.id) {
@@ -211,33 +252,44 @@ export function buildCaseRecords(args: BuildCaseRecordsArgs): CaseRecord[] {
     }
   }
 
-  return completedKeys
+  const completed = completedKeys
     .map(key => drafts.get(key))
     .filter((draft): draft is CaseDraft => draft != null && draft.endedAt != null)
-    .map(toCaseRecord)
+
+  // A failed case scores 0 on every score of its task, so the task's names are collected before any case is counted.
+  const taskScoreNames = new Map<string, Set<string>>()
+  for (const draft of completed) {
+    const names = taskScoreNames.get(draft.taskId) ?? new Set(definitionsByTask.get(draft.taskId)?.keys())
+    for (const outcome of [draft, ...(draft.attempts ?? []).map(attempt => ({ scores: attempt.recorded, unscored: attempt.unscored }))]) {
+      Object.keys(outcome.scores).forEach(name => names.add(name))
+      Object.keys(outcome.unscored).forEach(name => names.add(name))
+    }
+    taskScoreNames.set(draft.taskId, names)
+  }
+
+  return completed.map(draft => toCaseRecord(draft, {
+    definitions: definitionsByTask.get(draft.taskId) ?? new Map(),
+    names: taskScoreNames.get(draft.taskId) ?? new Set(),
+  }))
 }
 
 /**
- * Builds generic score summaries overall and grouped by arbitrary keys.
+ * Builds score summaries by score name, overall and grouped by arbitrary keys.
  *
  * Use when:
- * - report artifacts need benchmark-neutral aggregate score views
+ * - report artifacts need benchmark-neutral aggregate score views (`metrics-summary.json`)
  * - callers want to group by metrics such as `benchmark.category` or direct record fields such as `taskId`
  *
  * Expects:
  * - `groupByKeys` are stable metric names or direct `CaseRecord` field names
- * - record score values are normalized numeric scores
+ * - records built by {@link buildCaseRecords}
  *
  * Returns:
- * - overall score buckets and group buckets keyed by `<key>=<value>`
+ * - overall summaries and group summaries keyed by `<key>=<value>`, each from {@link summarizeRecordScores}
  */
 export function buildMetricsSummary(records: readonly CaseRecord[], groupByKeys: readonly string[]): MetricsSummary {
-  const overall: ScoreSummary = {}
-  const groups: Record<string, ScoreSummary> = {}
-
+  const groups = new Map<string, CaseRecord[]>()
   for (const record of records) {
-    addRecordScores(overall, record)
-
     for (const groupByKey of groupByKeys) {
       const groupValue = getGroupValue(record, groupByKey)
       if (!groupValue.exists) {
@@ -245,14 +297,13 @@ export function buildMetricsSummary(records: readonly CaseRecord[], groupByKeys:
       }
 
       const groupKey = `${groupByKey}=${String(groupValue.value)}`
-      groups[groupKey] ??= {}
-      addRecordScores(groups[groupKey], record)
+      groups.set(groupKey, [...(groups.get(groupKey) ?? []), record])
     }
   }
 
   return {
-    groups: finalizeSummaryGroups(groups),
-    overall: finalizeScoreSummary(overall),
+    groups: Object.fromEntries([...groups].map(([groupKey, groupRecords]) => [groupKey, summarizeRecordScores(groupRecords)])),
+    overall: summarizeRecordScores(records),
   }
 }
 
@@ -277,16 +328,89 @@ export function encodeJsonl(records: readonly CaseRecord[]): string {
   return `${records.map(record => JSON.stringify(record)).join('\n')}\n`
 }
 
-function addRecordScores(summary: ScoreSummary, record: CaseRecord): void {
-  for (const [kind, score] of Object.entries(record.scores)) {
-    if (!Number.isFinite(score)) {
-      continue
+/**
+ * Reads the case records of one `cases.jsonl` file.
+ *
+ * Use when:
+ * - a report command or `--resume` reads the cases of a finished run
+ *
+ * Expects:
+ * - one {@link CaseRecord} JSON object per non-empty line
+ *
+ * Returns:
+ * - records in file order
+ * - throws {@link OLDER_REPORT_MESSAGE} for a record of an older schema version, and a parse error with the line
+ *   number for a line that is not JSON
+ */
+export function readCaseRecordFile(filePath: string): CaseRecord[] {
+  return readFileSync(filePath, 'utf-8').split('\n').flatMap((line, index) => {
+    if (line.trim() === '') {
+      return []
     }
 
-    summary[kind] ??= { average: 0, count: 0, sum: 0 }
-    summary[kind].count += 1
-    summary[kind].sum += score
+    let record: CaseRecord
+    try {
+      record = JSON.parse(line) as CaseRecord
+    }
+    catch (error) {
+      throw new Error(`Invalid cases.jsonl line ${index + 1} in "${filePath}": ${errorMessageFrom(error) ?? 'Unknown JSON parse failure.'}`)
+    }
+    if (record.schemaVersion !== CASE_RECORD_SCHEMA_VERSION) {
+      throw new Error(`${OLDER_REPORT_MESSAGE} ("${filePath}" line ${index + 1}, case record schema version ${String(record.schemaVersion ?? 'none')})`)
+    }
+    return [record]
+  })
+}
+
+/**
+ * Pools the counted scores of case records into one summary per score name.
+ *
+ * Use when:
+ * - `metrics-summary.json` or `vieval report cases --group-by` summarizes a group of records
+ *
+ * Expects:
+ * - records built by {@link buildCaseRecords}, so `scores` already holds counted values
+ *
+ * Returns:
+ * - per score name, sorted by name: `sum` and `n` over the records that count it, `total` over the records of
+ *   tasks that have the score and were not skipped, and the unscored reasons of passed records; the same numbers
+ *   `scoreCases` gives for the cases of the records
+ */
+export function summarizeRecordScores(records: readonly CaseRecord[]): Record<string, ScoreSummary> {
+  // A record of a task without the score must not add to its `total`, so names are resolved per task.
+  const namesByTask = new Map<string, Set<string>>()
+  for (const record of records) {
+    const names = namesByTask.get(record.taskId) ?? new Set<string>()
+    Object.keys(record.scores).forEach(name => names.add(name))
+    Object.keys(record.unscored).forEach(name => names.add(name))
+    namesByTask.set(record.taskId, names)
   }
+
+  const summaries = new Map<string, ScoreSummary>()
+  for (const record of records) {
+    if (record.state === 'skipped') {
+      continue
+    }
+    for (const name of namesByTask.get(record.taskId) ?? []) {
+      const summary = summaries.get(name) ?? { mean: null, n: 0, name, sum: 0, total: 0, unscored: {} }
+      summaries.set(name, summary)
+      summary.total += 1
+      const value = record.scores[name]
+      if (value != null && Number.isFinite(value)) {
+        summary.n += 1
+        summary.sum += value
+        continue
+      }
+      const reason = record.state === 'passed' ? record.unscored[name] : undefined
+      if (reason != null) {
+        summary.unscored[reason] = (summary.unscored[reason] ?? 0) + 1
+      }
+    }
+  }
+
+  return Object.fromEntries([...summaries.values()]
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map(summary => [summary.name, { ...summary, mean: summary.n === 0 ? null : summary.sum / summary.n }]))
 }
 
 function applyCaseEnd(draft: CaseDraft, event: RunEventEnvelope, data: CaseEndedData): void {
@@ -294,11 +418,9 @@ function applyCaseEnd(draft: CaseDraft, event: RunEventEnvelope, data: CaseEnded
   draft.endedAt = event.time
   draft.output = data.output ?? draft.output
   draft.state = data.state
-  // Only a case with a result gets a default exact score. An errored or timed-out case measured nothing, so it has
-  // no exact score and report means leave it out, as the task score does.
-  if (isMeasuredState(draft.state)) {
-    draft.scores.exact ??= draft.state === 'passed' ? 1 : 0
-  }
+  // The comment here previously described the default `exact` score of a case with a result. It was removed with the
+  // `exact` score itself: a case that records no score has no score, and the state rule counts values in
+  // `toCaseRecord`, once the task's score names are known.
 
   if (data.attemptIndex != null) {
     const startedAt = draft.attemptStartedAt ?? event.time
@@ -308,10 +430,11 @@ function applyCaseEnd(draft: CaseDraft, event: RunEventEnvelope, data: CaseEnded
       durationMs: calculateDurationMs(startedAt, event.time),
       endedAt: event.time,
       ...(data.errorMessage == null ? {} : { errorMessage: data.errorMessage }),
+      recorded: { ...draft.scores },
       retryCount: draft.retryCount,
-      scores: { ...draft.scores },
       startedAt,
       state: data.state,
+      unscored: { ...draft.unscored },
     })
   }
 }
@@ -323,8 +446,10 @@ function applyCaseStart(draft: CaseDraft, event: RunEventEnvelope, data: CaseSta
   draft.endedAt = undefined
   draft.metrics = {}
   draft.output = undefined
+  draft.scoreDetails = {}
   draft.scores = {}
   draft.state = undefined
+  draft.unscored = {}
   draft.input = data.input
   draft.requeueCount = Math.max(draft.requeueCount, data.requeueIndex ?? 0)
 
@@ -355,6 +480,30 @@ function applyCaseStart(draft: CaseDraft, event: RunEventEnvelope, data: CaseSta
  * - `1250`
  * - `0`
  */
+function applyScoreRecord(draft: CaseDraft, data: v.InferOutput<typeof scoreRecordedDataSchema>): void {
+  // A value and an unscored record of one name replace each other; the last one of the try wins.
+  if ('value' in data) {
+    draft.scores[data.name] = data.value
+    delete draft.unscored[data.name]
+  }
+  else {
+    draft.unscored[data.name] = data.unscored.reason
+    delete draft.scores[data.name]
+  }
+
+  const detail: CaseScoreDetail = {
+    ...(data.derived == null ? {} : { derived: data.derived }),
+    ...(data.grader == null ? {} : { grader: data.grader }),
+    ...(data.metadata == null ? {} : { metadata: data.metadata }),
+    ...(data.rationale == null ? {} : { rationale: data.rationale }),
+  }
+  if (Object.keys(detail).length === 0) {
+    delete draft.scoreDetails[data.name]
+    return
+  }
+  draft.scoreDetails[data.name] = detail
+}
+
 function calculateDurationMs(startedAt: string, endedAt: string): number {
   const started = Date.parse(startedAt)
   const ended = Date.parse(endedAt)
@@ -365,27 +514,35 @@ function calculateDurationMs(startedAt: string, endedAt: string): number {
   return Math.max(0, ended - started)
 }
 
+/**
+ * Counts the recorded values of one case outcome with the state rule of `scoreCases`.
+ *
+ * NOTICE:
+ * `scoreCases` (`core/scoring/index.ts`) returns summaries, not per-case values, so this repeats its per-case rule.
+ * Both must change together; `report-records.test.ts` checks that pooled records equal `scoreCases` summaries.
+ */
+function countScores(
+  outcome: { scores: Record<string, number>, state: CaseRecordState },
+  task: { definitions: ReadonlyMap<string, ScoreDefinedData>, names: ReadonlySet<string> },
+): Record<string, number> {
+  if (outcome.state === 'passed') {
+    return { ...outcome.scores }
+  }
+  if (outcome.state === 'skipped') {
+    return {}
+  }
+
+  const counted: Record<string, number> = {}
+  for (const name of [...task.names].sort()) {
+    if (outcome.state === 'failed' || task.definitions.get(name)?.errors === 'zero') {
+      counted[name] = 0
+    }
+  }
+  return counted
+}
+
 function createCaseKey(taskId: string, caseId: string): string {
   return `${taskId}\u0000${caseId}`
-}
-
-function finalizeScoreSummary(summary: ScoreSummary): ScoreSummary {
-  return Object.fromEntries(
-    Object.entries(summary).map(([kind, bucket]) => [
-      kind,
-      {
-        average: bucket.count === 0 ? 0 : bucket.sum / bucket.count,
-        count: bucket.count,
-        sum: bucket.sum,
-      },
-    ]),
-  )
-}
-
-function finalizeSummaryGroups(groups: Record<string, ScoreSummary>): Record<string, ScoreSummary> {
-  return Object.fromEntries(
-    Object.entries(groups).map(([key, summary]) => [key, finalizeScoreSummary(summary)]),
-  )
 }
 
 function getGroupValue(record: CaseRecord, key: string): { exists: false } | { exists: true, value: CaseMetricValue } {
@@ -431,9 +588,11 @@ function getOrCreateDraft(
     requeueCount: 0,
     retryCount: 0,
     runId: event.runId,
+    scoreDetails: {},
     scores: {},
     startCount: 0,
     taskId,
+    unscored: {},
     workspaceId: event.workspaceId,
   }
   drafts.set(key, draft)
@@ -456,14 +615,25 @@ function parseData<TSchema extends v.GenericSchema>(schema: TSchema, event: RunE
   return result.success ? result.output : undefined
 }
 
-function toCaseRecord(draft: CaseDraft): CaseRecord {
+function toCaseRecord(
+  draft: CaseDraft,
+  task: { definitions: ReadonlyMap<string, ScoreDefinedData>, names: ReadonlySet<string> },
+): CaseRecord {
   const startedAt = draft.startedAt ?? draft.endedAt ?? ''
   const endedAt = draft.endedAt ?? startedAt
+  const state = draft.state ?? 'failed'
 
   return {
     attemptId: draft.attemptId,
     ...(draft.attemptIndex == null ? {} : { attemptIndex: draft.attemptIndex }),
-    ...(draft.attempts == null ? {} : { attempts: draft.attempts }),
+    ...(draft.attempts == null
+      ? {}
+      : {
+          attempts: draft.attempts.map(({ recorded, ...attempt }) => ({
+            ...attempt,
+            scores: countScores({ scores: recorded, state: attempt.state }, task),
+          })),
+        }),
     ...(draft.autoAttempt == null ? {} : { autoAttempt: draft.autoAttempt }),
     caseId: draft.caseId,
     caseName: draft.caseName,
@@ -477,11 +647,13 @@ function toCaseRecord(draft: CaseDraft): CaseRecord {
     ...(draft.requeueCount === 0 ? {} : { requeueCount: draft.requeueCount }),
     retryCount: draft.retryCount,
     runId: draft.runId,
-    schemaVersion: 1,
-    scores: draft.scores,
+    schemaVersion: CASE_RECORD_SCHEMA_VERSION,
+    scoreDetails: draft.scoreDetails,
+    scores: countScores({ scores: draft.scores, state }, task),
     startedAt,
-    state: draft.state ?? 'failed',
+    state,
     taskId: draft.taskId,
+    unscored: draft.unscored,
     workspaceId: draft.workspaceId,
   }
 }

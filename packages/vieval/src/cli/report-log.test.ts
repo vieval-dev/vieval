@@ -102,17 +102,35 @@ describe('readReportEvents', () => {
 
   /**
    * @example
-   * it('rejects a log written by an older report schema with its line number', async () => {})
+   * it('rejects a log of event schema version 2 as written by an older vieval, with its line number', async () => {})
    */
-  it('rejects a log written by an older report schema with its line number', async () => {
+  it('rejects a log of event schema version 2 as written by an older vieval, with its line number', async () => {
     const filePath = join(await mkdtemp(join(tmpdir(), 'vieval-report-log-')), 'events.jsonl')
     temporaryDirectories.push(join(filePath, '..'))
-    await writeFile(filePath, `${JSON.stringify({ event: 'RunStarted', schemaVersion: 1, version: 1 })}\n`, 'utf-8')
+    const olderEnvelope = { attemptId: 'a', caseId: 'c', data: { kind: 'exact', score: 1 }, event: 'score.recorded', experimentId: 'e', runId: 'r', schemaVersion: 2, seq: 1, taskId: 't', time: '2026-10-20T00:00:00.000Z', workspaceId: 'w' }
+    await writeFile(filePath, `${JSON.stringify(olderEnvelope)}\n`, 'utf-8')
 
     /**
      * @example
-     * expect(() => readReportEvents(filePath)).toThrow(`${filePath}:1`)
+     * expect(() => readReportEvents(filePath)).toThrow('This report was written by an older vieval. Run it again.')
      */
+    expect(() => readReportEvents(filePath)).toThrow('This report was written by an older vieval. Run it again.')
     expect(() => readReportEvents(filePath)).toThrow(`${filePath}:1`)
+  })
+
+  /**
+   * @example
+   * it('rejects a line that is not an event envelope with its line number', async () => {})
+   */
+  it('rejects a line that is not an event envelope with its line number', async () => {
+    const filePath = join(await mkdtemp(join(tmpdir(), 'vieval-report-log-')), 'events.jsonl')
+    temporaryDirectories.push(join(filePath, '..'))
+    await writeFile(filePath, `${JSON.stringify({ event: 'run.started' })}\n`, 'utf-8')
+
+    /**
+     * @example
+     * expect(() => readReportEvents(filePath)).toThrow(`Unsupported event record at ${filePath}:1`)
+     */
+    expect(() => readReportEvents(filePath)).toThrow(`Unsupported event record at ${filePath}:1`)
   })
 })

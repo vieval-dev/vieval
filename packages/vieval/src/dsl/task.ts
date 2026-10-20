@@ -1,23 +1,26 @@
 import type { TaskCaseState, TaskConcurrencyConfig, TaskExecutionPolicy, TaskRunContext, TaskRunOutput } from '../config'
-import type { RunScore, RunScoreKind } from '../core/runner'
 import type { Scheduler } from '../core/scheduler/types'
 import type { ScoredCaseOutcome } from '../core/scoring'
 import type { TelemetryAttributeValue } from '../core/telemetry'
-import type { RunEventDefinition, RunEventEmitter } from '../events'
+import type { MetricDefinedData, RunEventDefinition, RunEventEmitter, ScoreDefinedData, ScoreRecordedData } from '../events'
+import type { Announcements } from './announcements'
 import type { RecordArtifactOptions } from './case-artifacts'
-import type { MetricAnnouncements, MetricDefinition, MetricMetadata } from './metrics'
+import type { MetricDefinition, MetricMetadata } from './metrics'
+import type { ScoreDefinition, ScoreRecordOptions, ScoreRef } from './scores'
 
 import { errorMessageFrom, errorNameFrom, sleep } from '@moeru/std'
 
 import { defineEval, defineTask } from '../config'
 import { runWithCaseOutput } from '../core/runner/case-output'
 import { createScheduler } from '../core/scheduler/runtime'
-import { scoreCaseOutcomes } from '../core/scoring'
+import { deriveScores, scoreCases } from '../core/scoring'
 import { createNoopTelemetryRuntime } from '../core/telemetry'
-import { artifactRecorded, caseEnded, caseOutput, caseRequeued, caseStarted, metricDefined, metricRecorded, scoreRecorded } from '../events'
+import { artifactRecorded, caseEnded, caseOutput, caseRequeued, caseStarted, metricDefined, metricRecorded, scoreDefined, scoreRecorded } from '../events'
+import { createAnnouncements } from './announcements'
 import { createCaseArtifacts } from './case-artifacts'
-import { createMetricAnnouncements } from './metrics'
+import { resolveMetricAnnouncement } from './metrics'
 import { registerEvalDefinition } from './registry'
+import { announceScore, scoreNameOf } from './scores'
 
 /**
  * Per-case registration options for `caseOf`.
@@ -69,7 +72,7 @@ export interface CaseRunContext<TInput> extends TaskRunContext {
    * Records one custom case metric into report events.
    *
    * Use when:
-   * - tasks need structured benchmark metadata beyond exact/judge score families
+   * - tasks need structured benchmark data that is not a score: latency, cost, a category, a count
    *
    * Expects:
    * - `metric` to be a stable metric name, or a definition from `defineMetric`
@@ -83,15 +86,34 @@ export interface CaseRunContext<TInput> extends TaskRunContext {
    */
   recordMetric: (metric: MetricDefinition | string, value: TelemetryAttributeValue, metadata?: MetricMetadata) => void
   /**
-   * Records a custom normalized value for one case score family, replacing an earlier value of the same kind.
+   * Records the value of one score for this case try, replacing an earlier value or unscored record of the same name.
    *
    * Use when:
-   * - one case computes a benchmark-native score that should flow into run aggregation
+   * - the case measured a quality as a value in `0..1`, where higher is better
    *
    * Expects:
-   * - `score` to stay in the `0..1` range
+   * - `score` to be a definition from `defineScore` or a score name; a definition is announced on first use
+   * - `value` to be finite and in `0..1`
+   * - `score` not to be derived (`combine`); the runtime computes derived scores when the try settles
+   *
+   * Returns:
+   * - nothing; emits `score.defined` first when the definition is new for the task, then `score.recorded`
    */
-  recordScore: (score: number, kind?: RunScoreKind) => void
+  recordScore: (score: ScoreRef, value: number, options?: ScoreRecordOptions) => void
+  /**
+   * Records that the grader could not produce a value for one score in this case try.
+   *
+   * Use when:
+   * - the case produced a result but its grader failed, for example an unparseable judge answer; the value says
+   *   nothing about the test object, so it is not 0 and never counts
+   *
+   * Expects:
+   * - `reason` to be a short code; `grader_failed`, `invalid_response`, `no_response`, and `refusal` have labels in viewers
+   *
+   * Returns:
+   * - nothing; emits `score.recorded` with `unscored`
+   */
+  recordUnscored: (score: ScoreRef, reason: string, options?: ScoreRecordOptions) => void
   /**
    * Cooperative abort signal for the current case execution.
    */
@@ -179,6 +201,17 @@ export interface DescribeTaskOptions extends TaskExecutionPolicy {
    * Optional description override.
    */
   description?: string
+  /**
+   * Scores of this task, announced when the task starts.
+   *
+   * Use when:
+   * - a score is derived (`combine`), so no case records it
+   * - a score should count as missing for cases that never record it, or should be the task's primary score before
+   *   the first case records anything
+   *
+   * @default []
+   */
+  scores?: readonly ScoreDefinition[]
 }
 
 /**
@@ -194,8 +227,11 @@ interface CaseExecutionOutcome {
   error?: unknown
   errorMessage?: string
   output?: unknown
-  scoresByKind: Map<RunScoreKind, number>
+  /** Score values of the try by name, recorded or derived. */
+  scores: Record<string, number>
   state: TaskCaseState
+  /** Unscored records of the try by name, with the reason. */
+  unscored: Record<string, string>
 }
 
 interface RegisteredCase<TInput> {
@@ -205,6 +241,12 @@ interface RegisteredCase<TInput> {
   name: string
   queueKey?: object
   run: CaseRunner<TInput>
+}
+
+/** Metric and score definitions one task run announced. */
+interface TaskAnnouncements {
+  metrics: Announcements<MetricDefinedData>
+  scores: Announcements<ScoreDefinedData>
 }
 
 function assertNonNegativeInteger(value: number, label: string): void {
@@ -487,8 +529,9 @@ async function executeRegisteredCase(
 
   return lastOutcome ?? {
     errorMessage: 'Unknown case failure.',
-    scoresByKind: new Map(),
+    scores: {},
     state: 'failed',
+    unscored: {},
   }
 }
 
@@ -571,11 +614,8 @@ function resolveCaseExecutionPolicy(
   }
 }
 
-function toScoredCaseOutcome(outcome: CaseExecutionOutcome): ScoredCaseOutcome {
-  return {
-    scores: { exact: outcome.scoresByKind.get('exact'), judge: outcome.scoresByKind.get('judge') },
-    state: outcome.state,
-  }
+function toScoredCaseOutcome(outcome: CaseExecutionOutcome, caseId: string): ScoredCaseOutcome {
+  return { caseId, scores: outcome.scores, state: outcome.state, unscored: outcome.unscored }
 }
 
 /**
@@ -603,21 +643,33 @@ async function waitUnlessAborted(milliseconds: number, signal: AbortSignal | und
 }
 
 /**
- * Metric announcements of each running task, keyed by the task's run context.
+ * Announcements of each running task, keyed by the task's run context.
  *
  * NOTICE:
  * Every case of one task run receives the same `TaskRunContext` object, so it identifies the task run without
  * threading a tracker through the attempt, retry, and case helpers. A `WeakMap` drops the tracker with the context.
  */
-const metricAnnouncementsByTask = new WeakMap<TaskRunContext, MetricAnnouncements>()
+const announcementsByTask = new WeakMap<TaskRunContext, TaskAnnouncements>()
 
-function metricAnnouncementsOf(context: TaskRunContext): MetricAnnouncements {
-  let announcements = metricAnnouncementsByTask.get(context)
+function announcementsOf(context: TaskRunContext): TaskAnnouncements {
+  let announcements = announcementsByTask.get(context)
   if (announcements == null) {
-    announcements = createMetricAnnouncements()
-    metricAnnouncementsByTask.set(context, announcements)
+    announcements = { metrics: createAnnouncements(), scores: createAnnouncements() }
+    announcementsByTask.set(context, announcements)
   }
   return announcements
+}
+
+/**
+ * Announces a score definition for the task once; definitions belong to the task, so they carry no case id.
+ */
+function announceTaskScore(context: TaskRunContext, score: ScoreRef): void {
+  if (typeof score === 'string') {
+    return
+  }
+  for (const defined of announceScore(announcementsOf(context).scores, score)) {
+    emitSafely(context.events, scoreDefined, defined)
+  }
 }
 
 async function runCaseOnce(
@@ -628,7 +680,8 @@ async function runCaseOnce(
   autoAttempt: CaseAutoAttempt | undefined,
 ): Promise<CaseExecutionOutcome> {
   const { classifyError, timeout } = policy
-  const customScoresByKind = new Map<RunScoreKind, number>()
+  const scores: Record<string, number> = {}
+  const unscored: Record<string, string> = {}
   const abortController = new AbortController()
   const telemetry = context.telemetry ?? createNoopTelemetryRuntime()
   const caseId = createCaseId(index, taskCase.name)
@@ -643,14 +696,51 @@ async function runCaseOnce(
   const completedOutcome = (output: unknown): CaseExecutionOutcome => context.signal?.aborted === true
     ? {
         errorMessage: errorMessageFrom(context.signal.reason) ?? 'Run interrupted.',
-        scoresByKind: customScoresByKind,
+        scores,
         state: 'errored',
+        unscored,
       }
     : {
         output,
-        scoresByKind: customScoresByKind,
+        scores,
         state: 'passed',
+        unscored,
       }
+  // Shared by `recordScore` and `recordUnscored`: both replace the other record of the same name in this try.
+  const recordScoreEvent = (score: ScoreRef, record: ScoreRecordedData): void => {
+    const derived = announcementsOf(context).scores.latest().find(defined => defined.name === record.name)?.combine
+    if (derived != null || (typeof score !== 'string' && score.combine != null)) {
+      throw new Error(`Score "${record.name}" is derived from other scores; the runtime computes it when the case try settles.`)
+    }
+    announceTaskScore(context, score)
+    if ('value' in record) {
+      scores[record.name] = record.value
+      delete unscored[record.name]
+    }
+    else {
+      unscored[record.name] = record.unscored.reason
+      delete scores[record.name]
+    }
+    telemetry.addEvent('vieval.case.score', {
+      'vieval.score.name': record.name,
+      ...('value' in record ? { 'vieval.score.value': record.value } : { 'vieval.score.unscored': record.unscored.reason }),
+    })
+    emitSafely(events, scoreRecorded, record)
+  }
+  // Emits the derived scores of this try once it settled, before `case.ended`.
+  const settleScores = (): void => {
+    for (const derived of deriveScores(announcementsOf(context).scores.latest(), scores, unscored)) {
+      if ('value' in derived) {
+        scores[derived.name] = derived.value
+      }
+      else {
+        unscored[derived.name] = derived.unscored
+      }
+      emitSafely(events, scoreRecorded, 'value' in derived
+        ? { derived: true, name: derived.name, value: derived.value }
+        : { derived: true, name: derived.name, unscored: { reason: derived.unscored } })
+    }
+  }
 
   try {
     return await telemetry.withSpan('vieval.case', {
@@ -689,7 +779,7 @@ async function runCaseOnce(
             return
           }
 
-          const { defined, name } = metricAnnouncementsOf(context).resolve(metric, metadata)
+          const { defined, name } = resolveMetricAnnouncement(announcementsOf(context).metrics, metric, metadata)
           // Metadata belongs to the task, not to this case, so it is announced without the case id.
           if (defined != null)
             emitSafely(context.events, metricDefined, defined)
@@ -699,18 +789,20 @@ async function runCaseOnce(
             telemetry.setAttributes({ [name]: value })
           }
         },
-        recordScore(score, kind = 'exact') {
+        recordScore(score, value, options) {
           if (abortController.signal.aborted || settled) {
             return
           }
 
-          assertValidScore(score)
-          customScoresByKind.set(kind, score)
-          telemetry.addEvent('vieval.case.score', {
-            'vieval.score.kind': kind,
-            'vieval.score.value': score,
-          })
-          emitSafely(events, scoreRecorded, { kind, score })
+          assertValidScore(value)
+          recordScoreEvent(score, { ...options, name: scoreNameOf(score), value })
+        },
+        recordUnscored(score, reason, options) {
+          if (abortController.signal.aborted || settled) {
+            return
+          }
+
+          recordScoreEvent(score, { ...options, name: scoreNameOf(score), unscored: { reason } })
         },
         signal: abortController.signal,
       })
@@ -730,16 +822,19 @@ async function runCaseOnce(
 
         const output = await Promise.race([runPromise, timeoutPromise])
         settled = true
+        settleScores()
         return completedOutcome(output)
       }
 
       const output = await runPromise
       settled = true
+      settleScores()
       return completedOutcome(output)
     })
   }
   catch (error) {
     settled = true
+    settleScores()
     // Abort errors raised by the interrupt carry generic messages ("The operation was aborted"); the run's reason is clearer.
     const interrupted = context.signal?.aborted === true
     const interruptMessage = interrupted ? errorMessageFrom(context.signal!.reason) : undefined
@@ -754,8 +849,9 @@ async function runCaseOnce(
     return {
       error,
       errorMessage: interruptMessage ?? errorMessageFrom(error) ?? (timedOut && timeout != null ? `Case timed out after ${timeout}ms.` : 'Unknown case failure.'),
-      scoresByKind: customScoresByKind,
+      scores,
       state,
+      unscored,
     }
   }
   finally {
@@ -853,10 +949,13 @@ export function describeTask(
       async run(context): Promise<TaskRunOutput> {
         // `--case` runs a subset; each case keeps the index (and so the case id) it has in the full task.
         const runCases = registeredCases.flatMap((taskCase, index) => context.selectsCase == null || context.selectsCase(taskCase.name) ? [{ index, taskCase }] : [])
+        // An empty selection measured nothing, so it has no scores.
         if (runCases.length === 0) {
-          return {
-            scores: [{ kind: 'exact', score: 1 }],
-          }
+          return { scores: [] }
+        }
+        // Declared scores are announced before any case, so the primary score and derived scores are known up front.
+        for (const score of options.scores ?? []) {
+          announceTaskScore(context, score)
         }
 
         const totalCases = runCases.length
@@ -890,7 +989,7 @@ export function describeTask(
             runCases.map(async ({ index, taskCase }) => {
               await executeCaseWithRequeue(context, taskCase, index, totalCases, taskExecutionPolicy, undefined, async execute => await scheduleCase(taskCase, index, 0, execute), (outcome) => {
                 emitCaseOutcome(context, taskCase, outcome, index, totalCases, undefined)
-                settledOutcomes.push(toScoredCaseOutcome(outcome))
+                settledOutcomes.push(toScoredCaseOutcome(outcome, createCaseId(index, taskCase.name)))
               })
             }),
           )
@@ -924,7 +1023,7 @@ export function describeTask(
 
               const { index, taskCase } = runCase
               emitCaseOutcome(context, taskCase, outcome, index, totalCases, autoAttemptOf(taskCase))
-              settledOutcomes.push(toScoredCaseOutcome(outcome))
+              settledOutcomes.push(toScoredCaseOutcome(outcome, createCaseId(index, taskCase.name)))
             })
 
             const shouldContinue = context.signal?.aborted !== true && attemptOutcomes.some((outcome, position) => {
@@ -948,19 +1047,7 @@ export function describeTask(
           }
         }
 
-        const { coverage, exact, judge } = scoreCaseOutcomes(settledOutcomes)
-        const scores: RunScore[] = []
-        if (exact != null) {
-          scores.push({ kind: 'exact', score: exact })
-        }
-        if (judge != null) {
-          scores.push({ kind: 'judge', score: judge })
-        }
-
-        return {
-          coverage,
-          scores,
-        }
+        return scoreCases(settledOutcomes, announcementsOf(context).scores.latest())
       },
     }),
   })

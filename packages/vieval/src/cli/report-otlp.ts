@@ -150,6 +150,7 @@ export function buildLocalOtlpProjection(args: { identity: RunEventIdentity, rec
                 caseId: record.caseId,
                 scores: record.scores,
                 state: record.state,
+                unscored: record.unscored,
               }),
             },
             eventName: 'vieval.case',
@@ -163,12 +164,12 @@ export function buildLocalOtlpProjection(args: { identity: RunEventIdentity, rec
       resourceMetrics: [{
         resource,
         scopeMetrics: [{
-          metrics: collectScoreKinds(args.records).map(kind => ({
+          metrics: collectScoreNames(args.records).map(name => ({
             gauge: {
               dataPoints: args.records
-                .filter(record => typeof record.scores[kind] === 'number')
+                .filter(record => typeof record.scores[name] === 'number')
                 .map(record => ({
-                  asDouble: record.scores[kind]!,
+                  asDouble: record.scores[name]!,
                   attributes: toAttributes({
                     ...record.metrics,
                     'vieval.case.id': record.caseId,
@@ -177,7 +178,7 @@ export function buildLocalOtlpProjection(args: { identity: RunEventIdentity, rec
                   timeUnixNano: isoToUnixNano(record.endedAt),
                 })),
             },
-            name: `vieval.score.${kind}`,
+            name: `vieval.score.${name}`,
           })),
           scope: { name: 'vieval' },
         }],
@@ -208,7 +209,7 @@ function collectProjectNames(records: readonly CaseRecord[]): string[] {
     .sort((left, right) => left.localeCompare(right))
 }
 
-function collectScoreKinds(records: readonly CaseRecord[]): string[] {
+function collectScoreNames(records: readonly CaseRecord[]): string[] {
   return [...new Set(records.flatMap(record => Object.keys(record.scores)))]
     .sort((left, right) => left.localeCompare(right))
 }

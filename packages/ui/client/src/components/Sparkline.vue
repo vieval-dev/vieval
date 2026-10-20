@@ -18,7 +18,7 @@ const props = withDefaults(defineProps<{
   /** Coverage of each value, in the same order; every value counts as `full` without it. */
   coverage?: readonly SparklineCoverage[]
   height?: number
-  /** Accessible summary, for example "exact score of 10 runs". */
+  /** Accessible summary, for example "Pass of 10 runs" (the label of the primary score). */
   label: string
   /** Tooltip of each point (for example its time and score), in the same order as `values`. */
   titles?: readonly string[]

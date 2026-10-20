@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { CaseCounts, CaseNode, CaseRound, RunSnapshot } from '../../../src/shared/contract'
+import type { CaseCounts, CaseNode, CaseRound, RunSnapshot, TaskNode } from '../../../src/shared/contract'
 import type { Segment } from './SegmentedControl.vue'
 
 import { useVirtualizer } from '@tanstack/vue-virtual'
@@ -14,6 +14,7 @@ import StateBadge from './StateBadge.vue'
 import { formatDuration, formatScore } from '../format'
 import { levelIcons, levelLabels } from '../hierarchy'
 import { href } from '../router'
+import { completionText, headlineOf, headlineView } from '../scores'
 
 /**
  * Live execution tree `run → project → task → round → case → try`, virtualized so tasks with hundreds of cases
@@ -69,6 +70,13 @@ function matches(state: string, name: string): boolean {
   return state === filter.value
 }
 
+/** A task's headline on its row: the primary score (or the passed cases) and, below 100 %, the completion rate. */
+function taskDetail(task: TaskNode): string {
+  const view = headlineView(headlineOf(task.scoring), props.snapshot.scoreDefinitions)
+  const incomplete = view.completion.mean != null && view.completion.mean < 1
+  return `${view.label} ${formatScore(view.summary.mean)}${incomplete ? ` · ${completionText(view.completion)}` : ''}`
+}
+
 const rows = computed<Row[]>(() => {
   const list: Row[] = []
   const snapshot = props.snapshot
@@ -81,7 +89,7 @@ const rows = computed<Row[]>(() => {
       continue
     for (const task of tasks) {
       const taskKey = `t:${task.id}`
-      list.push({ counts: { ...task.caseCounts, total: task.caseTotal ?? task.caseCounts.total }, depth: 1, detail: `exact ${formatScore(task.scores.exact)}`, expandable: true, href: href({ name: 'task', runKey: snapshot.runKey, taskId: task.id }), key: taskKey, kind: 'task', label: task.displayName, state: task.state })
+      list.push({ counts: { ...task.caseCounts, total: task.caseTotal ?? task.caseCounts.total }, depth: 1, detail: taskDetail(task), expandable: true, href: href({ name: 'task', runKey: snapshot.runKey, taskId: task.id }), key: taskKey, kind: 'task', label: task.displayName, state: task.state })
       if (!open.has(taskKey))
         continue
       const pushCase = (node: CaseNode, depth: number, round: CaseRound | undefined) => {

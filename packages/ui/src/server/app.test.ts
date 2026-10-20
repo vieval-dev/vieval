@@ -49,6 +49,8 @@ const RUNNING = 'run-1791747103580-dd3a8517'
 const ARCHIVED = 'run-1791746045991-a77ba0a4'
 const LEGACY = 'run-1791656450009-5299b70e'
 const FAILED_CASE = '1:chrome%2F06fe7178-4491-4589-810f-2e2bc9502122'
+/** The one score the OSWorld runs record, without a `score.defined`: the primary score as the task's only score. */
+const SCORE = 'osworld.success'
 /** Shortly after the last event of the running fixture (19:39:57Z), so the run is `running`, not `stale`. */
 const NOW = Date.parse('2026-10-11T19:45:00.000Z')
 
@@ -77,26 +79,36 @@ describe('viewer API on the OSWorld report root (real data)', () => {
     expect(project.experiments.map(experiment => experiment.id)).toEqual(['matrix-run-model-gpt-5.5-repeat-1'])
     const attempts = project.experiments[0].attempts
     expect(attempts.map(attempt => [attempt.id, attempt.runs.map(run => [run.runKey, run.source, run.state])])).toEqual([
-      ['attempt-2026-10-10T18-20-50-009Z', [[LEGACY, 'legacy', 'legacy']]],
+      ['attempt-2026-10-10T18-20-50-009Z', [[LEGACY, 'unsupported', 'unsupported']]],
       ['attempt-2026-10-11T19-14-05-991Z', [[ARCHIVED, 'offline', 'interrupted']]],
       ['attempt-2026-10-11T19-31-43-580Z', [[RUNNING, 'live-tail', 'running']]],
     ])
   })
 
-  it('lists runs with counts and scores that match run-summary.json', async () => {
+  /**
+   * @example
+   * expect(byKey[ARCHIVED].headline?.headline).toEqual({ kind: 'score', score: { mean: 11 / 18, n: 18, name: SCORE, ... } })
+   */
+  it('lists runs with counts and the headline of run-summary.json, else of their events', async () => {
     const { json } = await setup()
     const runs = (await json<unknown[]>('/api/runs')).map(item => expectSchema(runListItemSchema, item))
     const byKey = Object.fromEntries(runs.map(run => [run.runKey, run]))
     // An archived report written before `errored` existed counts every failure as `failed`.
     expect(byKey[ARCHIVED].counts).toEqual({ errored: 0, failed: 7, passed: 11, requeued: 0, running: 0, skipped: 0, timeout: 0, total: 18 })
-    expect(byKey[ARCHIVED].exactAverage).toBeCloseTo(0.6111111111111112, 12)
+    expect(byKey[ARCHIVED].headline).toEqual({
+      completion: { mean: 1, n: 18, name: 'completion', sum: 18, total: 18, unscored: {} },
+      headline: { kind: 'score', score: { mean: 11 / 18, n: 18, name: SCORE, sum: 11, total: 18, unscored: {} } },
+    })
+    // The score has no `score.defined`, so there is no definition to show with it.
+    expect(byKey[ARCHIVED].headlineDefinitions).toEqual([])
     expect(byKey[ARCHIVED].reportPath).toBe(OSWORLD_RUNS.archived)
-    expect(byKey[LEGACY].counts).toMatchObject({ failed: 1, passed: 2, total: 3 })
-    expect(byKey[LEGACY].exactAverage).toBeCloseTo(2 / 3, 12)
     expect(byKey[RUNNING].counts).toEqual({ errored: 0, failed: 2, passed: 4, requeued: 0, running: 8, skipped: 0, timeout: 0, total: 14 })
+    // No run-summary.json yet: the headline comes from the six settled cases.
+    expect(byKey[RUNNING].headline?.headline).toMatchObject({ kind: 'score', score: { n: 6, name: SCORE, total: 6 } })
     expect(byKey[RUNNING].lastSeq).toBe(150)
     expect(byKey[RUNNING].matrix).toEqual({ model: ['gpt-5.5'], repeat: ['1'] })
-    expect(byKey[LEGACY].matrix).toEqual({ model: ['gpt-5.5'], repeat: ['1'] })
+    // A run written by an older vieval is listed, without reading its events.
+    expect(byKey[LEGACY]).toMatchObject({ counts: { total: 0 }, headline: null, matrix: {}, source: 'unsupported', state: 'unsupported' })
     expect((await json<unknown[]>('/api/runs?state=running')).length).toBe(1)
     expect((await json<unknown[]>('/api/runs?attempt=attempt-2026-10-11T19-14-05-991Z')).length).toBe(1)
   })
@@ -143,9 +155,22 @@ describe('viewer API on the OSWorld report root (real data)', () => {
     for (let index = 1; index < history.length; index += 1) {
       expect(history[index].elapsedMs).toBeGreaterThanOrEqual(history[index - 1].elapsedMs)
     }
+  })
 
-    const legacy = expectSchema(runSnapshotSchema, await json(`/api/runs/${LEGACY}/snapshot`)).progress
-    expect(legacy.history.at(-1)).toEqual({ completed: 3, elapsedMs: legacy.elapsedMs })
+  /**
+   * @example
+   * expect(response.status).toBe(422)
+   */
+  it('lists a run of an older event schema version as unsupported and does not open it', async () => {
+    const { get, json } = await setup()
+    const item = expectSchema(runListItemSchema, await json(`/api/runs/${LEGACY}`))
+    expect([item.source, item.state]).toEqual(['unsupported', 'unsupported'])
+    for (const path of [`/api/runs/${LEGACY}/snapshot`, `/api/runs/${LEGACY}/scores`, `/api/runs/${LEGACY}/events`, `/api/compare/runs?runs=${LEGACY},${ARCHIVED}`]) {
+      const response = await get(path)
+      expect([path, response.status]).toEqual([path, 422])
+      const error = expectSchema(errorResponseSchema, await response.json())
+      expect(error.message).toBe(`This report was written by an older vieval. Run it again. (Run "${LEGACY}" has event schema version 1.)`)
+    }
   })
 
   /**
@@ -155,7 +180,8 @@ describe('viewer API on the OSWorld report root (real data)', () => {
   it('returns the matrix of a project: one cell per matrix row, latest run and history across attempts', async () => {
     const { json } = await setup()
     const matrix = expectSchema(matrixResponseSchema, await json('/api/matrix?workspace=default-workspace&project=osworld-kubernetes'))
-    expect(matrix.runCount).toBe(3)
+    // The run of an older vieval is not read.
+    expect(matrix.runCount).toBe(2)
     expect(matrix.axes.filter(axis => axis.kind === 'run')).toEqual([
       { kind: 'run', name: 'model', values: ['gpt-5.5'] },
       { kind: 'run', name: 'repeat', values: ['1'] },
@@ -165,12 +191,15 @@ describe('viewer API on the OSWorld report root (real data)', () => {
     expect(cell.run).toEqual({ model: 'gpt-5.5', repeat: '1' })
     expect(cell.latest).toMatchObject({ attemptId: 'attempt-2026-10-11T19-31-43-580Z', runKey: RUNNING, state: 'running', taskId: OSWORLD_TASK_ID })
     expect(cell.latest.counts).toMatchObject({ failed: 2, passed: 4, running: 8, total: 14 })
-    expect(cell.history.map(point => point.runKey)).toEqual([LEGACY, ARCHIVED, RUNNING])
-    expect(cell.history[1].exact).toBeCloseTo(0.6111111111111112, 12)
+    expect(cell.history.map(point => point.runKey)).toEqual([ARCHIVED, RUNNING])
+    expect(cell.history[0].score).toBeCloseTo(11 / 18, 12)
+    expect(cell.history[0].completion).toBe(1)
+    expect(cell.latest.scoring.primary).toBe(SCORE)
+    expect(matrix.scoreDefinitions).toEqual([])
 
     // Filters narrow the scope like `/api/runs`; an unknown workspace is an empty matrix, no filter is every run.
     expect(expectSchema(matrixResponseSchema, await json('/api/matrix?workspace=other')).cells).toEqual([])
-    expect(expectSchema(matrixResponseSchema, await json('/api/matrix')).runCount).toBe(3)
+    expect(expectSchema(matrixResponseSchema, await json('/api/matrix')).runCount).toBe(2)
   })
 
   it('returns task, case detail with input, metrics, scores, and evidence of a finished run', async () => {
@@ -179,6 +208,7 @@ describe('viewer API on the OSWorld report root (real data)', () => {
     expect(snapshot.state).toBe('interrupted')
     expect(snapshot.interruptSignal).toBe('SIGINT')
     expect(snapshot.summary).toMatchObject({ caseSummary: { failed: 7, passed: 11, total: 18 } })
+    expect(snapshot.summary?.headline).toEqual(snapshot.headline)
     expect(snapshot.progress.basis).toBe('ended')
 
     const task = expectSchema(taskNodeSchema, await json(`/api/runs/${ARCHIVED}/task?taskId=${q(OSWORLD_TASK_ID)}`))
@@ -194,6 +224,9 @@ describe('viewer API on the OSWorld report root (real data)', () => {
     expect(detail.durationMs).toBe(Date.parse('2026-10-11T19:16:32.903Z') - Date.parse('2026-10-11T19:14:05.993Z'))
     expect((detail.input as { task: { id: string } }).task.id).toBe('06fe7178-4491-4589-810f-2e2bc9502122')
     expect(detail.metrics.find(metric => metric.name === 'osworld.pod')?.value).toBe('osworld-06fe7178-624029')
+    expect(detail.scores).toEqual({ unscored: {}, values: { [SCORE]: 0 } })
+    expect(detail.scoreRecords).toEqual([{ record: { name: SCORE, value: 0 }, roundIndex: 0, seq: 32 }])
+    expect(detail.scoreDefinitions).toEqual([])
     expect(detail.evidence).toHaveLength(1)
     expect(detail.evidence[0]).toMatchObject({ adapter: 'osworld', allowed: true, exists: true, kind: 'directory', metricName: 'osworld.evidence' })
     expect(detail.evidence[0].summary).toMatchObject({ podName: 'osworld-06fe7178-624029', status: 'evaluated', taskId: '06fe7178-4491-4589-810f-2e2bc9502122' })
@@ -246,14 +279,20 @@ describe('viewer API on the OSWorld report root (real data)', () => {
   it('returns scores, metrics, timeline, events, and logs', async () => {
     const { json } = await setup()
     const scores = expectSchema(scoresResponseSchema, await json(`/api/runs/${ARCHIVED}/scores`))
-    expect(scores.overall.exact).toBeCloseTo(11 / 18, 12)
-    expect(scores.summary?.exact).toBeCloseTo(0.6111111111111112, 12)
+    expect(scores.overall.scores).toEqual([{ mean: 11 / 18, n: 18, name: SCORE, sum: 11, total: 18, unscored: {} }])
+    expect(scores.overall.headline).toEqual(scores.summary)
     expect(scores.byRound).toHaveLength(1)
+    expect(scores.byRound[0].scoring.primary).toBe(SCORE)
     expect(scores.cases).toHaveLength(18)
 
     const metrics = expectSchema(metricsResponseSchema, await json(`/api/runs/${ARCHIVED}/metrics`))
     expect(metrics.numeric.find(metric => metric.name === 'osworld.agent.steps')?.summary.count).toBe(15)
     expect(metrics.nonNumeric.map(metric => metric.name)).toContain('osworld.evidence')
+    // Case 2 recorded 0.94 but failed, so it counts 0, like in the task's mean.
+    const [success] = metrics.scores
+    expect(success.summary).toEqual(scores.overall.scores[0])
+    expect(success.points).toHaveLength(18)
+    expect(success.points.find(point => point.caseId.startsWith('2:'))?.value).toBe(0)
 
     const timeline = expectSchema(timelineResponseSchema, await json(`/api/runs/${ARCHIVED}/timeline`))
     expect(timeline.entries).toHaveLength(18)
@@ -271,13 +310,16 @@ describe('viewer API on the OSWorld report root (real data)', () => {
   it('compares attempts of one experiment and experiments of one project', async () => {
     const { json } = await setup()
     const attempts = expectSchema(comparisonResponseSchema, await json('/api/compare/attempts?workspace=default-workspace&project=osworld-kubernetes&experiment=matrix-run-model-gpt-5.5-repeat-1'))
-    expect(attempts.columns.map(column => column.id)).toEqual([LEGACY, ARCHIVED, RUNNING])
+    // The run of an older vieval is no column.
+    expect(attempts.columns.map(column => column.id)).toEqual([ARCHIVED, RUNNING])
+    expect(attempts.primary).toBe(SCORE)
     const row = attempts.rows.find(candidate => candidate.caseName === 'chrome/06fe7178-4491-4589-810f-2e2bc9502122')
-    expect(row?.cells[ARCHIVED]).toEqual({ exact: 0, roundCount: 1, state: 'failed' })
+    expect(row?.cells[ARCHIVED]).toEqual({ roundCount: 1, scores: { unscored: {}, values: { [SCORE]: 0 } }, state: 'failed' })
+    expect(attempts.columns[0].runs[0].headline?.headline.kind).toBe('score')
     expect(attempts.summary.rows).toBeGreaterThan(18)
 
     const experiments = expectSchema(comparisonResponseSchema, await json('/api/compare/experiments?workspace=default-workspace&project=osworld-kubernetes'))
-    expect(experiments.columns.map(column => [column.id, column.runs.length])).toEqual([['matrix-run-model-gpt-5.5-repeat-1', 3]])
+    expect(experiments.columns.map(column => [column.id, column.runs.length])).toEqual([['matrix-run-model-gpt-5.5-repeat-1', 2]])
 
     const runs = expectSchema(comparisonResponseSchema, await json(`/api/compare/runs?runs=${ARCHIVED},${RUNNING}`))
     expect(runs.columns.map(column => column.id)).toEqual([ARCHIVED, RUNNING])
@@ -293,6 +335,8 @@ describe('viewer API on the OSWorld report root (real data)', () => {
     expect(logs.records.filter(record => record.severity === 'ERROR')).toHaveLength(7)
     const metrics = expectSchema(otelMetricsResponseSchema, await json(`/api/runs/${ARCHIVED}/otel/metrics`))
     expect(metrics.metrics.map(metric => metric.name)).toContain('vieval.case.duration_ms')
+    expect(metrics.metrics.find(metric => metric.name === `vieval.score.${SCORE}`)?.dataPoints).toHaveLength(15)
+    expect(traces.spans.find(span => span.kind === 'task')?.attributes).toMatchObject({ 'vieval.score.osworld.success': 11 / 18, 'vieval.task.primary_score': SCORE })
     const raw = await get(`/api/runs/${ARCHIVED}/otel/raw/traces`)
     expect(raw.status).toBe(200)
     expect((await raw.json() as { resourceSpans: unknown[] }).resourceSpans).toHaveLength(1)

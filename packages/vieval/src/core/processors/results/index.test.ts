@@ -1,145 +1,97 @@
-import type { AggregatedRunResults } from '../../runner/aggregate'
+import type { RunResult } from '../../runner/aggregate'
+import type { ScoreSummary } from '../../scoring'
 
 import { describe, expect, it } from 'vitest'
 
+import { aggregateRunResults } from '../../runner/aggregate'
 import { processRunResults } from './index'
 
-function createAggregatedResults(overrides: Partial<AggregatedRunResults> = {}): AggregatedRunResults {
+function run(id: string, passMean: number, extra: ScoreSummary[] = []): RunResult {
   return {
-    inferenceExecutors: [{
-      coverage: null,
-      exactAverage: 0.8,
-      hybridAverage: 0.8,
-      inferenceExecutorId: 'openai:gpt-4.1-mini',
-      judgeAverage: 0.8,
-      runCount: 2,
-      strictExactAverage: 0.8,
-    }],
-    overall: {
-      coverage: null,
-      exactAverage: 0.8,
-      hybridAverage: 0.8,
-      judgeAverage: 0.8,
-      runCount: 2,
-      strictExactAverage: 0.8,
-    },
-    runs: [{
-      coverage: null,
-      entryId: 'plugins/airi-plugin-game-chess/src/agent/evals/chess-commentary',
-      exactAverage: 0.8,
-      hybridAverage: 0.8,
-      id: 'run-1',
-      inferenceExecutorId: 'openai:gpt-4.1-mini',
-      judgeAverage: 0.8,
-      matrix: createScheduledTaskMatrix(),
-      strictExactAverage: 0.8,
-    }, {
-      coverage: null,
-      entryId: 'plugins/airi-plugin-game-chess/src/agent/evals/chess-commentary',
-      exactAverage: 0.7,
-      hybridAverage: 0.7,
-      id: 'run-2',
-      inferenceExecutorId: 'openai:gpt-4.1-mini',
-      judgeAverage: 0.7,
-      matrix: createScheduledTaskMatrix(),
-      strictExactAverage: 0.7,
-    }],
-    ...overrides,
+    completion: summary('completion', 10, 10),
+    entryId: 'evals/formula',
+    id,
+    inferenceExecutorId: 'openai:gpt-4.1-mini',
+    matrix: { eval: {}, meta: { evalRowId: 'default', runRowId: 'default' }, run: {} },
+    passed: summary('passed', 10, 10),
+    primary: 'pass',
+    scores: [summary('pass', passMean * 10, 10), ...extra],
   }
 }
 
-function createScheduledTaskMatrix() {
-  return {
-    eval: {},
-    meta: {
-      evalRowId: 'default',
-      runRowId: 'default',
-    },
-    run: {},
-  }
+function summary(name: string, sum: number, n: number): ScoreSummary {
+  return { mean: n === 0 ? null : sum / n, n, name, sum, total: n, unscored: {} }
 }
 
 describe('processRunResults', () => {
-  it('passes when threshold and hard-limit policies are satisfied', () => {
-    const decision = processRunResults(createAggregatedResults(), {
-      maxFailedRuns: {
-        maxFailedRuns: 0,
-        minRunHybridScore: 0.7,
-      },
-      threshold: {
-        minOverallHybridScore: 0.75,
-        minProviderHybridScore: 0.75,
-      },
-    })
+  /**
+   * @example
+   * primary pass 0.8 and 0.7 -> overall 0.75 and per-run means above the defaults: no violation.
+   */
+  it('passes when the primary score meets the threshold and hard-limit policies', () => {
+    const decision = processRunResults(aggregateRunResults([run('run-1', 0.8), run('run-2', 0.7)]))
 
     expect(decision.pass).toBe(true)
     expect(decision.violations).toEqual([])
   })
 
-  it('fails threshold policy when overall or inferenceExecutor hybrid scores are below limits', () => {
-    const decision = processRunResults(createAggregatedResults({
-      inferenceExecutors: [{
-        coverage: null,
-        exactAverage: 0.55,
-        hybridAverage: 0.55,
-        inferenceExecutorId: 'openai:gpt-4.1-mini',
-        judgeAverage: 0.55,
-        runCount: 2,
-        strictExactAverage: 0.55,
-      }],
-      overall: {
-        coverage: null,
-        exactAverage: 0.5,
-        hybridAverage: 0.5,
-        judgeAverage: 0.5,
-        runCount: 2,
-        strictExactAverage: 0.5,
-      },
-    }), {
-      threshold: {
-        minOverallHybridScore: 0.7,
-        minProviderHybridScore: 0.6,
-      },
-    })
+  /**
+   * @example
+   * primary pass 0.5 -> overall and executor below 0.7 / 0.6.
+   */
+  it('fails the threshold policy when the primary score is below the limits', () => {
+    const decision = processRunResults(aggregateRunResults([run('run-1', 0.5)]), { maxFailedRuns: { maxFailedRuns: 1 } })
 
     expect(decision.pass).toBe(false)
-    expect(decision.violations.map(violation => violation.policyId)).toEqual([
-      'threshold:overall-hybrid',
-      'threshold:inferenceExecutor-hybrid',
+    expect(decision.violations).toEqual([
+      { policyId: 'threshold:overall', reason: 'Overall pass mean 0.5 is below 0.7.' },
+      { policyId: 'threshold:inferenceExecutor', reason: 'Provider openai:gpt-4.1-mini pass mean 0.5 is below 0.6.' },
     ])
   })
 
-  it('fails hard-limit policy when failed runs exceed maxFailedRuns', () => {
-    const decision = processRunResults(createAggregatedResults({
-      runs: [{
-        coverage: null,
-        entryId: 'plugins/airi-plugin-game-chess/src/agent/evals/chess-commentary',
-        exactAverage: 0.3,
-        hybridAverage: 0.3,
-        id: 'run-1',
-        inferenceExecutorId: 'openai:gpt-4.1-mini',
-        judgeAverage: 0.3,
-        matrix: createScheduledTaskMatrix(),
-        strictExactAverage: 0.3,
-      }, {
-        coverage: null,
-        entryId: 'plugins/airi-plugin-game-chess/src/agent/evals/chess-commentary',
-        exactAverage: 0.2,
-        hybridAverage: 0.2,
-        id: 'run-2',
-        inferenceExecutorId: 'openai:gpt-4.1-mini',
-        judgeAverage: 0.2,
-        matrix: createScheduledTaskMatrix(),
-        strictExactAverage: 0.2,
-      }],
-    }), {
-      maxFailedRuns: {
-        maxFailedRuns: 1,
-        minRunHybridScore: 0.6,
-      },
+  /**
+   * @example
+   * threshold.score = 'latency_ok' gates on that score instead of the primary one.
+   */
+  it('gates on a named score when the policy names one', () => {
+    const decision = processRunResults(aggregateRunResults([run('run-1', 0.9, [summary('latency_ok', 2, 10)])]), {
+      maxFailedRuns: { maxFailedRuns: 1, score: 'latency_ok' },
+      threshold: { score: { name: 'latency_ok' } },
     })
 
-    expect(decision.pass).toBe(false)
-    expect(decision.violations.map(violation => violation.policyId)).toContain('hard-limit:max-failed-runs')
+    expect(decision.violations.map(violation => violation.reason)).toEqual([
+      'Overall latency_ok mean 0.2 is below 0.7.',
+      'Provider openai:gpt-4.1-mini latency_ok mean 0.2 is below 0.6.',
+    ])
+  })
+
+  /**
+   * @example
+   * runs without a primary score -> each group reports that it has no primary score.
+   */
+  it('reports a violation when there is no primary score to gate on', () => {
+    const results = aggregateRunResults([{ ...run('run-1', 1), primary: undefined, scores: [summary('a', 1, 1), summary('b', 1, 1)] }])
+    const decision = processRunResults(results, { maxFailedRuns: { maxFailedRuns: 1 } })
+
+    expect(decision.violations).toEqual([
+      { policyId: 'threshold:overall', reason: 'Overall has no primary score.' },
+      { policyId: 'threshold:inferenceExecutor', reason: 'Provider openai:gpt-4.1-mini has no primary score.' },
+    ])
+  })
+
+  /**
+   * @example
+   * two runs below minRunScore 0.6 with maxFailedRuns 1 -> one hard-limit violation.
+   */
+  it('fails the hard-limit policy when failed runs exceed maxFailedRuns', () => {
+    const decision = processRunResults(aggregateRunResults([run('run-1', 0.5), run('run-2', 0.4), run('run-3', 1)]), {
+      maxFailedRuns: { maxFailedRuns: 1 },
+      threshold: { minOverall: 0, minPerExecutor: 0 },
+    })
+
+    expect(decision.violations).toEqual([{
+      policyId: 'hard-limit:max-failed-runs',
+      reason: 'Failed runs 2 exceed maxFailedRuns 1 with minRunScore 0.6.',
+    }])
   })
 })

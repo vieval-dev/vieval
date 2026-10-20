@@ -99,7 +99,7 @@ function choose(id: unknown): void {
                   <span :class="['flex items-center gap-2 min-w-0']">
                     <StateBadge v-if="option.state" :state="option.state" icon-only />
                     <span :class="['font-medium truncate']">{{ option.label }}</span>
-                    <span v-if="option.exact !== undefined" :class="['ml-auto shrink-0 tabular-nums text-xs font-semibold']">{{ formatScore(option.exact) }}</span>
+                    <span v-if="option.score !== undefined" :class="['ml-auto shrink-0 tabular-nums text-xs font-semibold']" :title="option.scoreLabel">{{ formatScore(option.score) }}</span>
                   </span>
                   <span v-if="option.chips?.length" :class="['flex flex-wrap gap-1']">
                     <span v-for="chip in option.chips" :key="chip.axis" :class="['badge state-neutral font-normal']"><span class="muted">{{ chip.axis }}</span>{{ chip.values }}</span>

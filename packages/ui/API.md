@@ -33,13 +33,13 @@ schemas. This document explains the routes and the rules behind the numbers.
 | `live-bus` | Run of this process (`vieval run --with-viewer`) | `onRunReady` → `bus.onAny`; every event from `seq` 1. |
 | `live-tail` | Run directory without an end event and without `run-summary.json` (another process is writing it) | Byte-offset tail of `events.jsonl`: only complete lines, a half-written line waits for the next read, multi-byte characters stay intact, a truncated or replaced file restarts from byte 0. `fs.watch` + 1 s polling while a stream is open; on demand otherwise. |
 | `offline` | Run directory with an end event or `run-summary.json` | Same reader, read to the end once; official numbers from `run-summary.json`. |
-| `legacy` | `events.jsonl` with event schema version 1 | Rebuilt from `cases.jsonl` + `run-summary.json` (no rounds, retries, logs). |
+| `unsupported` | `events.jsonl` with event schema version below 3 | Listed, not opened: every route but `GET /api/runs/:runKey` answers 422 "This report was written by an older vieval. Run it again." |
 
 All sources feed one reducer (`src/shared/reduce.ts`). Envelopes with a `seq` at or below the last applied one are
 dropped (duplicates); missing numbers are counted in `seqGaps`; invalid lines in `parseErrors`.
 
 `state`: `running`, `stale` (no end event and the last event is older than `--stale-after`, default 60 min),
-`ended`, `interrupted` (`run.interrupted` or `interruptSignal` in the summary), `legacy`.
+`ended`, `interrupted` (`run.interrupted` or `interruptSignal` in the summary), `unsupported`.
 
 ## Routes
 
@@ -49,27 +49,45 @@ dropped (duplicates); missing numbers are counted in `seqGaps`; invalid lines in
 |---|---|---|
 | `GET /api/health` | `{ ok, apiVersion, mode, reportRoots, evidenceRoots, logDirectories }` | |
 | `GET /api/tree` | `TreeResponse` | `workspaces[].projects[].experiments[].attempts[].runs[]` (`RunListItem`). Project = report path segment. Current vieval writes one run per project; older reports may use `multi-project` for runs of several projects (see `projectIds`). |
-| `GET /api/runs?workspace=&project=&experiment=&attempt=&state=&source=` | `RunListItem[]` | Newest first. `counts`, `exactAverage`/`judgeAverage`/`hybridAverage` (from `run-summary.json` once written, else from events). `reportRoot` is the absolute report root the run was found in (tells archived roots apart), `reportPath` the directory below it. `matrix`: run-matrix axes of the run's tasks with their distinct values in natural order (`{ model: ['gpt-5.5'], repeat: ['1', '2', '10'] }`), `{}` without a run matrix. |
+| `GET /api/runs?workspace=&project=&experiment=&attempt=&state=&source=` | `RunListItem[]` | Newest first. `counts`, `headline` (a `HeadlineResult`, see "Scores": from `run-summary.json` once written, else from events; `null` before any case settled) and `headlineDefinitions` (the latest `score.defined` of each score in `headline`, for its label and description). `reportRoot` is the absolute report root the run was found in (tells archived roots apart), `reportPath` the directory below it. `matrix`: run-matrix axes of the run's tasks with their distinct values in natural order (`{ model: ['gpt-5.5'], repeat: ['1', '2', '10'] }`), `{}` without a run matrix. |
 | `GET /api/runs/:runKey` | `RunListItem` | |
 
 ### Run
 
 | Route | Response | Notes |
 |---|---|---|
-| `GET /api/runs/:runKey/snapshot` | `RunSnapshot` | Identity, state, `seq`, projects, tasks → cases → rounds → tries (the execution tree), `progress`, `current`, `summary`, `eventCounts`. |
+| `GET /api/runs/:runKey/snapshot` | `RunSnapshot` | Identity, state, `seq`, projects, tasks → cases → rounds → tries (the execution tree), `progress`, `current`, `summary` (`caseSummary` and `headline` of `run-summary.json`), `headline` (from events), `scoreDefinitions`, `eventCounts`. Each task has `scoring` (a `CaseScoring`) and `scoreGraders` (every distinct grader kind, model, and version its score records carried, by score name); each case and round has `scores` (`{ values, unscored }`). |
 | `GET /api/runs/:runKey/progress` | `ProgressResponse` | `progress` + `current` + `state` + `seq`, for polling. |
 | `GET /api/runs/:runKey/events?after=<seq>&limit=<1..5000>` | `{ events, nextAfter, seq }` | Raw envelopes after `after` (default 0, limit default 1000). |
 | `GET /api/runs/:runKey/stream?after=<seq>` | `text/event-stream` | See "Live updates". `Last-Event-ID` is honored. |
 | `GET /api/runs/:runKey/task?taskId=` | `TaskNode` | |
-| `GET /api/runs/:runKey/case?taskId=&caseId=` | `CaseDetail` | Node + `input`, `output`, `metrics`, `metricDefinitions` (latest `metric.defined` of each metric), `artifacts` (with `label` / `description` when recorded), `evidence`, `inference` (inference and tool-call events), `taskDisplayName`. |
+| `GET /api/runs/:runKey/case?taskId=&caseId=` | `CaseDetail` | Node + `input`, `output`, `metrics`, `metricDefinitions` (latest `metric.defined` of each metric), `scoreDefinitions` (latest `score.defined` of each score of the task), `scoreRecords` (every `score.recorded` of the case in event order, with `roundIndex`, `seq`, and the record's `rationale`, `grader`, `metadata`, and `derived`), `artifacts` (with `label` / `description` when recorded), `evidence`, `inference` (inference and tool-call events), `taskDisplayName`. |
 | `GET /api/runs/:runKey/timeline?taskId=&caseId=` | `TimelineResponse` | Every try with round, retry index, times, state; per task a summary per round (passed/failed/running, start/end). |
 | `GET /api/runs/:runKey/logs?taskId=&caseId=&stream=stdout\|stderr&round=&offset=&limit=<1..5000>` | `LogsResponse` | Console output of cases (`case.output`), split into lines. Output outside cases is not recorded by vieval. |
-| `GET /api/runs/:runKey/metrics?taskId=&caseId=` | `MetricsResponse` | Numeric metrics as series with `min/max/avg/sum/count`; other values listed; `definitions`: the latest `metric.defined` (label, description, unit, better) of each listed metric; inference totals. |
-| `GET /api/runs/:runKey/scores` | `ScoresResponse` | `overall`, `byTask`, `byRound`, `cases`, `summary` (from `run-summary.json`). |
+| `GET /api/runs/:runKey/metrics?taskId=&caseId=` | `MetricsResponse` | Numeric metrics as series with `min/max/avg/sum/count`; other values listed; `definitions`: the latest `metric.defined` (label, description, unit, better) of each listed metric; inference totals. `scores`: each score beside the metrics, with one point per case (the counted value of its last round) and the `ScoreSummary` of the selection; `scoreDefinitions` for their labels. |
+| `GET /api/runs/:runKey/scores` | `ScoresResponse` | `overall` (`headline` and each score pooled over the tasks), `byTask` and `byRound` (a `CaseScoring` each), `cases` (`scores` of each case), `definitions` (latest `score.defined` of each score), `summary` (the `HeadlineResult` of `run-summary.json`, once written). |
 
-**Score rule** (same as `describeTask`): every settled round of every case contributes; a case that did not pass
-scores exact 0; a passed case without `recordScore` scores exact 1; otherwise its recorded `exact` (default 1) and
-`judge`. `hybrid = (exact + judge) / 2` when both exist. Task scores are averaged into `overall`.
+**Scores**: the viewer computes scores with `scoreCases` of `vieval/core/scoring`, the rule of `describeTask`, so
+live runs, `run-summary.json`, and `cases.jsonl` agree. Every settled round of every case contributes. Per score:
+
+- `passed`: the recorded (or derived) value; a passed case that did not record the score is missing, not 1.
+- `failed`: 0. Recorded values stay in `scoreRecords` but are not counted.
+- `errored`, `timeout`: left out, or 0 when the score's `score.defined` has `errors: 'zero'`.
+- `skipped`: left out. An unscored value (`recordUnscored`) never counts; it is counted per reason in `unscored`.
+
+A `ScoreSummary` is `{ name, mean, n, total, sum, unscored }`: `mean = sum / n` (`null` when `n` is 0), `n` the cases
+that counted, `total` the settled cases that were not skipped. A `CaseScoring` (one task, one round) is
+`{ scores, primary?, completion, passed }`: `primary` is the score declared `primary`, or the only score of the task;
+`completion` is the completion rate (`(passed + failed) / settled`, with `errored` / `timeout` counts in `unscored`);
+`passed` is the share of passed cases. Summaries of several tasks pool their cases (`poolScoreSummaries`); they are
+not a mean of task means.
+
+A `HeadlineResult` is `{ headline, completion }`, resolved with `resolveHeadline`: `headline.kind` is `score` (every
+task with scores shares one primary name; its pooled summary), `per-task` (primary names differ; one summary per task
+in `tasks`), or `passed-cases` (no primary score; the share of passed cases in `score`). Show `completion` next to the
+headline wherever it appears. Labels and descriptions come from the `scoreDefinitions` / `headlineDefinitions` of the
+response (`score.defined`: `label`, `description`, `primary`, `combine`, `errors`, `grader`); a name without a
+definition is shown as written.
 
 **Progress and ETA**: `T` = `run.started.totalTasks`; a task's case total is its first `case.started.total` (unknown
 until the task starts; unknown totals are extrapolated from the mean of known ones: `basis:
@@ -132,9 +150,9 @@ evidence link.
 
 | Route | Response |
 |---|---|
-| `GET /api/runs/:runKey/otel/traces` | Span tree `run → project → task → (round) → case → (try)` rebuilt from events, with ids, times, status. |
+| `GET /api/runs/:runKey/otel/traces` | Span tree `run → project → task → (round) → case → (try)` rebuilt from events, with ids, times, status. Task spans carry `vieval.score.<name>` (the task mean) and `vieval.task.primary_score`; case spans carry `vieval.score.<name>` and `vieval.score.<name>.unscored`. |
 | `GET /api/runs/:runKey/otel/logs` | Console lines (INFO/WARN), case failures and inference failures (ERROR), interruption (WARN). |
-| `GET /api/runs/:runKey/otel/metrics` | Gauges: numeric metrics, `vieval.case.duration_ms`, `vieval.case.score.{exact,judge}`. |
+| `GET /api/runs/:runKey/otel/metrics` | Gauges: numeric metrics, `vieval.case.duration_ms`, and one `vieval.score.<name>` per score. |
 | `GET /api/runs/:runKey/otel/raw/:signal` | `otlp/<traces\|logs\|metrics>.json` written by vieval when the run ended (`404` before). |
 
 Limits: no OTLP receiver, no user-defined spans, no cross-process trace correlation, no sampling, querying, or
@@ -143,7 +161,9 @@ storage. Spans of the live OpenTelemetry runtime are not collected.
 ### Comparisons
 
 All return `ComparisonResponse`: `columns` (each with the runs it covers), `rows` (one per case name; `cells[column]`
-= `{ state, exact?, judge?, roundCount }`; `changed` when state or exact score differs between columns), `summary`.
+= `{ state, scores, roundCount }`, `scores` being `{ values, unscored }`; `changed` when the state or the value of
+`primary` differs between columns), `primary` (the primary score the rows compare, when the columns share one; without
+it, `changed` uses the state only), `scoreDefinitions`, `summary`. Each column's runs carry `headline`.
 
 | Route | Columns |
 |---|---|
@@ -151,26 +171,28 @@ All return `ComparisonResponse`: `columns` (each with the runs it covers), `rows
 | `GET /api/compare/attempts?workspace=&project=&experiment=` | One per run of the experiment (attempt label + run id), oldest first. |
 | `GET /api/compare/runs?runs=<runKey>,<runKey>[,…]` | The given runs, in order (≥ 2). |
 
+Each column carries `scoreGraders`, the graders that produced each score in its runs. The viewer warns on the primary score when the graders of the columns differ in kind, model, or version, because the values then do not measure the same thing.
+
 ### Matrix
 
 | Route | Response | Notes |
 |---|---|---|
 | `GET /api/matrix?workspace=&project=&experiment=` | `MatrixResponse` | Every run in scope (filters as in `/api/runs`; none = all runs; an unknown value is an empty matrix). |
 
-A cell is one eval entry × run-matrix row × eval-matrix row (from the task id). Every run of a cell has a `coverage`:
+A cell is one eval entry × run-matrix row × eval-matrix row (from the task id). Every run of a cell has a `coverage` (the case coverage of the cell, not the completion rate):
 `full` (every expected case settled and at least one has a result; errored cases count as settled, over the same cases
 as the headline run), `other` (every expected case settled, but over other cases than the headline run, told apart by
 `identity`: a smoke or limited run, or another case set under the same entry), `partial` (some expected cases never ran or never settled), or `none` (no case has a result). `latest` is the task
 of the newest run (by start time) that covered the cell fully or is still running it, else of the newest run: run,
-experiment, attempt, task state, coverage, expected case total (`caseTotal`), case counts, the exact score of every case
-(`caseScores`), exact and judge score. The headline run is the newest one that settled every case it planned over cases no other run covers a strict
+experiment, attempt, task state, coverage, expected case total (`caseTotal`), case counts, the primary score of every
+case (`caseScores`), and the task's `scoring` (a `CaseScoring`). The headline run is the newest one that settled every case it planned over cases no other run covers a strict
 superset of; `caseCount` is its number of cases. A partial re-run or a run over other cases therefore never replaces a full run as the
 cell's score. `superseded` is `true` when a newer run ran the same entry and run row with other eval values (the eval
 axes changed since). `history` lists every run with that cell, oldest first
-(one point per run: attempt, coverage, case counts, exact, state, start time). Two tasks of one
+(one point per run: attempt, coverage, case counts, `score` (mean of the cell's primary score), `completion`, state, start time). Two tasks of one
 run in the same cell (several inference executors) keep the last one in queue order. `axes` lists the run-matrix axes,
 then the eval-matrix axes, each with its values in natural order. Cells are ordered by entry, then run row and eval
-row in natural order. Tasks whose id has no matrix are left out. The route builds every run's task nodes once.
+row in natural order. Tasks whose id has no matrix are left out. `scoreDefinitions` holds the latest `score.defined` of each score in the cells. The route builds every run's task nodes once.
 
 ## Live updates (SSE)
 
@@ -196,7 +218,7 @@ data: {"seq":251,"state":"ended"}                   ← terminal state reached; 
 ```
 
 Client pattern: `GET /snapshot`, then open the stream with `after=snapshot.seq` and apply each `run-event` with the
-same reducer (`@vieval/ui/reduce`). Finished and legacy runs send their backlog, one `progress`, and `end`.
+same reducer (`@vieval/ui/reduce`). Finished runs send their backlog, one `progress`, and `end`.
 
 ## Security
 

@@ -1,6 +1,5 @@
 import type { Eventa } from '@moeru/eventa'
 
-import type { RunScoreKind } from '../core/runner/aggregate'
 import type { TelemetryAttributeValue } from '../core/telemetry/types'
 
 import { defineEventa } from '@moeru/eventa'
@@ -24,10 +23,11 @@ export { defineEventa } from '@moeru/eventa'
  *   keep accepting newer logs (payload schemas ignore unknown keys, and readers skip unknown events)
  * - renaming, removing, or retyping an envelope or payload field bumps the version
  *
- * Optional fields added within version 2: `case.started` / `case.ended` `attemptIndex` and `autoAttempt`;
- * `artifact.recorded` `label` and `description`. Events added within version 2: `metric.defined`.
+ * Version 3 replaced the `exact` / `judge` score kinds with named scores: `score.recorded` carries `name` and
+ * `value` (or `unscored`) instead of `kind` and `score`, and `score.defined` declares a score. Readers reject
+ * envelopes of older versions.
  */
-export const RUN_EVENT_SCHEMA_VERSION = 2
+export const RUN_EVENT_SCHEMA_VERSION = 3
 
 /**
  * One typed run event definition.
@@ -272,11 +272,79 @@ export const metricRecordedDataSchema = v.object({
   value: metricValueSchema,
 })
 
-/** Payload of {@link scoreRecorded}. */
-export const scoreRecordedDataSchema = v.object({
-  kind: v.picklist(['exact', 'judge'] satisfies RunScoreKind[]),
-  score: v.number(),
+/** What produced a score value. */
+export const graderSchema = v.object({
+  /** Stable name, for example `listener`, `judge`, or `grader.chem`; matches the `role` of the grader's inference events. */
+  id: v.optional(v.string()),
+  /**
+   * `rule`: deterministic code. `model`: an LLM or another model. `human`: a reviewer. `external`: the verifier of
+   * another harness, for example a Harbor `tests/test.sh`.
+   */
+  kind: v.picklist(['external', 'human', 'model', 'rule']),
+  /** Model id when `kind` is `model`. */
+  model: v.optional(v.string()),
+  /** How several votes were reduced to the value, for example `majority` or `median`. */
+  reducer: v.optional(v.string()),
+  /** Version of the grader: a prompt hash, a rule set version, or a package version. */
+  version: v.optional(v.string()),
+  /** Number of votes when the value reduces several answers. */
+  votes: v.optional(v.number()),
 })
+
+/** How a derived score combines other scores of the same case try. */
+export const scoreCombinationSchema = v.object({
+  inputs: v.array(v.object({
+    /** `all` only: the least value at which this input passes. */
+    atLeast: v.optional(v.number()),
+    name: v.string(),
+    /** `weighted` only: the weight of this input; weights are normalized. */
+    weight: v.optional(v.number()),
+  })),
+  /** `all`: 1 when every input reaches its `atLeast` (default 1), else 0. `mean`: the mean. `weighted`: the weighted mean. */
+  kind: v.picklist(['all', 'mean', 'weighted']),
+})
+
+/** Payload of {@link scoreDefined}. */
+export const scoreDefinedDataSchema = v.object({
+  /** Present when the runtime derives this score from other scores; a case cannot record it. */
+  combine: v.optional(scoreCombinationSchema),
+  /** What the score measures and how to read it. */
+  description: v.optional(localizedTextSchema),
+  /** How an errored or timed-out case counts: left out (`exclude`, the default) or as 0 (`zero`). */
+  errors: v.optional(v.picklist(['exclude', 'zero'])),
+  /** What usually produces the value; a record can override it. */
+  grader: v.optional(graderSchema),
+  /** Human-readable name shown instead of `name`. */
+  label: v.optional(localizedTextSchema),
+  /** Score name, the same as in `score.recorded`. */
+  name: v.string(),
+  /** Whether this is the headline score of its task. At most one score of a task is primary. */
+  primary: v.optional(v.boolean()),
+})
+
+const scoreRecordedEntries = {
+  /** Whether the runtime derived the value from other scores (`score.defined` `combine`). */
+  derived: v.optional(v.boolean()),
+  /** What produced this value; overrides the definition's `grader`. */
+  grader: v.optional(graderSchema),
+  /** Other details of the value. */
+  metadata: v.optional(v.record(v.string(), v.unknown())),
+  name: v.string(),
+  /** Why the score has this value: a judge's reasoning, or the rule that matched. */
+  rationale: v.optional(v.string()),
+}
+
+/**
+ * Payload of {@link scoreRecorded}: a value in `0..1`, or `unscored` when the grader could not produce one.
+ */
+export const scoreRecordedDataSchema = v.union([
+  v.object({ ...scoreRecordedEntries, value: v.number() }),
+  v.object({
+    ...scoreRecordedEntries,
+    /** The grader produced no value, for a reason such as `grader_failed`, `invalid_response`, `no_response`, or `refusal`. */
+    unscored: v.object({ reason: v.string() }),
+  }),
+])
 
 /** Payload of {@link artifactRecorded}. */
 export const artifactRecordedDataSchema = v.object({
@@ -330,6 +398,7 @@ export type CaseEndedData = v.InferOutput<typeof caseEndedDataSchema>
 export type CaseOutputData = v.InferOutput<typeof caseOutputDataSchema>
 export type CaseRequeuedData = v.InferOutput<typeof caseRequeuedDataSchema>
 export type CaseStartedData = v.InferOutput<typeof caseStartedDataSchema>
+export type Grader = v.InferOutput<typeof graderSchema>
 export type InferenceFailedData = v.InferOutput<typeof inferenceFailedDataSchema>
 export type InferenceRequestedData = v.InferOutput<typeof inferenceRequestedDataSchema>
 export type InferenceRespondedData = v.InferOutput<typeof inferenceRespondedDataSchema>
@@ -341,6 +410,8 @@ export type ProjectStartedData = v.InferOutput<typeof projectStartedDataSchema>
 export type RunEndedData = v.InferOutput<typeof runEndedDataSchema>
 export type RunInterruptedData = v.InferOutput<typeof runInterruptedDataSchema>
 export type RunStartedData = v.InferOutput<typeof runStartedDataSchema>
+export type ScoreCombinationData = v.InferOutput<typeof scoreCombinationSchema>
+export type ScoreDefinedData = v.InferOutput<typeof scoreDefinedDataSchema>
 export type ScoreRecordedData = v.InferOutput<typeof scoreRecordedDataSchema>
 export type TaskEndedData = v.InferOutput<typeof taskEndedDataSchema>
 export type TaskQueuedData = v.InferOutput<typeof taskQueuedDataSchema>
@@ -381,7 +452,12 @@ export const caseOutput = defineEventa<CaseOutputData>('case.output')
 export const metricDefined = defineEventa<MetricDefinedData>('metric.defined')
 /** Case code recorded one metric. */
 export const metricRecorded = defineEventa<MetricRecordedData>('metric.recorded')
-/** Case code recorded one score. */
+/**
+ * Label, description, combination, and grader of one score; emitted by its task before the first value of the score,
+ * and again when they change. Viewers keep the latest per score name.
+ */
+export const scoreDefined = defineEventa<ScoreDefinedData>('score.defined')
+/** Case code recorded one score value or an unscored value, or the runtime derived one when the case try settled. */
 export const scoreRecorded = defineEventa<ScoreRecordedData>('score.recorded')
 /** Case code recorded one artifact file. */
 export const artifactRecorded = defineEventa<ArtifactRecordedData>('artifact.recorded')

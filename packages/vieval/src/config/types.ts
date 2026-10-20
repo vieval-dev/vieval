@@ -1,8 +1,7 @@
-import type { RunScore } from '../core/runner'
 import type { ScheduledTask } from '../core/runner/schedule'
 import type { TaskExecutionContext } from '../core/runner/task-context'
 import type { Scheduler } from '../core/scheduler/types'
-import type { CaseCoverage } from '../core/scoring'
+import type { ScoreSummary } from '../core/scoring'
 import type { TelemetryRuntime } from '../core/telemetry'
 import type { RunEventEmitter } from '../events'
 
@@ -628,13 +627,21 @@ export interface TaskRunContext {
  */
 export interface TaskRunOutput {
   /**
-   * Measured and settled case counts of this task run. A task without cases leaves it out.
+   * Completion rate of this task run (`scoreCases`). A task without cases leaves it out.
    */
-  coverage?: CaseCoverage
+  completion?: ScoreSummary
   /**
-   * Scores emitted by this task run.
+   * Share of passed cases of this task run. A task without cases leaves it out.
    */
-  scores: readonly RunScore[]
+  passed?: ScoreSummary
+  /**
+   * Name of the headline score of this task run, when it has one.
+   */
+  primary?: string
+  /**
+   * One summary per score of this task run.
+   */
+  scores: readonly ScoreSummary[]
 }
 
 /**

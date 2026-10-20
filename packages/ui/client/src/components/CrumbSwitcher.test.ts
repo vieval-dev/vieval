@@ -8,9 +8,9 @@ import CrumbSwitcher from './CrumbSwitcher.vue'
 
 /** Experiments of one project as the breadcrumb of an experiment page offers them. */
 const options: SwitcherOption[] = [
-  { detail: '10 attempt(s)', exact: 0.438, href: '#/?experiment=matrix-run-model-gpt-5.5-repeat-1&project=p&workspace=w', id: 'matrix-run-model-gpt-5.5-repeat-1', label: 'model gpt-5.5 · repeat 1', state: 'ended' },
-  { chips: [{ axis: 'model', values: 'gpt-5.5' }], detail: '1 attempt(s)', exact: 0.496, href: '#/?experiment=auv-c759d695&project=p&workspace=w', id: 'auv-c759d695', label: 'auv-c759d695', state: 'ended' },
-  { detail: '1 attempt(s)', exact: 1, href: '#/?experiment=matrix-run-model-gpt-5.5-repeat-1--run-model-gpt-5.5-repeat-3&project=p&workspace=w', id: 'matrix-run-model-gpt-5.5-repeat-1--run-model-gpt-5.5-repeat-3', label: 'model gpt-5.5 · repeat 1–3', state: 'legacy' },
+  { detail: '10 attempt(s)', href: '#/?experiment=matrix-run-model-gpt-5.5-repeat-1&project=p&workspace=w', id: 'matrix-run-model-gpt-5.5-repeat-1', label: 'model gpt-5.5 · repeat 1', score: 0.438, scoreLabel: 'Pass', state: 'ended' },
+  { chips: [{ axis: 'model', values: 'gpt-5.5' }], detail: '1 attempt(s)', href: '#/?experiment=auv-c759d695&project=p&workspace=w', id: 'auv-c759d695', label: 'auv-c759d695', score: 0.496, scoreLabel: 'Pass', state: 'ended' },
+  { detail: '1 attempt(s)', href: '#/?experiment=matrix-run-model-gpt-5.5-repeat-1--run-model-gpt-5.5-repeat-3&project=p&workspace=w', id: 'matrix-run-model-gpt-5.5-repeat-1--run-model-gpt-5.5-repeat-3', label: 'model gpt-5.5 · repeat 1–3', score: 1, scoreLabel: 'Pass', state: 'unsupported' },
 ]
 
 describe('crumbSwitcher', () => {

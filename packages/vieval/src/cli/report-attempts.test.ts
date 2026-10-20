@@ -30,6 +30,7 @@ async function writeRun(root: string, options: {
     await writeFile(join(runDirectory, 'run-summary.json'), JSON.stringify({
       projects: [{ caseSummary: { ...cases, skipped: 0, total: cases.errored + cases.failed + cases.passed + cases.timeout } }],
       ...(options.resumedFrom == null ? {} : { resumedFrom: options.resumedFrom }),
+      schemaVersion: 2,
     }))
   }
   await utimes(attemptDirectory, new Date(options.modifiedAt), new Date(options.modifiedAt))
@@ -54,7 +55,7 @@ describe('listAttempts', () => {
       ['attempt-1', false, ['llm', 'rule']],
     ])
     expect(rows[1]!.cases).toEqual({ errored: 2, failed: 1, passed: 9, timeout: 1, total: 13 })
-    expect(rows[1]!.coverage).toBeCloseTo(10 / 13)
+    expect(rows[1]!.completion).toBeCloseTo(10 / 13)
     expect(rows[0]!.resumedFrom).toBe('attempt-1')
     expect(formatAttemptsTable(rows)).toContain('resumed attempt-1')
   })
@@ -72,7 +73,25 @@ describe('listAttempts', () => {
     const [llm] = await listAttempts(root, { workspace: ['llm'] })
 
     expect(llm!.unfinishedRuns).toBe(1)
-    expect(llm!.coverage).toBeNull()
+    expect(llm!.completion).toBeNull()
     expect(formatAttemptsTable([llm!])).toContain('1 run without summary')
+  })
+
+  /**
+   * @example
+   * a run-summary.json of schema version 1 is rejected, as every report reader rejects older reports.
+   */
+  it('rejects a run summary written by an older vieval', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'vieval-attempts-'))
+    temporaryDirectories.push(root)
+    const runDirectory = join(root, 'llm', 'project', 'experiment-a', 'attempt-1', 'run-a')
+    await mkdir(runDirectory, { recursive: true })
+    await writeFile(join(runDirectory, 'run-summary.json'), JSON.stringify({ projects: [], schemaVersion: 1 }))
+
+    /**
+     * @example
+     * await expect(listAttempts(root)).rejects.toThrow('This report was written by an older vieval. Run it again.')
+     */
+    await expect(listAttempts(root)).rejects.toThrow('This report was written by an older vieval. Run it again.')
   })
 })

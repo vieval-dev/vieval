@@ -140,6 +140,33 @@ describeTask('arithmetic-quality', ({ casesFromInputs }) => {
 })
 ```
 
+Declare the scores a task measures with `defineScore`. Each score is a named value in `0..1` where higher is better; one score per task is `primary` and becomes the headline, shown next to the completion rate. A derived score (`combine: { all | mean | weighted }`) is computed by the runtime when the case try settles:
+
+```ts
+import { caseOf, defineScore, describeTask } from 'vieval'
+
+const correct = defineScore('formula.correct', { label: { 'en': 'Correct', 'zh-Hans': '正确' } })
+const natural = defineScore('formula.natural', { grader: { id: 'judge', kind: 'model' } })
+const pass = defineScore('formula.pass', {
+  combine: { all: [correct, { atLeast: 0.5, score: natural }] },
+  label: 'Pass',
+  primary: true,
+})
+
+describeTask('read-formula', () => {
+  caseOf('fraction', async (context) => {
+    const { listenerScore, verdict } = await readAloud('1/2')
+    context.recordScore(correct, listenerScore)
+    if (verdict == null)
+      context.recordUnscored(natural, 'invalid_response')
+    else
+      context.recordScore(natural, verdict.score, { rationale: verdict.reason })
+  })
+}, { scores: [correct, natural, pass] })
+```
+
+A failed case counts `0` in every score. An errored or timed-out case is left out (`errors: 'exclude'`, the default) or counts `0` (`errors: 'zero'`), and lowers the completion rate either way. An unscored value never counts. Latency and cost are metrics (`defineMetric` with `better: 'lower'`), not scores.
+
 `describeEval` remains exported as an alias of `describeTask`, but new examples should prefer `describeTask` because task/case semantics are the primary runtime model.
 
 Every `describeTask` call in an eval file is its own task:
@@ -182,7 +209,8 @@ Each scheduled task receives stable matrix metadata:
 - `project`: the complete unit of work: discovery rules (`include`, `exclude`, `root`), `runMatrix` / `evalMatrix`, `models`, `inferenceExecutors`, optional `executor`, `plugins`, `reporters`, and `scheduler`.
 - `experiment`: run metadata derived from explicit `--experiment` or, when omitted, stable matrix row metadata. It does not create an extra scheduler layer.
 - `task`: one eval definition discovered from files and expanded across inference executors plus run/eval matrix rows.
-- `case`: the scoring and evidence source inside a task. `context.recordScore(...)` contributes normalized score evidence; `context.recordMetric(...)` emits benchmark metadata for reports.
+- `case`: the scoring and evidence source inside a task. `context.recordScore(score, value)` records a named score declared with `defineScore` (a value in `0..1`, higher is better; one score per task is the primary score); `context.recordUnscored(score, reason)` records that the grader could not produce one; `context.recordMetric(...)` emits benchmark data such as latency or cost for reports.
+- `completion rate`: the share of cases that produced a result (`passed` or `failed`, not `errored` or `timeout`). It is shown next to the primary score everywhere.
 - `attempt`: a full task rerun used to estimate reliability. With `autoAttempt`, each full attempt contributes evidence, so a fail-then-pass pair scores as a success rate rather than replacing the earlier failure.
 - `retry`: an in-case retry. With `autoRetry`, a case can recover inside one attempt; a retry pass still counts as that attempt passing.
 
@@ -260,6 +288,7 @@ If a project provides no `executor`, `vieval run` still discovers eval files, sc
 
 ```ts
 import { defineConfig } from 'vieval'
+import { scoreCases } from 'vieval/core/scoring'
 
 export default defineConfig({
   projects: [
@@ -282,7 +311,8 @@ export default defineConfig({
           id: task.id,
           inferenceExecutorId: task.inferenceExecutor.id,
           matrix: task.matrix,
-          scores: [{ kind: 'exact', score: success ? 1 : 0 }],
+          // One measurement as one passed outcome; `scoreCases` builds `scores`, `primary`, `completion`, and `passed`.
+          ...scoreCases([{ scores: { 'motion.success': success ? 1 : 0 }, state: 'passed', unscored: {} }]),
         }
       },
       include: ['evals/*.eval.ts'],
@@ -363,7 +393,7 @@ export default defineConfig({
 
 - One live terminal window shows `Workspaces`, `Projects`, `Tasks`, `Cases`, `Concurrency`, and `Time` rows for all workspaces.
 - A failing workspace does not stop the others.
-- At the end, a leaderboard prints one row per workspace and project, sorted by hybrid score, then the failed workspaces with the last lines of their stderr.
+- At the end, a leaderboard prints one row per workspace and project, ranked by the primary score with the completion rate in its own column, then the failed workspaces with the last lines of their stderr. If the workspaces have different primary scores, the leaderboard says so and ranks by passed cases.
 - The exit code is `1` when any workspace failed or had failing cases.
 - `--json` prints the comparison output.
 - Reports go to `.vieval/reports` next to the comparison config. The experiment defaults to the comparison id, and all workspaces share one attempt.
@@ -393,7 +423,7 @@ vieval viewer [reportRoot...] [--port <port>] [--host <host>] [--open]
 vieval report analyze <report-directory>
 vieval report index <report-directory> [--output <path>] [--format table|json|jsonl]
 vieval report cases <report-directory> [--where <key=value>] [--group-by <key>] [--format table|json|jsonl]
-vieval report compare <left-report-directory> <right-report-directory> [--case-key <key>] [--score-kind <kind>] [--format table|json]
+vieval report compare <left-report-directory> <right-report-directory> [--case-key <key>] [--score <name>] [--format table|json]
 ```
 
 `vieval run --config <comparison config>` runs a comparison; there is no separate `vieval compare` command. `vieval report compare` diffs two existing reports.
@@ -427,11 +457,13 @@ A concurrency value is shared by the work where it is declared: top-level `sched
 
 ## Public Entrypoints
 
-- `vieval`: `defineConfig`, `loadEnv`, `requiredEnvFrom`, `describeTask`, `describeEval`, `caseOf`, `casesFromInputs`, and `expect`.
+- `vieval`: `defineConfig`, `loadEnv`, `requiredEnvFrom`, `describeTask`, `describeEval`, `caseOf`, `casesFromInputs`, `defineScore`, `defineMetric`, and `expect`.
 - `vieval/config`: lower-level `defineEval`, `defineTask`, matrix types, task context types, model definitions, and plugin contracts.
 - `vieval/plugins/chat-models`: `ChatModels`, `ChatProviders`, `chatModelFrom`, `chatProviderFrom`, `chatModelMatrix`, runtime config helpers, and chat telemetry helpers.
 - `vieval/core/runner`: collection, scheduling, task context, cache runtime, scheduler, execution, and aggregation utilities.
-- `vieval/core/assertions`: assertion primitives and pipeline helpers.
+- `vieval/core/assertions`: assertion primitives and pipeline helpers. Outcomes carry a `score`; record it with `context.recordScore(definition, outcome.score)`.
+- `vieval/core/scoring`: the one scoring rule (`scoreCases`), derived scores (`deriveScores`), pooling (`poolScoreSummaries`), and headline resolution (`resolveHeadline`). Side-effect free.
+- `vieval/core/processors/results`: `processRunResults` with the `threshold` (score-threshold) and `maxFailedRuns` policies, gating on the primary score unless `score` names another.
 - `vieval/core/inference-executors`: env helpers and remote provider executors.
 - `vieval/testing/expect-extensions`: Vitest expect extensions for testing eval behavior.
 

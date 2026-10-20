@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 
-import type { CaseRecord, ScoreSummary } from './report-records'
+import type { ScoreSummary } from '../core/scoring'
+import type { CaseRecord } from './report-records'
 
 import process from 'node:process'
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import meow from 'meow'
@@ -12,7 +13,7 @@ import meow from 'meow'
 import { errorMessageFrom } from '@moeru/std'
 import { glob } from 'tinyglobby'
 
-import { encodeJsonl } from './report-records'
+import { encodeJsonl, readCaseRecordFile, summarizeRecordScores } from './report-records'
 import { getCaseSelectorValue } from './report-selectors'
 
 export type ReportCasesFormat = 'json' | 'jsonl' | 'table'
@@ -21,8 +22,8 @@ export type ReportCasesFormat = 'json' | 'jsonl' | 'table'
 export interface ReportCasesGroupSummary {
   /** Number of case records in this group. */
   count: number
-  /** Score averages/sums/counts for this group. */
-  scores: ScoreSummary
+  /** Score summaries of this group by score name, counted as in `metrics-summary.json`. */
+  scores: Record<string, ScoreSummary>
 }
 
 /** Options for inspecting normalized `cases.jsonl` report artifacts. */
@@ -97,10 +98,11 @@ export function buildReportCasesOutput(
  * - callers may pass a run directory, a `cases.jsonl` file, or a report root
  *
  * Expects:
- * - discovered `cases.jsonl` files contain one `CaseRecord` JSON object per line
+ * - discovered `cases.jsonl` files contain one current `CaseRecord` JSON object per line
  *
  * Returns:
  * - all parsed case records sorted by discovered file path order
+ * - throws for records written by an older vieval (see {@link readCaseRecordFile})
  */
 export async function readCaseRecordsFromReport(reportPath: string): Promise<CaseRecord[]> {
   const caseFilePaths = await resolveCaseRecordPaths(reportPath)
@@ -108,27 +110,7 @@ export async function readCaseRecordsFromReport(reportPath: string): Promise<Cas
     throw new Error(`No cases.jsonl files found under "${resolve(reportPath)}".`)
   }
 
-  const records: CaseRecord[] = []
-
-  for (const caseFilePath of caseFilePaths) {
-    const contents = readFileSync(caseFilePath, 'utf-8')
-    const lines = contents.split('\n')
-    for (const [index, line] of lines.entries()) {
-      const trimmed = line.trim()
-      if (trimmed.length === 0) {
-        continue
-      }
-
-      try {
-        records.push(JSON.parse(trimmed) as CaseRecord)
-      }
-      catch (error) {
-        throw new Error(`Invalid cases.jsonl line ${index + 1} in "${caseFilePath}": ${errorMessageFrom(error) ?? 'Unknown JSON parse failure.'}`)
-      }
-    }
-  }
-
-  return records
+  return caseFilePaths.flatMap(caseFilePath => readCaseRecordFile(caseFilePath))
 }
 
 /**
@@ -175,16 +157,8 @@ export async function runReportCasesCli(argv: readonly string[]): Promise<void> 
   }
 }
 
-function addScores(summary: ScoreSummary, scores: Record<string, number>): void {
-  for (const [scoreName, value] of Object.entries(scores)) {
-    summary[scoreName] ??= { average: 0, count: 0, sum: 0 }
-    summary[scoreName].count += 1
-    summary[scoreName].sum += value
-  }
-}
-
 function buildCaseGroups(records: readonly CaseRecord[], groupBy: string): Record<string, ReportCasesGroupSummary> {
-  const groups: Record<string, ReportCasesGroupSummary> = {}
+  const groups = new Map<string, CaseRecord[]>()
 
   for (const record of records) {
     const resolved = getCaseSelectorValue(record, groupBy)
@@ -193,30 +167,16 @@ function buildCaseGroups(records: readonly CaseRecord[], groupBy: string): Recor
     }
 
     const groupKey = `${groupBy}=${String(resolved.value)}`
-    groups[groupKey] ??= { count: 0, scores: {} }
-    groups[groupKey].count += 1
-    addScores(groups[groupKey].scores, record.scores)
+    groups.set(groupKey, [...(groups.get(groupKey) ?? []), record])
   }
 
   return Object.fromEntries(
-    Object.entries(groups)
+    [...groups]
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([groupKey, group]) => [groupKey, {
-        count: group.count,
-        scores: finalizeScores(group.scores),
+      .map(([groupKey, groupRecords]) => [groupKey, {
+        count: groupRecords.length,
+        scores: summarizeRecordScores(groupRecords),
       } satisfies ReportCasesGroupSummary]),
-  )
-}
-
-function finalizeScores(summary: ScoreSummary): ScoreSummary {
-  return Object.fromEntries(
-    Object.entries(summary)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([scoreName, bucket]) => [scoreName, {
-        average: bucket.count === 0 ? 0 : bucket.sum / bucket.count,
-        count: bucket.count,
-        sum: bucket.sum,
-      }]),
   )
 }
 
@@ -229,8 +189,8 @@ function formatCasesTable(output: ReportCasesOutput): string {
   if (output.groups != null) {
     lines.push('Groups')
     for (const [groupKey, group] of Object.entries(output.groups)) {
-      const scoreText = Object.entries(group.scores)
-        .map(([scoreName, bucket]) => `${scoreName}=${bucket.average.toFixed(3)}`)
+      const scoreText = Object.values(group.scores)
+        .map(summary => `${summary.name}=${summary.mean == null ? '-' : summary.mean.toFixed(3)} (${summary.n}/${summary.total})`)
         .join(' ')
       lines.push(`${groupKey}  count=${group.count}${scoreText.length > 0 ? ` ${scoreText}` : ''}`)
     }

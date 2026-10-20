@@ -8,7 +8,7 @@ module.exports = {
           id: task.id,
           matrix: task.matrix,
           providerId: task.inferenceExecutor.id,
-          scores: [{ kind: 'exact', score: 1 }],
+          scores: [{ mean: 1, n: 1, name: 'byoa.success', sum: 1, total: 1, unscored: {} }],
         }
       },
       include: ['evals/*.eval.ts'],

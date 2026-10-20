@@ -24,14 +24,17 @@ export interface EventTail {
 export interface EventTailRead {
   /** Valid envelopes of the current schema version, in file order. */
   envelopes: RunEvent[]
-  /** A line of event schema version 1 was seen: the file is a legacy report. */
-  legacy: boolean
   /** Complete lines that were not valid envelopes. */
   parseErrors: number
   /** Bytes after the last newline, kept for the next read (a line still being written). */
   partialBytes: number
   /** The file shrank or was replaced: the caller must discard state built from earlier reads. */
   reset: boolean
+  /**
+   * Event schema version of a line older than {@link RUN_EVENT_SCHEMA_VERSION}, when one was seen: an older vieval
+   * wrote the file, and its events cannot be read.
+   */
+  unsupportedVersion?: number
 }
 
 /**
@@ -59,7 +62,7 @@ export function createEventTail(filePath: string): EventTail {
   return {
     offset: () => offset,
     async read() {
-      const result: EventTailRead = { envelopes: [], legacy: false, parseErrors: 0, partialBytes: 0, reset: false }
+      const result: EventTailRead = { envelopes: [], parseErrors: 0, partialBytes: 0, reset: false }
       const info = await stat(filePath).catch(() => undefined)
       if (info == null) {
         return result
@@ -105,8 +108,8 @@ export function createEventTail(filePath: string): EventTail {
           continue
         }
         const parsed = parseEventLine(line)
-        if (parsed === 'legacy') {
-          result.legacy = true
+        if (typeof parsed === 'number') {
+          result.unsupportedVersion ??= parsed
         }
         else if (parsed == null) {
           result.parseErrors += 1
@@ -125,10 +128,10 @@ export function createEventTail(filePath: string): EventTail {
  *
  * Returns:
  * - the envelope for the current schema version
- * - `'legacy'` for schema version 1 lines
+ * - the schema version of a line written by an older vieval (below {@link RUN_EVENT_SCHEMA_VERSION})
  * - `undefined` for anything else
  */
-export function parseEventLine(line: string): 'legacy' | RunEvent | undefined {
+export function parseEventLine(line: string): number | RunEvent | undefined {
   let value: unknown
   try {
     value = JSON.parse(line)
@@ -137,8 +140,8 @@ export function parseEventLine(line: string): 'legacy' | RunEvent | undefined {
     return undefined
   }
   const version = (value as null | { schemaVersion?: unknown })?.schemaVersion
-  if (version === 1) {
-    return 'legacy'
+  if (typeof version === 'number' && version < RUN_EVENT_SCHEMA_VERSION) {
+    return version
   }
   if (version !== RUN_EVENT_SCHEMA_VERSION) {
     return undefined

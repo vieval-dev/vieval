@@ -11,7 +11,6 @@ import {
   expectRubric,
   expectStructuredOutput,
   expectToolCallArgs,
-  toRunScores,
 } from './index'
 
 describe('assertions', () => {
@@ -32,11 +31,7 @@ describe('assertions', () => {
     expect(outcomes.map(outcome => outcome.pass)).toEqual([true, true])
     expect(collectFailedAssertions(outcomes)).toEqual([])
 
-    const runScores = toRunScores(outcomes)
-    expect(runScores).toEqual([
-      { kind: 'exact', score: 1 },
-      { kind: 'exact', score: 1 },
-    ])
+    expect(outcomes.map(outcome => outcome.score)).toEqual([1, 1])
   })
 
   it('supports regex, structured output, and tool-call argument checks', async () => {
@@ -109,7 +104,7 @@ describe('assertions', () => {
     })
 
     expect(outcomes.map(outcome => outcome.pass)).toEqual([true, true])
-    expect(outcomes[1]?.scoreKind).toBe('judge')
+    expect(outcomes[1]?.score).toBeGreaterThanOrEqual(0.8)
   })
 
   it('supports stateful custom assertions for dynamic measurements', async () => {
@@ -127,7 +122,6 @@ describe('assertions', () => {
           }
         },
         id: 'stateful-threshold',
-        scoreKind: 'exact',
       }),
     ], {
       state: new Map([['calls', 1]]),
