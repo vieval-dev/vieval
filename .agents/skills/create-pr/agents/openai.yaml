@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create PR"
+  short_description: "Disclose CLI, DSL, and report changes and migration steps in PRs"
+  default_prompt: "Use $create-pr to prepare a PR with API changes, before-and-after examples, and migration notes."
