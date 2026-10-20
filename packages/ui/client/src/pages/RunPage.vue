@@ -104,9 +104,11 @@ const errorCaseHref = (target: { caseId: string, taskId: string }) => href({ ...
   <PageHeader :id="props.route.runKey" :loading="!live.snapshot.value && !live.error.value" level="run" :position="position" :title="documentTitle">
     <template #title>
       <IdLabel :id="props.route.runKey" :label="label" />
+      <!-- RunDetails renders no element of its own; the wrapper centers the button on the title's first line. -->
+      <span :class="['flex shrink-0 mt-0.5']"><RunDetails :run-id="props.route.runKey" :report-path="props.run?.reportPath" :report-root="props.run?.reportRoot" /></span>
     </template>
     <template #subtitle>
-      <span v-if="position.experiment" :class="['inline-flex items-center gap-1.5 mr-1 align-middle']">
+      <span v-if="position.experiment" :class="['inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mr-1 align-middle']">
         <span :class="[levelIcons.experiment]" aria-hidden="true" />
         <ExperimentName :experiment-id="position.experiment" :matrix="experimentMatrix" :href="position.workspace && position.project ? href({ experiment: position.experiment, name: 'scope', project: position.project, workspace: position.workspace }) : undefined" />
         <template v-if="position.attempt">
@@ -122,15 +124,14 @@ const errorCaseHref = (target: { caseId: string, taskId: string }) => href({ ...
           · interrupted by {{ live.snapshot.value.interruptSignal }}
         </template>
       </template>
-      <RunDetails :run-id="props.route.runKey" :report-path="props.run?.reportPath" :report-root="props.run?.reportRoot" />
     </template>
     <template #actions>
       <!-- The run's score at a glance, on the title's line: the headline with its completion rate, and the case bar
            (counts in its tooltip). A score over part of the cases is not the score of the run, so the completion rate
-           always stands next to it. -->
-      <span v-if="counts && live.snapshot.value" :class="['flex items-center gap-3 mr-1', 'max-md:(w-full mr-0)']" data-testid="run-score">
+           always stands next to it. Phones give the bar the full width and put the score below it. -->
+      <span v-if="counts && live.snapshot.value" :class="['flex items-center gap-3 mr-1', 'max-md:(w-full mr-0 flex-col items-stretch gap-2)']" data-testid="run-score">
         <HeadlineScore :result="live.snapshot.value.headline" :definitions="live.snapshot.value.scoreDefinitions" :task-label="taskLabel" @errors="showErrors" />
-        <CountsBar :class="['w-32 max-md:flex-1']" :counts="counts" />
+        <CountsBar :class="['w-32 max-md:(order-first w-full)']" :counts="counts" />
       </span>
       <a v-if="position.workspace && position.project && position.experiment" :class="['btn']" :href="href({ name: 'compare', query: { experiment: position.experiment, project: position.project, view: 'attempts', workspace: position.workspace } })">
         <span class="i-mingcute-git-compare-line" aria-hidden="true" />Compare attempts
