@@ -6,8 +6,9 @@ import type { ParallelAxis } from './ParallelCoordinates.vue'
 
 import { axisBottom, axisLeft, brush, brushX, brushY, scaleBand, select } from 'd3'
 import { onMounted, useTemplateRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
-import { caseOffset } from '../caseMetrics'
+import { caseOffset, categoryValueLabel } from '../caseMetrics'
 import { useElementWidth } from '../composables/useElementWidth'
 import { formatTick } from '../format'
 
@@ -44,6 +45,7 @@ const emit = defineEmits<{
   pin: [row: CaseRow | null, point: null | { x: number, y: number }, axis: null | string]
 }>()
 
+const { locale, t } = useI18n()
 const root = useTemplateRef<HTMLElement>('root')
 const width = useElementWidth(root, 800)
 /** A strip needs less height than a plane; both leave room for the axis labels. */
@@ -73,7 +75,7 @@ function drawDots(svg: Selection<SVGSVGElement, unknown, null, undefined>) {
     const g = svg.append('g').attr('transform', horizontal ? `translate(0,${height - margin.bottom})` : `translate(${margin.left},0)`)
     // One call per scale kind: a band axis and a numeric axis are different generator types.
     if ('bandwidth' in scale)
-      g.call((horizontal ? axisBottom(scale) : axisLeft(scale)).tickSizeOuter(0))
+      g.call((horizontal ? axisBottom(scale) : axisLeft(scale)).tickFormat(value => categoryValueLabel(axis.name, value)).tickSizeOuter(0))
     else
       g.call((horizontal ? axisBottom(scale) : axisLeft(scale)).ticks(horizontal ? 8 : 5).tickFormat(value => formatTick(value as number)).tickSizeOuter(0))
     // NOTICE:
@@ -98,7 +100,7 @@ function drawDots(svg: Selection<SVGSVGElement, unknown, null, undefined>) {
       .attr('text-anchor', horizontal ? 'middle' : 'start')
       .attr('x', horizontal ? (xRange[0] + xRange[1]) / 2 : -margin.left + 8)
       .attr('y', horizontal ? 34 : margin.top - 4)
-      .text(`${props.labelOf(axis.name)}${axis.kind === 'category' ? ' · click a value to pick' : ''}`)
+      .text(axis.kind === 'category' ? t('metrics.charts.categoryAxis', { axis: props.labelOf(axis.name) }) : props.labelOf(axis.name))
   }
   axisGroup(true, xAxis, x.scale)
   axisGroup(false, yAxis, y.scale)
@@ -209,14 +211,15 @@ function render(): void {
 
 onMounted(render)
 // Same rule as the parallel coordinates: brushing must not redraw (it would drop the brush being dragged), so the
-// sources are compared one by one and only a category pick (a new object) redraws.
-watch([() => props.rows, () => props.axes, () => props.categoryValues, () => props.scales, width, () => props.filters.categories], render)
+// sources are compared one by one and only a category pick (a new object) redraws. The SVG text is written once per
+// draw, so a change of language redraws too.
+watch([() => props.rows, () => props.axes, () => props.categoryValues, () => props.scales, width, () => props.filters.categories, locale], render)
 watch([() => props.selected, () => props.colorOf], paint)
 watch(() => props.pinnedKey, () => drawPinned?.())
 </script>
 
 <template>
   <div ref="root" :class="['relative overflow-x-auto select-none text-neutral-800 dark:text-neutral-200']" data-testid="case-cartesian">
-    <svg role="img" :aria-label="`Cases by ${props.axes.map(axis => props.labelOf(axis.name)).join(' and ')}`" />
+    <svg role="img" :aria-label="t('metrics.charts.cartesian', { axes: props.axes.map(axis => props.labelOf(axis.name)).join(t('metrics.charts.cartesianAnd')) })" />
   </div>
 </template>

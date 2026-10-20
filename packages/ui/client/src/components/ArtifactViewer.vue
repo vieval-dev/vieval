@@ -7,6 +7,7 @@ import { errorMessageFrom } from '@moeru/std'
 import { useQuery } from '@pinia/colada'
 import { parse as parseToml } from 'smol-toml'
 import { computed, shallowRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { parse as parseYaml } from 'yaml'
 
 import IconButton from './IconButton.vue'
@@ -37,20 +38,25 @@ const props = defineProps<{
   size: number
 }>()
 
+const { t } = useI18n()
+
 /** Text and structured files are read up to this size; larger files show the head and a download link. */
 const maxTextBytes = 1024 * 1024
 
 const src = computed(() => rawUrl(props.location))
 const download = computed(() => rawUrl(props.location, true))
 const structuredView = shallowRef<'source' | 'tree'>('tree')
-const structuredViews: Segment<'source' | 'tree'>[] = [{ icon: 'i-mingcute-sitemap-line', label: 'Tree', value: 'tree' }, { icon: 'i-mingcute-code-line', label: 'Source', value: 'source' }]
+const structuredViews = computed<Segment<'source' | 'tree'>[]>(() => [{ icon: 'i-mingcute-sitemap-line', label: t('cases.viewer.tree'), value: 'tree' }, { icon: 'i-mingcute-code-line', label: t('cases.viewer.source'), value: 'source' }])
 
 /** What the preview of a text-like or binary file needs, read once per file. */
 interface Preview {
   /** First bytes of a binary file as hex rows. */
   hex?: string
-  /** Parsed value of a structured file, or why it is shown as text. */
-  parsed?: { error?: string, value?: unknown }
+  /**
+   * Parsed value of a structured file, or why it is shown as text: too large to parse, or the parser's message
+   * (translated when shown, so a cached preview follows the language).
+   */
+  parsed?: { failure?: { message?: string, reason: 'parse' } | { reason: 'size' }, value?: unknown }
   text?: { text: string, total: number, truncated: boolean }
 }
 
@@ -77,17 +83,25 @@ async function loadPreview(location: FileLocation, kind: PreviewKind): Promise<P
   if (kind === 'text')
     return { text }
   if (text.truncated)
-    return { parsed: { error: `The file is larger than ${formatBytes(maxTextBytes)}; showing its beginning as text.` }, text }
+    return { parsed: { failure: { reason: 'size' } }, text }
   try {
     return { parsed: { value: kind === 'json' ? JSON.parse(text.text) : kind === 'yaml' ? parseYaml(text.text) : parseToml(text.text) }, text }
   }
   catch (caught) {
-    return { parsed: { error: `Could not parse as ${kind.toUpperCase()}: ${errorMessageFrom(caught) ?? 'unknown error'}` }, text }
+    return { parsed: { failure: { message: errorMessageFrom(caught), reason: 'parse' } }, text }
   }
 }
 const text = computed(() => preview.data.value?.text)
 const parsed = computed(() => preview.data.value?.parsed)
 const hex = computed(() => preview.data.value?.hex)
+const failure = computed(() => {
+  const value = parsed.value?.failure
+  if (value == null)
+    return undefined
+  return value.reason === 'size'
+    ? t('cases.viewer.tooLarge', { size: formatBytes(maxTextBytes) })
+    : t('cases.viewer.parseFailed', { format: props.previewKind.toUpperCase(), message: value.message ?? t('cases.viewer.unknownError') })
+})
 
 const loadJsonl = computed(() => {
   const location = props.location
@@ -102,8 +116,8 @@ const loadJsonl = computed(() => {
       <span class="font-medium break-all">{{ props.name }}</span>
       <span class="muted">{{ props.contentType }} · {{ formatBytes(props.size) }}</span>
       <div :class="['ml-auto flex items-center gap-0.5']">
-        <IconButton :href="src" new-tab icon="i-mingcute-external-link-line" label="Open raw file in a new tab" />
-        <IconButton :href="download" :download="props.name" icon="i-mingcute-download-2-line" label="Download file" />
+        <IconButton :href="src" new-tab icon="i-mingcute-external-link-line" :label="t('cases.viewer.openRaw')" />
+        <IconButton :href="download" :download="props.name" icon="i-mingcute-download-2-line" :label="t('cases.viewer.downloadFile')" />
       </div>
     </div>
 
@@ -121,7 +135,7 @@ const loadJsonl = computed(() => {
 
     <template v-else-if="props.previewKind === 'html'">
       <p class="text-xs muted flex gap-1 items-center">
-        <span class="i-mingcute-safety-certificate-line text-green-600" aria-hidden="true" />Rendered in a sandboxed iframe: scripts, forms, and same-origin access are disabled.
+        <span class="i-mingcute-safety-certificate-line text-green-600" aria-hidden="true" />{{ t('cases.viewer.sandboxed') }}
       </p>
       <iframe :src="src" sandbox="" referrerpolicy="no-referrer" :title="props.name" :class="['w-full h-[60vh] rounded border border-neutral-200/50 dark:border-neutral-800/50 bg-white']" data-testid="html-sandbox" />
     </template>
@@ -131,15 +145,15 @@ const loadJsonl = computed(() => {
         <div :class="['rounded border border-dashed border-neutral-300/60 dark:border-neutral-700/40 p-4 flex flex-col items-center gap-2 text-center']" data-testid="binary-notice">
           <span class="i-mingcute-file-forbid-line text-3xl muted" aria-hidden="true" />
           <div class="font-medium">
-            No preview for this file type
+            {{ t('cases.viewer.noPreview') }}
           </div>
           <div class="text-sm muted">
-            {{ props.contentType }} · {{ formatBytes(props.size) }}. Download it to open it with another tool.
+            {{ t('cases.viewer.binaryHint', { size: formatBytes(props.size), type: props.contentType }) }}
           </div>
-          <a :href="download" :class="['btn btn-active']" :download="props.name"><span class="i-mingcute-download-2-line" aria-hidden="true" />Download {{ props.name }}</a>
+          <a :href="download" :class="['btn btn-active']" :download="props.name"><span class="i-mingcute-download-2-line" aria-hidden="true" />{{ t('cases.viewer.downloadName', { name: props.name }) }}</a>
           <details v-if="hex" :class="['w-full text-left']">
             <summary class="text-xs muted cursor-pointer">
-              First {{ Math.min(256, props.size) }} bytes (hex)
+              {{ t('cases.viewer.hexHead', { n: Math.min(256, props.size) }) }}
             </summary>
             <pre :class="['mono text-[11px] p-2 overflow-auto']">{{ hex }}</pre>
           </details>
@@ -147,18 +161,18 @@ const loadJsonl = computed(() => {
       </template>
       <template v-else-if="props.previewKind === 'text'">
         <p v-if="text?.truncated" class="text-xs muted">
-          Showing the first {{ formatBytes(maxTextBytes) }} of {{ formatBytes(text.total) }}.
+          {{ t('cases.viewer.showingHead', { size: formatBytes(maxTextBytes), total: formatBytes(text.total) }) }}
         </p>
-        <StateView :empty="text?.total === 0" empty-text="Empty file">
+        <StateView :empty="text?.total === 0" :empty-text="t('cases.viewer.emptyFile')">
           <pre :class="['mono text-xs leading-5 p-3 overflow-auto max-h-[65vh] rounded bg-neutral-50 dark:bg-neutral-950 border border-neutral-200/50 dark:border-neutral-800/50 whitespace-pre-wrap break-all']" data-testid="text-view">{{ text?.text }}</pre>
         </StateView>
       </template>
       <template v-else>
-        <div v-if="parsed?.error" :class="['text-xs rounded state-interrupted px-2 py-1']">
-          {{ parsed.error }}
+        <div v-if="failure" :class="['text-xs rounded state-interrupted px-2 py-1']">
+          {{ failure }}
         </div>
         <div>
-          <SegmentedControl v-model="structuredView" :items="structuredViews" label="Show as" />
+          <SegmentedControl v-model="structuredView" :items="structuredViews" :label="t('cases.viewer.showAs')" />
         </div>
         <div v-if="structuredView === 'tree' && parsed?.value !== undefined" :class="['rounded border border-neutral-200/50 dark:border-neutral-800/50 p-2 overflow-auto max-h-[65vh]']">
           <ObjectTree :value="parsed.value" :expand-depth="2" />

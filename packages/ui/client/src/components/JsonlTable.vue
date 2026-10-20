@@ -3,12 +3,14 @@ import type { JsonlPage } from '../../../src/shared/contract'
 
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { computed, reactive, shallowRef, useTemplateRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import ObjectTree from './ObjectTree.vue'
 import StateView from './StateView.vue'
 
 import { ApiError } from '../api'
 import { previewValue } from '../format'
+import { currentLocale } from '../i18n'
 
 /**
  * JSONL file as a virtualized table: only visible rows are in the DOM, and pages of rows are fetched from the
@@ -17,6 +19,7 @@ import { previewValue } from '../format'
  * Columns are the most frequent top-level keys of the first page; the selected row opens as an object tree.
  */
 const props = defineProps<{ load: (offset: number, limit: number) => Promise<JsonlPage> }>()
+const { t } = useI18n()
 
 const pageSize = 200
 const pages = reactive(new Map<number, unknown[]>())
@@ -110,12 +113,12 @@ function cell(row: unknown, column: string): string {
 </script>
 
 <template>
-  <StateView :error="error" :loading="loading" :empty="totalLines === 0" empty-text="Empty JSONL file" skeleton="lines" @retry="() => fetchPage(0)">
+  <StateView :error="error" :loading="loading" :empty="totalLines === 0" :empty-text="t('cases.jsonl.empty')" skeleton="lines" @retry="() => fetchPage(0)">
     <div :class="['flex flex-col gap-2']" data-testid="jsonl-table" :data-total-lines="totalLines" :data-rendered-start="range.start" :data-rendered-end="range.end" :data-dom-rows="virtualizer.getVirtualItems().length">
       <div :class="['flex items-center gap-2 text-xs muted']">
         <span class="i-mingcute-table-2-line" aria-hidden="true" />
-        <span data-testid="jsonl-range">rows {{ range.start.toLocaleString() }}–{{ range.end.toLocaleString() }} of {{ totalLines.toLocaleString() }} · {{ virtualizer.getVirtualItems().length }} rows in DOM</span>
-        <span v-if="partialTail" class="badge state-running">file is growing</span>
+        <span data-testid="jsonl-range">{{ t('cases.jsonl.range', { end: range.end.toLocaleString(currentLocale()), rendered: virtualizer.getVirtualItems().length, start: range.start.toLocaleString(currentLocale()), total: totalLines.toLocaleString(currentLocale()) }) }}</span>
+        <span v-if="partialTail" class="badge state-running">{{ t('cases.jsonl.growing') }}</span>
       </div>
       <div ref="scroller" :class="['overflow-auto h-[45vh] min-h-48 rounded border border-neutral-200/50 dark:border-neutral-800/50']">
         <div :class="['sticky top-0 z-1 flex bg-neutral-100 dark:bg-neutral-800 text-xs font-medium min-w-max']">
@@ -142,14 +145,14 @@ function cell(row: unknown, column: string): string {
               </div>
             </template>
             <div v-else class="muted px-2 py-1">
-              loading…
+              {{ t('cases.jsonl.loading') }}
             </div>
           </div>
         </div>
       </div>
       <div v-if="selected != null && rowAt(selected) !== undefined" :class="['rounded border border-neutral-200/50 dark:border-neutral-800/50 p-2 max-h-72 overflow-auto']">
         <div class="text-xs muted mb-1">
-          Row {{ selected + 1 }}
+          {{ t('cases.jsonl.row', { n: selected + 1 }) }}
         </div>
         <ObjectTree :value="rowAt(selected)" :expand-depth="2" />
       </div>

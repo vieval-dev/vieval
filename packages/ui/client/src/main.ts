@@ -5,6 +5,7 @@ import { createApp } from 'vue'
 
 import App from './App.vue'
 
+import { i18n } from './i18n'
 import { queryDefaults } from './queryDefaults'
 
 import '@fontsource-variable/noto-sans'
@@ -20,4 +21,5 @@ createApp(App)
   .use(createPinia())
   .use(PiniaColada, { queryOptions: queryDefaults })
   .use(createHead())
+  .use(i18n)
   .mount('#app')

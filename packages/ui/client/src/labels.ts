@@ -1,3 +1,5 @@
+import { currentLocale } from './i18n'
+
 /**
  * Readable names of report levels. Report ids are path segments made for machines
  * (`matrix-run-model-gpt-5.5-repeat-1`, `attempt-2026-10-12T07-11-52-616Z`, `run-1791789112616-e67c9b33`); the UI
@@ -141,13 +143,13 @@ export function formatAxisValues(values: readonly string[]): string {
 export function formatFinish(iso: string, now = Date.now()): string {
   const finish = new Date(iso)
   return finish.getTime() - now < 86_400_000
-    ? finish.toLocaleTimeString('en-US', { hour: '2-digit', hour12: false, minute: '2-digit' })
+    ? finish.toLocaleTimeString(currentLocale(), { hour: '2-digit', hour12: false, minute: '2-digit' })
     : formatShortDateTime(finish)
 }
 
-/** `Oct 12, 07:11` in the viewer's (English) UI language and the browser's time zone. */
+/** `Oct 12, 07:11` (`10月12日 07:11`) in the viewer's locale and the browser's time zone. */
 export function formatShortDateTime(date: Date): string {
-  return date.toLocaleString('en-US', { day: 'numeric', hour: '2-digit', hour12: false, minute: '2-digit', month: 'short' })
+  return date.toLocaleString(currentLocale(), { day: 'numeric', hour: '2-digit', hour12: false, minute: '2-digit', month: 'short' })
 }
 
 /**
@@ -176,12 +178,12 @@ export function mergeMatrices(matrices: readonly (MatrixAxes | undefined)[]): Ma
  * - 3 hours before now, 2 days before now
  *
  * After:
- * - "3 hours ago", "2 days ago"
+ * - "3 hours ago", "2 days ago" (`zh-Hans`: "3小时前", "前天"), in the viewer's locale
  */
 export function relativeTime(date: Date, now: number): string {
   const seconds = Math.round((date.getTime() - now) / 1000)
   const units: [Intl.RelativeTimeFormatUnit, number][] = [['year', 31_536_000], ['month', 2_592_000], ['week', 604_800], ['day', 86_400], ['hour', 3600], ['minute', 60]]
-  const format = new Intl.RelativeTimeFormat('en-US', { numeric: 'auto' })
+  const format = new Intl.RelativeTimeFormat(currentLocale(), { numeric: 'auto' })
   for (const [unit, size] of units) {
     if (Math.abs(seconds) >= size)
       return format.format(Math.round(seconds / size), unit)

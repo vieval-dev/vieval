@@ -2,6 +2,7 @@
 import type { ProjectEntry } from '../composables/useCatalog'
 
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import PageHeader from '../components/PageHeader.vue'
 import ScoreCard from '../components/ScoreCard.vue'
@@ -9,8 +10,8 @@ import StateView from '../components/StateView.vue'
 import TimeAgo from '../components/TimeAgo.vue'
 
 import { useCatalog } from '../composables/useCatalog'
-import { countOf } from '../format'
-import { levelIcons } from '../hierarchy'
+import { formatCount } from '../format'
+import { levelIcons, levelLabel } from '../hierarchy'
 import { formatAxisValues, mergeMatrices } from '../labels'
 import { href } from '../router'
 
@@ -22,6 +23,7 @@ import { href } from '../router'
  */
 const props = defineProps<{ workspace?: string }>()
 
+const { t } = useI18n()
 const catalog = useCatalog()
 const workspaces = computed(() => catalog.workspaces.value.filter(workspace => props.workspace == null || workspace.id === props.workspace))
 const projectCount = computed(() => workspaces.value.reduce((sum, workspace) => sum + workspace.projects.length, 0))
@@ -42,15 +44,15 @@ const sections = computed(() => workspaces.value.map(workspace => ({ id: workspa
 </script>
 
 <template>
-  <PageHeader :id="props.workspace" :loading="catalog.query.isPending.value" :level="props.workspace ? 'workspace' : 'home'" :position="{ workspace: props.workspace }" :title="props.workspace ?? 'Projects'">
+  <PageHeader :id="props.workspace" :loading="catalog.query.isPending.value" :level="props.workspace ? 'workspace' : 'home'" :position="{ workspace: props.workspace }" :title="props.workspace ?? levelLabel('home')">
     <template #subtitle>
-      {{ projectCount }} project(s) · {{ runCount }} run(s)<template v-if="!props.workspace && workspaces.length === 1">
-        · workspace {{ workspaces[0]!.id }}
+      {{ t('runs.count.projects', { n: projectCount }, projectCount) }} · {{ t('runs.count.runs', { n: runCount }, runCount) }}<template v-if="!props.workspace && workspaces.length === 1">
+        · {{ t('runs.home.workspace', { id: workspaces[0]!.id }) }}
       </template>
     </template>
   </PageHeader>
 
-  <StateView :error="catalog.query.error.value" :loading="catalog.query.isPending.value" :empty="projectCount === 0" empty-text="No runs found" empty-hint="Runs appear here once `vieval run` writes a report below the viewer's report roots." skeleton="cards" @retry="catalog.query.refetch()">
+  <StateView :error="catalog.query.error.value" :loading="catalog.query.isPending.value" :empty="projectCount === 0" :empty-text="t('navigation.noRuns')" :empty-hint="t('runs.emptyHint')" skeleton="cards" @retry="catalog.query.refetch()">
     <section v-for="section in sections" :key="section.id" :class="['mb-6']">
       <h2 v-if="workspaces.length > 1" :class="['flex items-center gap-2 mb-2 text-sm font-semibold']">
         <span :class="[levelIcons.workspace, 'muted']" aria-hidden="true" />
@@ -76,8 +78,8 @@ const sections = computed(() => workspaces.value.map(workspace => ({ id: workspa
           </template>
           <!-- A running run says when it started in its progress line; a finished one says it here. -->
           <span>
-            {{ countOf(project.experiments.length, 'experiment') }} · {{ countOf(project.runs.length, 'run') }}<template v-if="project.latest.state !== 'running'">
-              · last run <TimeAgo :time="project.latest.startedAt" relative-only />
+            {{ t('runs.count.experiments', { n: formatCount(project.experiments.length) }, project.experiments.length) }} · {{ t('runs.count.runs', { n: formatCount(project.runs.length) }, project.runs.length) }}<template v-if="project.latest.state !== 'running'">
+              · <i18n-t keypath="runs.home.lastRun" scope="global"><template #time><TimeAgo :time="project.latest.startedAt" relative-only /></template></i18n-t>
             </template>
           </span>
           <template v-if="project.axes.length > 0" #footer>

@@ -2,6 +2,7 @@
 import type { RunListItem } from '../../../src/shared/contract'
 
 import { computed, reactive, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import StateBadge from './StateBadge.vue'
 import StateView from './StateView.vue'
@@ -19,6 +20,8 @@ import { currentRoute, href } from '../router'
  * appears when there is more than one.
  */
 const props = defineProps<{ activeRun?: { attempt: string, experiment: string, project: string, runKey: string, workspace: string } }>()
+
+const { t } = useI18n()
 
 /** Number of runs in "Recent runs". */
 const RECENT_RUNS = 8
@@ -65,11 +68,11 @@ function rowClass(active: boolean) {
 </script>
 
 <template>
-  <nav aria-label="Projects and runs" :class="['flex flex-col gap-4 text-sm']">
-    <StateView :error="catalog.query.error.value" :loading="catalog.query.isPending.value" :empty="workspaces.length === 0" empty-text="No runs found" skeleton="nav" @retry="catalog.query.refetch()">
+  <nav :aria-label="t('navigation.projectsAndRuns')" :class="['flex flex-col gap-4 text-sm']">
+    <StateView :error="catalog.query.error.value" :loading="catalog.query.isPending.value" :empty="workspaces.length === 0" :empty-text="t('navigation.noRuns')" skeleton="nav" @retry="catalog.query.refetch()">
       <section>
         <h2 :class="['px-1.5 mb-1 text-xs font-medium muted']">
-          Projects
+          {{ t('navigation.projects') }}
         </h2>
         <div v-for="workspace in workspaces" :key="workspace.id">
           <a v-if="!singleWorkspace" :href="href({ name: 'scope', workspace: workspace.id })" :class="rowClass(scope?.workspace === workspace.id && scope?.project == null)">
@@ -81,7 +84,7 @@ function rowClass(active: boolean) {
                 <button
                   type="button"
                   :class="['i-mingcute-right-line shrink-0 transition-transform muted', !closed.has(`${workspace.id}/${project.id}`) && 'rotate-90']"
-                  :aria-label="`Toggle ${project.id}`"
+                  :aria-label="t('navigation.toggleProject', { project: project.id })"
                   :aria-expanded="!closed.has(`${workspace.id}/${project.id}`)"
                   @click="toggle(`${workspace.id}/${project.id}`)"
                 />
@@ -109,7 +112,7 @@ function rowClass(active: boolean) {
 
       <section>
         <h2 :class="['px-1.5 mb-1 text-xs font-medium muted']">
-          Recent runs
+          {{ t('navigation.recentRuns') }}
         </h2>
         <a
           v-for="run in recent"

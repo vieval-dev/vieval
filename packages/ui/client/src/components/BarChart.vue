@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, shallowRef, useTemplateRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import { useElementWidth } from '../composables/useElementWidth'
 
@@ -28,6 +29,7 @@ const props = withDefaults(defineProps<{
   max: 1,
 })
 
+const { t } = useI18n()
 const barHeight = 10
 const gap = 2
 const groupGap = 10
@@ -60,7 +62,7 @@ const colors = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)']
         <span :class="['inline-block w-2.5 h-2.5 rounded-sm']" :style="{ background: colors[position] }" />{{ item.name }}
       </span>
     </div>
-    <svg :viewBox="`0 0 ${width} ${height}`" :class="['w-full h-auto']" role="img" :aria-label="`Bar chart of ${shown.map(series => series.name).join(', ')}`" @mouseleave="hover = undefined">
+    <svg :viewBox="`0 0 ${width} ${height}`" :class="['w-full h-auto']" role="img" :aria-label="t('metrics.charts.bar', { series: shown.map(series => series.name).join(t('scores.listSeparator')) })" @mouseleave="hover = undefined">
       <g :transform="`translate(${labelWidth}, 0)`">
         <line v-for="tick in [0, 0.25, 0.5, 0.75, 1]" :key="tick" :x1="tick * plotWidth" :x2="tick * plotWidth" y1="0" :y2="height - 6" stroke="var(--chart-grid)" stroke-width="1" />
         <text v-for="tick in [0, 0.5, 1]" :key="`t${tick}`" :x="tick * plotWidth" :y="height" font-size="9" fill="var(--chart-text)" text-anchor="middle">{{ props.format(tick * props.max) }}</text>
@@ -70,7 +72,7 @@ const colors = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)']
           <text :x="labelWidth - 8" :y="row.top + (row.values.length * (barHeight + gap)) / 2 + 3" font-size="11" text-anchor="end" fill="var(--chart-text)" :class="[row.href && 'underline']">{{ row.label.length > labelWidth / 6.5 ? `${row.label.slice(0, Math.floor(labelWidth / 6.5) - 1)}…` : row.label }}<title>{{ row.label }}</title></text>
         </a>
         <g v-for="(value, index) in row.values" :key="index" :transform="`translate(${labelWidth}, ${row.top + index * (barHeight + gap)})`">
-          <rect :width="plotWidth" :height="barHeight" fill="transparent" @mousemove="hover = { text: `${row.label} · ${shown[index]?.name}: ${value == null ? 'no data' : props.format(value)}`, x: labelWidth + scale(value ?? 0), y: row.top + index * (barHeight + gap) }" />
+          <rect :width="plotWidth" :height="barHeight" fill="transparent" @mousemove="hover = { text: `${row.label} · ${shown[index]?.name}: ${value == null ? t('metrics.charts.noData') : props.format(value)}`, x: labelWidth + scale(value ?? 0), y: row.top + index * (barHeight + gap) }" />
           <rect v-if="value != null" :width="Math.max(2, scale(value))" :height="barHeight" rx="3" :fill="colors[index]" pointer-events="none" />
           <text :x="(value == null ? 0 : scale(value)) + 4" :y="barHeight - 1" font-size="10" fill="var(--chart-text)" pointer-events="none">{{ value == null ? 'no data' : props.format(value) }}</text>
         </g>

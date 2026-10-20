@@ -2,6 +2,7 @@
 import type { SkeletonVariant } from './LoadingSkeleton.vue'
 
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import LoadingSkeleton from './LoadingSkeleton.vue'
 
@@ -35,13 +36,15 @@ const props = defineProps<{
 
 const emit = defineEmits<{ retry: [] }>()
 
+const { t } = useI18n()
+
 const status = computed(() => (props.error instanceof ApiError ? props.error.status : undefined))
 const title = computed(() => {
   if (status.value === 0)
-    return 'Viewer server unreachable'
+    return t('common.serverUnreachable')
   if (status.value === 404)
-    return 'Not found'
-  return status.value == null ? 'Request failed' : `Request failed (${status.value})`
+    return t('common.notFound')
+  return status.value == null ? t('common.requestFailed') : t('common.requestFailedStatus', { status: status.value })
 })
 </script>
 
@@ -55,17 +58,17 @@ const title = computed(() => {
       {{ props.error.message }}
     </div>
     <button :class="['btn mt-1']" type="button" @click="emit('retry')">
-      <span class="i-mingcute-refresh-2-line" aria-hidden="true" /> Retry
+      <span class="i-mingcute-refresh-2-line" aria-hidden="true" /> {{ t('common.retry') }}
     </button>
   </div>
   <div v-else-if="props.loading" role="status" data-testid="state-loading" aria-busy="true">
-    <span :class="['sr-only']">{{ props.loadingText ?? 'Loading…' }}</span>
+    <span :class="['sr-only']">{{ props.loadingText ?? t('common.loading') }}</span>
     <LoadingSkeleton :variant="props.skeleton" :count="props.skeletonCount" />
   </div>
   <div v-else-if="props.empty" data-testid="state-empty" :class="['flex flex-col items-center gap-1.5 py-10 px-4 text-center']">
     <span :class="['i-mingcute-inbox-line text-3xl muted']" aria-hidden="true" />
     <div :class="['font-medium']">
-      {{ props.emptyText ?? 'Nothing here yet' }}
+      {{ props.emptyText ?? t('common.empty') }}
     </div>
     <div v-if="props.emptyHint" :class="['muted text-sm max-w-xl']">
       {{ props.emptyHint }}

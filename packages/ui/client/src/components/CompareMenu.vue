@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { DropdownMenuArrow, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuPortal, DropdownMenuRoot, DropdownMenuSeparator, DropdownMenuTrigger } from 'reka-ui'
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import AnimatedContent from './AnimatedContent.vue'
 import IconButton from './IconButton.vue'
@@ -20,16 +21,17 @@ const props = defineProps<{
   runKey?: string
   workspace?: string
 }>()
+const { t } = useI18n()
 
 const items = computed(() => {
   const list: { href: string, icon: string, label: string }[] = []
   const { experiment, project, runKey, workspace } = props
   if (workspace != null && project != null)
-    list.push({ href: href({ name: 'compare', query: { project, view: 'experiments', workspace } }), icon: levelIcons.experiment, label: 'Experiments of this project' })
+    list.push({ href: href({ name: 'compare', query: { project, view: 'experiments', workspace } }), icon: levelIcons.experiment, label: t('compare.menu.experiments') })
   if (workspace != null && project != null && experiment != null)
-    list.push({ href: href({ name: 'compare', query: { experiment, project, view: 'attempts', workspace } }), icon: levelIcons.attempt, label: 'Attempts of this experiment' })
+    list.push({ href: href({ name: 'compare', query: { experiment, project, view: 'attempts', workspace } }), icon: levelIcons.attempt, label: t('compare.menu.attempts') })
   if (runKey != null)
-    list.push({ href: href({ name: 'compare', query: { run: runKey, view: 'matrix' } }), icon: 'i-mingcute-layout-grid-line', label: 'Matrix rows of this run' })
+    list.push({ href: href({ name: 'compare', query: { run: runKey, view: 'matrix' } }), icon: 'i-mingcute-layout-grid-line', label: t('compare.menu.matrix') })
   return list
 })
 
@@ -43,13 +45,13 @@ function go(target: string): void {
 <template>
   <DropdownMenuRoot>
     <DropdownMenuTrigger as-child>
-      <IconButton :icon="levelIcons.comparison" label="Compare" />
+      <IconButton :icon="levelIcons.comparison" :label="t('compare.menu.title')" />
     </DropdownMenuTrigger>
     <DropdownMenuPortal>
       <DropdownMenuContent as-child :side-offset="6" align="start" :class="['floating min-w-60 p-1 text-sm']">
         <AnimatedContent>
           <DropdownMenuLabel :class="['px-2 py-1 text-xs muted']">
-            Compare
+            {{ t('compare.menu.title') }}
           </DropdownMenuLabel>
           <DropdownMenuItem
             v-for="item in items"
@@ -64,7 +66,7 @@ function go(target: string): void {
             :class="['menu-item']"
             @select="go(allComparisons)"
           >
-            <span class="i-mingcute-list-check-line" aria-hidden="true" />All comparisons
+            <span class="i-mingcute-list-check-line" aria-hidden="true" />{{ t('compare.menu.all') }}
           </DropdownMenuItem>
           <DropdownMenuArrow :class="['floating-arrow']" />
         </AnimatedContent>

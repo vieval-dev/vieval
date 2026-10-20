@@ -3,6 +3,7 @@ import type { MatrixCell, MatrixResponse } from '../../../src/shared/contract'
 
 import { useQuery } from '@pinia/colada'
 import { computed, shallowRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import ScoreBar from './ScoreBar.vue'
 import ScoreCard from './ScoreCard.vue'
@@ -11,7 +12,7 @@ import StateView from './StateView.vue'
 
 import { api } from '../api'
 import { useCatalog } from '../composables/useCatalog'
-import { countOf, formatScore, shortTaskId } from '../format'
+import { formatCount, formatScore, shortTaskId } from '../format'
 import { attemptLabel, formatShortDateTime } from '../labels'
 import { href } from '../router'
 import { headlineOf, headlineView } from '../scores'
@@ -25,6 +26,7 @@ import { headlineOf, headlineView } from '../scores'
  * since) are folded until asked for, so the table opens on what the newest runs measure.
  */
 const props = defineProps<{ experiment?: string, project: string, workspace: string }>()
+const { t } = useI18n()
 
 const matrix = useQuery({
   key: () => ['matrix', { experiment: props.experiment ?? null, project: props.project, workspace: props.workspace }],
@@ -85,7 +87,7 @@ function buildGrid(entryId: string, cells: MatrixCell[], response: MatrixRespons
     const present = varyingAxes.filter(key => coordinates(cell)[key] != null)
     if (present.length > 0)
       return present.map(key => `${axisName(key)} ${coordinates(cell)[key]}`).join(' · ')
-    return varyingAxes.length > 0 ? `without ${varyingAxes.map(axisName).join(', ')}` : 'all'
+    return varyingAxes.length > 0 ? t('matrix.view.without', { axes: varyingAxes.map(axisName).join(', ') }) : t('matrix.view.all')
   }
 
   const columns = [...new Set(cells.map(columnKey))].map((key) => {
@@ -108,7 +110,7 @@ function buildGrid(entryId: string, cells: MatrixCell[], response: MatrixRespons
   const rows = rowValues.map(value => ({
     cells: columns.map(column => cells.find(cell => rowKey(cell) === value && columnKey(cell) === column.key)),
     key: value,
-    label: rowAxis == null ? 'all' : value,
+    label: rowAxis == null ? t('matrix.view.all') : value,
   }))
   return {
     columns,
@@ -167,6 +169,19 @@ function pointTime(point: MatrixCell['history'][number]): string {
   return point.startedAt == null ? attemptLabel(point.attemptId) : formatShortDateTime(new Date(point.startedAt))
 }
 
+/** Tooltip of one history point: when, how much it measured, its score, and its completion rate. */
+function pointTitle(cell: MatrixCell, point: MatrixCell['history'][number]): string {
+  return t('matrix.view.pointTitle', {
+    completion: formatScore(point.completion),
+    coverage: t(`matrix.view.coverage.${point.coverage}`),
+    measured: formatCount(point.counts.passed + point.counts.failed),
+    score: headlineLabel(cell),
+    time: pointTime(point),
+    total: formatCount(cell.caseCount),
+    value: formatScore(point.score),
+  })
+}
+
 /**
  * Change of the primary score from the previous full run, in percentage points; `undefined` unless the cell's run and
  * an earlier run both covered the cell fully (a partial run or one without a result is no baseline).
@@ -179,25 +194,18 @@ function scoreDelta(cell: MatrixCell): number | undefined {
   const previous = cell.history.slice(0, Math.max(0, index)).findLast(point => point.coverage === 'full' && point.score != null)
   return previous == null ? undefined : (latest - previous.score!) * 100
 }
-
-const COVERAGE_TEXT = { full: 'every case', none: 'no result', other: 'other cases', partial: 'some cases' } as const
-/** Tooltip of one history point: when, how much it measured, its score, and its completion rate. */
-function pointTitle(cell: MatrixCell, point: MatrixCell['history'][number]): string {
-  const measured = point.counts.passed + point.counts.failed
-  return `${pointTime(point)} · ${COVERAGE_TEXT[point.coverage]} (${measured} of ${cell.caseCount} cases with a result) · ${headlineLabel(cell)} ${formatScore(point.score)} · completed ${formatScore(point.completion)}`
-}
 </script>
 
 <template>
-  <StateView :error="matrix.error.value" :loading="matrix.isPending.value" :empty="grids.length === 0" empty-text="No matrix rows" empty-hint="Runs without tasks have nothing to show here." skeleton="matrix" @retry="matrix.refetch()">
+  <StateView :error="matrix.error.value" :loading="matrix.isPending.value" :empty="grids.length === 0" :empty-text="t('matrix.view.empty')" :empty-hint="t('matrix.view.emptyHint')" skeleton="matrix" @retry="matrix.refetch()">
     <p :class="['flex flex-wrap items-center gap-x-3 gap-y-1 text-xs muted mb-3']">
-      <span>Newest full run of every combination across {{ matrix.data.value?.runCount }} run(s); a partial run or one over other cases never replaces it.</span>
-      <span :class="['inline-flex items-center gap-1']"><svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="2.5" fill="var(--series-1)" /></svg>full run</span>
-      <span :class="['inline-flex items-center gap-1']"><svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="2.5" fill="none" stroke="var(--series-1)" stroke-width="1.25" stroke-dasharray="1.5 1.2" /></svg>partial run or other cases</span>
-      <span :class="['inline-flex items-center gap-1']"><svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="2.5" fill="none" stroke="var(--mark-errored)" stroke-width="1.25" /></svg>no result</span>
+      <span>{{ t('matrix.view.intro', { n: formatCount(matrix.data.value?.runCount ?? 0) }, matrix.data.value?.runCount ?? 0) }}</span>
+      <span :class="['inline-flex items-center gap-1']"><svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="2.5" fill="var(--series-1)" /></svg>{{ t('matrix.view.legendFull') }}</span>
+      <span :class="['inline-flex items-center gap-1']"><svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="2.5" fill="none" stroke="var(--series-1)" stroke-width="1.25" stroke-dasharray="1.5 1.2" /></svg>{{ t('matrix.view.legendPartial') }}</span>
+      <span :class="['inline-flex items-center gap-1']"><svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="2.5" fill="none" stroke="var(--mark-errored)" stroke-width="1.25" /></svg>{{ t('matrix.view.legendNone') }}</span>
       <button v-if="supersededLabels.size > 0" type="button" :class="['btn text-xs px-1.5! py-0.5! ml-auto']" :title="[...supersededLabels].join('\n')" data-testid="matrix-toggle-superseded" @click="showSuperseded = !showSuperseded">
         <span :class="[showSuperseded ? 'i-mingcute-eye-close-line' : 'i-mingcute-history-line']" aria-hidden="true" />
-        {{ showSuperseded ? 'Hide' : 'Show' }} {{ countOf(supersededLabels.size, 'older configuration') }}
+        {{ t(showSuperseded ? 'matrix.view.hideSuperseded' : 'matrix.view.showSuperseded', { n: formatCount(supersededLabels.size) }, supersededLabels.size) }}
       </button>
     </p>
     <section v-for="grid in visibleGrids" :key="grid.entryId" :class="['card mb-4 overflow-x-auto']" :data-testid="`matrix-${grid.entryId}`">
@@ -211,7 +219,7 @@ function pointTitle(cell: MatrixCell, point: MatrixCell['history'][number]): str
             <th :class="['th']">
               {{ grid.rowAxis ?? '' }}
             </th>
-            <th v-for="column in grid.columns" :key="column.key" :class="['th text-center', column.superseded && 'opacity-60']" :title="column.superseded ? 'An older configuration: newer runs measured this entry with other eval values' : undefined">
+            <th v-for="column in grid.columns" :key="column.key" :class="['th text-center', column.superseded && 'opacity-60']" :title="column.superseded ? t('matrix.view.superseded') : undefined">
               {{ column.label }}
             </th>
           </tr>
@@ -238,7 +246,7 @@ function pointTitle(cell: MatrixCell, point: MatrixCell['history'][number]): str
                   <span
                     v-if="scoreDelta(cell) !== undefined && Math.abs(scoreDelta(cell)!) >= 0.05"
                     :class="['inline-flex items-center text-xs font-medium tabular-nums', scoreDelta(cell)! > 0 ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400']"
-                    :title="`${scoreDelta(cell)! > 0 ? '+' : ''}${scoreDelta(cell)!.toFixed(1)} points from the previous full run`"
+                    :title="t('matrix.view.deltaTitle', { delta: `${scoreDelta(cell)! > 0 ? '+' : ''}${scoreDelta(cell)!.toFixed(1)}` })"
                     data-testid="matrix-cell-delta"
                   >
                     <span :class="[scoreDelta(cell)! > 0 ? 'i-mingcute-arrow-up-line' : 'i-mingcute-arrow-down-line']" aria-hidden="true" />{{ Math.abs(scoreDelta(cell)!).toFixed(1) }}
@@ -248,17 +256,17 @@ function pointTitle(cell: MatrixCell, point: MatrixCell['history'][number]): str
                   <ScoreBar :class="['w-full']" :scores="cell.latest.caseScores" />
                 </template>
                 <span :class="['flex items-center gap-1.5 min-w-0']" :title="`${attemptLabel(cell.latest.attemptId)} · ${cell.latest.runKey}`">
-                  <span :class="['truncate']">{{ cell.latest.startedAt ? formatShortDateTime(new Date(cell.latest.startedAt)) : attemptLabel(cell.latest.attemptId) }} · {{ countOf(cell.latest.counts.total, 'case') }} · {{ countOf(cell.history.length, 'run') }}</span>
+                  <span :class="['truncate']">{{ cell.latest.startedAt ? formatShortDateTime(new Date(cell.latest.startedAt)) : attemptLabel(cell.latest.attemptId) }} · {{ t('matrix.view.caseCount', { n: formatCount(cell.latest.counts.total) }, cell.latest.counts.total) }} · {{ t('matrix.view.runCount', { n: formatCount(cell.history.length) }, cell.history.length) }}</span>
                   <Sparkline
                     :class="['ml-auto']" :values="cell.history.map(point => point.score)" :coverage="cell.history.map(point => point.coverage)" :titles="cell.history.map(point => pointTitle(cell, point))"
-                    :label="`${headlineLabel(cell)} of ${cell.history.length} runs`" :width="48" :height="16"
+                    :label="t('matrix.view.sparkline', { n: formatCount(cell.history.length), score: headlineLabel(cell) }, cell.history.length)" :width="48" :height="16"
                   />
                 </span>
                 <span v-if="cell.latest.coverage !== 'full' && cell.latest.state !== 'running' && cell.latest.state !== 'queued'" :class="['flex items-center gap-1.5 [color:var(--ink-errored)]']" data-testid="matrix-cell-partial">
-                  <span class="i-mingcute-alert-octagon-line" aria-hidden="true" />{{ cell.latest.counts.passed + cell.latest.counts.failed }} of {{ cell.caseCount }} cases with a result · no full run yet
+                  <span class="i-mingcute-alert-octagon-line" aria-hidden="true" />{{ t('matrix.view.partial', { measured: formatCount(cell.latest.counts.passed + cell.latest.counts.failed), total: formatCount(cell.caseCount) }) }}
                 </span>
               </ScoreCard>
-              <span v-else :class="['flex items-center justify-center w-44 md:w-56 h-24 rounded-xl text-xs muted border border-dashed border-neutral-300/60 dark:border-neutral-700/40']">not run</span>
+              <span v-else :class="['flex items-center justify-center w-44 md:w-56 h-24 rounded-xl text-xs muted border border-dashed border-neutral-300/60 dark:border-neutral-700/40']">{{ t('matrix.view.notRun') }}</span>
             </td>
           </tr>
         </tbody>

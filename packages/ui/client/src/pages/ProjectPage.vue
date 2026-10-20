@@ -4,6 +4,7 @@ import type { ExperimentEntry } from '../composables/useCatalog'
 import type { Route } from '../router'
 
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import CountsBar from '../components/CountsBar.vue'
 import ExperimentName from '../components/ExperimentName.vue'
@@ -28,14 +29,16 @@ import { headlineValue, headlineView } from '../scores'
  */
 const props = defineProps<{ project: string, tab?: string, workspace: string }>()
 
+const { t } = useI18n()
+
 type Tab = 'experiments' | 'matrix'
-const tabs: ViewTab<Tab>[] = [
-  { icon: levelIcons.experiment, label: 'Experiments', value: 'experiments' },
-  { icon: 'i-mingcute-layout-grid-line', label: 'Matrix', value: 'matrix' },
-]
+const tabs = computed<ViewTab<Tab>[]>(() => [
+  { icon: levelIcons.experiment, label: t('runs.project.tabs.experiments'), value: 'experiments' },
+  { icon: 'i-mingcute-layout-grid-line', label: t('runs.project.tabs.matrix'), value: 'matrix' },
+])
 const tabRoute = (value: Tab): Route => ({ name: 'scope', project: props.project, tab: value === 'experiments' ? undefined : value, workspace: props.workspace })
 const tab = computed<Tab>({
-  get: () => tabs.find(item => item.value === props.tab)?.value ?? 'experiments',
+  get: () => tabs.value.find(item => item.value === props.tab)?.value ?? 'experiments',
   set: value => navigate(tabRoute(value)),
 })
 
@@ -52,7 +55,7 @@ function toRow(experiment: ExperimentEntry) {
     ...experiment,
     matrix: mergeMatrices(experiment.runs.map(run => run.matrix)),
     trend: experiment.runs.map(run => headlineValue(run.headline)).toReversed(),
-    trendLabel: latest.headline == null ? 'score' : headlineView(latest.headline, latest.headlineDefinitions).label,
+    trendLabel: latest.headline == null ? t('runs.trend.score') : headlineView(latest.headline, latest.headlineDefinitions).label,
   }
 }
 const rows = computed(() => (project.value?.experiments ?? []).map(toRow))
@@ -70,18 +73,18 @@ const rowGrid = [
 <template>
   <PageHeader :id="props.project" :loading="catalog.query.isPending.value" level="project" :position="{ project: props.project, workspace: props.workspace }" :title="props.project">
     <template #subtitle>
-      {{ project?.experiments.length ?? 0 }} experiment(s) · {{ project?.runs.length ?? 0 }} run(s)
+      {{ t('runs.count.experiments', { n: project?.experiments.length ?? 0 }, project?.experiments.length ?? 0) }} · {{ t('runs.count.runs', { n: project?.runs.length ?? 0 }, project?.runs.length ?? 0) }}
     </template>
   </PageHeader>
 
-  <StateView :error="catalog.query.error.value" :loading="catalog.query.isPending.value" :empty="project == null" empty-text="No runs in this project" empty-hint="Runs appear here once `vieval run` writes a report below the viewer's report roots." skeleton="rows" @retry="catalog.query.refetch()">
-    <ViewTabs v-model="tab" :items="tabs" label="Project views" :href="value => href(tabRoute(value))">
+  <StateView :error="catalog.query.error.value" :loading="catalog.query.isPending.value" :empty="project == null" :empty-text="t('runs.project.empty')" :empty-hint="t('runs.emptyHint')" skeleton="rows" @retry="catalog.query.refetch()">
+    <ViewTabs v-model="tab" :items="tabs" :label="t('runs.project.tabs.label')" :href="value => href(tabRoute(value))">
       <section v-if="tab === 'experiments'" :class="['card']">
         <div :class="[...rowGrid, 'max-md:hidden px-3 py-1.5 border-b border-neutral-200/50 dark:border-neutral-800/50', 'text-xs font-medium muted']" aria-hidden="true">
-          <span>Experiment</span><span>Latest run</span><span>Trend</span><span>Cases (latest)</span><span class="text-right">
-            Score
+          <span>{{ t('runs.project.columns.experiment') }}</span><span>{{ t('runs.project.columns.latestRun') }}</span><span>{{ t('runs.project.columns.trend') }}</span><span>{{ t('runs.project.columns.casesLatest') }}</span><span class="text-right">
+            {{ t('runs.project.columns.score') }}
           </span><span class="text-right">
-            Attempts
+            {{ t('runs.project.columns.attempts') }}
           </span>
         </div>
         <ul>
@@ -100,7 +103,7 @@ const rowGrid = [
               <TimeAgo :time="row.latest.startedAt" :class="['text-xs muted truncate']" />
             </span>
             <!-- The cell stays even when the trend draws nothing (fewer than two scored runs), so later columns keep their place. -->
-            <span :class="['flex max-md:hidden']"><Sparkline :values="row.trend" :label="`${row.trendLabel} of ${row.runs.length} runs`" :width="72" /></span>
+            <span :class="['flex max-md:hidden']"><Sparkline :values="row.trend" :label="t('runs.trend.label', { n: row.runs.length, score: row.trendLabel }, row.runs.length)" :width="72" /></span>
             <CountsBar :class="['max-md:(row-start-3 col-span-2)']" :counts="row.latest.counts" />
             <HeadlineScore :class="['relative z-1 justify-self-end max-md:(row-start-2 col-start-2)']" :result="row.latest.headline" :definitions="row.latest.headlineDefinitions" size="sm" align="end" />
             <span :class="['text-right tabular-nums muted max-md:hidden']">{{ row.attempts.length }}</span>

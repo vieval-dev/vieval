@@ -7,11 +7,12 @@ import type { BesideTarget } from './MetricBesideCard.vue'
 
 import { DropdownMenuContent, DropdownMenuItemIndicator, DropdownMenuPortal, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuRoot, DropdownMenuTrigger } from 'reka-ui'
 import { computed, shallowRef, useTemplateRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import AnimatedContent from './AnimatedContent.vue'
 import MetricBesideCard from './MetricBesideCard.vue'
 
-import { formatScore } from '../format'
+import { formatCount, formatScore } from '../format'
 
 /**
  * Cases grouped by one category (a stratum, a grading rule, a matrix axis): one row per value with a horizontal bar of
@@ -39,6 +40,7 @@ const props = defineProps<{
   valuesOf: (name: string) => readonly unknown[]
 }>()
 const emit = defineEmits<{ pick: [name: string, value: string] }>()
+const { t } = useI18n()
 
 /** Group by the first category that is not the outcome itself; `state` only when nothing else exists. */
 const picked = shallowRef<string>()
@@ -94,7 +96,7 @@ const groups = computed(() => {
     <div :class="['flex flex-wrap items-center gap-2 text-xs']">
       <DropdownMenuRoot @update:open="open => { if (!open) highlighted = undefined }">
         <DropdownMenuTrigger :class="['option-trigger max-w-60']" data-testid="group-by">
-          <span :class="['muted shrink-0']">Group by</span><span :class="['truncate']">{{ props.labelOf(groupBy) }}</span><span class="i-mingcute-down-line muted" aria-hidden="true" />
+          <span :class="['muted shrink-0']">{{ t('matrix.groupBars.groupBy') }}</span><span :class="['truncate']">{{ props.labelOf(groupBy) }}</span><span class="i-mingcute-down-line muted" aria-hidden="true" />
         </DropdownMenuTrigger>
         <DropdownMenuPortal>
           <DropdownMenuContent as-child align="start" :side-offset="6" :collision-padding="12" :class="['floating min-w-52 p-1 text-sm']">
@@ -112,7 +114,7 @@ const groups = computed(() => {
         </DropdownMenuPortal>
       </DropdownMenuRoot>
       <MetricBesideCard :anchor="menuElement" :target="highlighted" :definition-of="props.definitionOf" :values-of="props.valuesOf" />
-      <span class="muted">{{ scored ? `mean ${props.labelOf(props.score!)}` : 'pass rate' }} per group, lowest first · bars colored like the chart · click a group to select it</span>
+      <span class="muted">{{ t('matrix.groupBars.hint', { measure: scored ? t('matrix.groupBars.mean', { score: props.labelOf(props.score!) }) : t('matrix.groupBars.passRate') }) }}</span>
     </div>
     <ul :class="['m-0 p-0 list-none grid']">
       <li v-for="group in groups" :key="group.value">
@@ -124,7 +126,7 @@ const groups = computed(() => {
           @click="emit('pick', groupBy, group.value)"
         >
           <span :class="['truncate']" :title="group.value">{{ group.value }}</span>
-          <span :class="['flex h-2 gap-[2px] overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800']" role="img" :aria-label="`${group.count} cases`">
+          <span :class="['flex h-2 gap-[2px] overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800']" role="img" :aria-label="t('matrix.groupBars.caseCount', { n: formatCount(group.count) }, group.count)">
             <span v-for="segment in group.segments" :key="segment.color" :class="['h-full rounded-full min-w-1.5']" :style="{ background: segment.color, width: segment.width }" />
           </span>
           <b :class="['mono text-right']">{{ formatScore(group.score) }}</b>

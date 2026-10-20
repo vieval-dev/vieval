@@ -2,6 +2,7 @@
 import type { CaseRow, MetricSeparation } from '../caseMetrics'
 
 import { computed, shallowRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import { correlationOf } from '../caseMetrics'
 
@@ -22,6 +23,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ select: [pair: [string, string]] }>()
 
+const { t } = useI18n()
 const cells = computed(() => props.metrics.map((rowMetric, row) => props.metrics.slice(0, row).map((columnMetric) => {
   const n = props.rows.filter(item => item.numbers[rowMetric] != null && item.numbers[columnMetric] != null).length
   return { column: columnMetric, n, r: correlationOf(props.rows, columnMetric, rowMetric), row: rowMetric }
@@ -30,8 +32,9 @@ const cells = computed(() => props.metrics.map((rowMetric, row) => props.metrics
 // The cell under the pointer or focus, read out under the grid (one line instead of a tooltip per cell).
 const readout = shallowRef<{ text: string }>()
 function describe(cell: { column: string, n: number, r: number, row: string }): string {
-  const strength = Math.abs(cell.r) >= 0.7 ? 'move together' : Math.abs(cell.r) >= 0.4 ? 'loosely related' : 'mostly independent'
-  return `${props.labelOf(cell.column)} × ${props.labelOf(cell.row)} · r ${cell.r.toFixed(2)} (${strength}${cell.r < -0.4 ? ', opposite' : ''}) · ${cell.n} cases`
+  const word = t(Math.abs(cell.r) >= 0.7 ? 'metrics.pairs.moveTogether' : Math.abs(cell.r) >= 0.4 ? 'metrics.pairs.loose' : 'metrics.pairs.independent')
+  const strength = cell.r < -0.4 ? t('metrics.pairs.opposite', { strength: word }) : word
+  return t('metrics.pairs.cell', { column: props.labelOf(cell.column), n: cell.n, r: cell.r.toFixed(2), row: props.labelOf(cell.row), strength }, cell.n)
 }
 function isSelected(cell: { column: string, row: string }) {
   return props.selectedPair != null
@@ -64,7 +67,7 @@ const fill = (r: number) => `color-mix(in oklab, ${r >= 0 ? 'var(--series-1)' : 
             {{ cell.r.toFixed(2).replace(/^(-?)0\./, '$1.') }}
           </button>
           <!-- Diagonal: how well this metric alone tells failed from passed cases. -->
-          <span :class="['h-9 rounded-sm grid place-items-center text-[10px] mono muted border border-dashed border-neutral-300/70 dark:border-neutral-700/60']" :title="`AUC of ${props.labelOf(rowMetric)}`">
+          <span :class="['h-9 rounded-sm grid place-items-center text-[10px] mono muted border border-dashed border-neutral-300/70 dark:border-neutral-700/60']" :title="t('metrics.pairs.aucOf', { metric: props.labelOf(rowMetric) })">
             {{ props.separation.get(rowMetric)?.auc.toFixed(2).replace(/^0\./, '.') ?? '—' }}
           </span>
           <span v-for="index in props.metrics.length - row - 1" :key="`blank-${index}`" aria-hidden="true" />
@@ -77,9 +80,9 @@ const fill = (r: number) => `color-mix(in oklab, ${r >= 0 ? 'var(--series-1)' : 
     <div :class="['flex flex-wrap items-center gap-x-4 gap-y-1 text-xs muted min-h-5']">
       <span v-if="readout" :class="['text-neutral-800 dark:text-neutral-200']">{{ readout.text }}</span>
       <template v-else>
-        <span :class="['inline-flex items-center gap-1']"><span :class="['inline-block w-3 h-3 rounded-sm']" :style="{ background: fill(0.9) }" />move together</span>
-        <span :class="['inline-flex items-center gap-1']"><span :class="['inline-block w-3 h-3 rounded-sm']" :style="{ background: fill(-0.9) }" />move opposite</span>
-        <span>diagonal: AUC (failed vs passed) · click a cell for its scatterplot</span>
+        <span :class="['inline-flex items-center gap-1']"><span :class="['inline-block w-3 h-3 rounded-sm']" :style="{ background: fill(0.9) }" />{{ t('metrics.pairs.moveTogether') }}</span>
+        <span :class="['inline-flex items-center gap-1']"><span :class="['inline-block w-3 h-3 rounded-sm']" :style="{ background: fill(-0.9) }" />{{ t('metrics.pairs.moveOpposite') }}</span>
+        <span>{{ t('metrics.pairs.diagonal') }}</span>
       </template>
     </div>
   </div>

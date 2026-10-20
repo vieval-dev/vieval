@@ -2,6 +2,7 @@
 import { useClipboard } from '@vueuse/core'
 import { CollapsibleContent, CollapsibleRoot, CollapsibleTrigger } from 'reka-ui'
 import { computed, shallowRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 /**
  * Collapsed "Details" of a run page header: the raw identifiers (run id, report path, report root) that the header
@@ -13,17 +14,18 @@ const props = defineProps<{
   runId: string
 }>()
 
+const { t } = useI18n()
 const rows = computed(() => [
-  { label: 'Run ID', value: props.runId },
-  { label: 'Report path', value: props.reportPath },
-  { label: 'Report root', value: props.reportRoot },
-].filter((row): row is { label: string, value: string } => row.value != null && row.value !== ''))
+  { key: 'runId', label: t('runs.details.runId'), value: props.runId },
+  { key: 'reportPath', label: t('runs.details.reportPath'), value: props.reportPath },
+  { key: 'reportRoot', label: t('runs.details.reportRoot'), value: props.reportRoot },
+].filter((row): row is { key: string, label: string, value: string } => row.value != null && row.value !== ''))
 
 const { copied, copy } = useClipboard({ copiedDuring: 1500, legacy: true })
-/** Label of the row copied last, so only that row says "Copied". */
-const copiedLabel = shallowRef<string>()
-function copyRow(row: { label: string, value: string }): void {
-  copiedLabel.value = row.label
+/** Key of the row copied last, so only that row says "Copied". */
+const copiedKey = shallowRef<string>()
+function copyRow(row: { key: string, value: string }): void {
+  copiedKey.value = row.key
   void copy(row.value)
 }
 </script>
@@ -31,11 +33,11 @@ function copyRow(row: { label: string, value: string }): void {
 <template>
   <CollapsibleRoot v-slot="{ open }" :class="['mt-1']">
     <CollapsibleTrigger :class="['btn', 'px-1.5! py-0.5! text-xs muted']">
-      <span :class="[open ? 'i-mingcute-down-small-line' : 'i-mingcute-right-small-line']" aria-hidden="true" />Details
+      <span :class="[open ? 'i-mingcute-down-small-line' : 'i-mingcute-right-small-line']" aria-hidden="true" />{{ t('runs.details.title') }}
     </CollapsibleTrigger>
     <CollapsibleContent>
       <dl :class="['mt-1 grid gap-x-3 gap-y-1 text-xs', 'grid-cols-[max-content_1fr_max-content] items-baseline']" data-testid="run-details">
-        <template v-for="row in rows" :key="row.label">
+        <template v-for="row in rows" :key="row.key">
           <dt :class="['muted']">
             {{ row.label }}
           </dt>
@@ -44,7 +46,7 @@ function copyRow(row: { label: string, value: string }): void {
           </dd>
           <dd>
             <button type="button" :class="['btn', 'px-1.5! py-0.5! text-xs']" @click="copyRow(row)">
-              {{ copied && copiedLabel === row.label ? 'Copied' : 'Copy' }}
+              {{ copied && copiedKey === row.key ? t('runs.id.copied') : t('runs.id.copy') }}
             </button>
           </dd>
         </template>

@@ -3,6 +3,7 @@ import { useQuery } from '@pinia/colada'
 import { useIntervalFn, useTimestamp } from '@vueuse/core'
 import { TooltipArrow, TooltipContent, TooltipPortal, TooltipRoot, TooltipTrigger } from 'reka-ui'
 import { computed, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import ProgressBar from './ProgressBar.vue'
 
@@ -26,6 +27,7 @@ const props = defineProps<{
   startedAt?: string
 }>()
 
+const { t } = useI18n()
 const progress = useQuery({ key: () => ['runs', props.runKey, 'progress'], query: () => api.progress(props.runKey) })
 watch(() => props.seq, () => void progress.refetch())
 // Every 10 s: "started … ago" and the expected finish show minutes at most.
@@ -39,7 +41,7 @@ const view = computed(() => {
   const total = cases.estimatedTotal
   const percent = ratio == null ? undefined : Math.min(100, ratio * 100)
   return {
-    cases: `${cases.completed} / ${total ?? '?'} cases`,
+    cases: t('runs.eta.cases', { completed: cases.completed, total: total ?? '?' }),
     finish: etaMs == null ? undefined : formatFinish(new Date(now.value + etaMs).toISOString(), now.value),
     lowerBound,
     percent,
@@ -57,18 +59,20 @@ const startedAgo = computed(() => (props.startedAt == null ? undefined : formatD
       <span :class="['flex items-baseline justify-between flex-wrap gap-x-3 text-xs muted']">
         <span :class="['whitespace-nowrap']">
           <template v-if="view.finish">
-            Ends {{ view.lowerBound ? 'after' : 'at' }} <b :class="['font-semibold tabular-nums text-neutral-800 dark:text-neutral-200']">{{ view.finish }}</b>
+            <i18n-t :keypath="view.lowerBound ? 'runs.eta.endsAfter' : 'runs.eta.endsAt'" scope="global">
+              <template #time><b :class="['font-semibold tabular-nums text-neutral-800 dark:text-neutral-200']">{{ view.finish }}</b></template>
+            </i18n-t>
           </template>
-          <template v-else>No estimate yet</template>
+          <template v-else>{{ t('runs.eta.noEstimate') }}</template>
         </span>
-        <span v-if="startedAgo" :class="['whitespace-nowrap']">started {{ startedAgo }} ago</span>
+        <span v-if="startedAgo" :class="['whitespace-nowrap']">{{ t('runs.eta.started', { duration: startedAgo }) }}</span>
       </span>
       <TooltipRoot :delay-duration="150">
         <TooltipTrigger as-child>
           <div :class="['py-1.5 -my-1.5 outline-none']" tabindex="0">
             <ProgressBar
               size="sm"
-              label="Run progress"
+              :label="t('runs.progress.barLabel')"
               :value="view.percent ?? 0"
               :segments="[
                 { class: 'bg-primary-500 dark:bg-primary-400', percent: view.percent ?? 0 },
@@ -79,7 +83,7 @@ const startedAgo = computed(() => (props.startedAt == null ? undefined : formatD
         </TooltipTrigger>
         <TooltipPortal>
           <TooltipContent :side-offset="4" :class="['tooltip', 'tabular-nums']" data-testid="run-eta-tooltip">
-            {{ view.percent == null ? 'Progress unknown' : `${view.percent.toFixed(1)}% done` }} · {{ view.cases }} · {{ view.running }} running
+            {{ view.percent == null ? t('runs.eta.progressUnknown') : t('runs.eta.percentDone', { percent: view.percent.toFixed(1) }) }} · {{ view.cases }} · {{ t('runs.progress.running', { n: view.running }) }}
             <TooltipArrow :class="['tooltip-arrow']" />
           </TooltipContent>
         </TooltipPortal>

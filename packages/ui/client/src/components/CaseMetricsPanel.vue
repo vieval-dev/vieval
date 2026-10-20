@@ -13,6 +13,7 @@ import { animate } from 'animejs'
 import { DropdownMenuContent, DropdownMenuItemIndicator, DropdownMenuPortal, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuRoot, DropdownMenuTrigger, PopoverAnchor, PopoverArrow, PopoverContent, PopoverPortal, PopoverRoot } from 'reka-ui'
 import { DrawerContent, DrawerDescription, DrawerHandle, DrawerOverlay, DrawerPortal, DrawerRoot, DrawerTitle } from 'vaul-vue'
 import { computed, nextTick, shallowRef, useTemplateRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import AnimatedContent from './AnimatedContent.vue'
 import AxisPicker from './AxisPicker.vue'
@@ -29,7 +30,7 @@ import SegmentedControl from './SegmentedControl.vue'
 import StateView from './StateView.vue'
 
 import { api } from '../api'
-import { buildCaseTable, columnDefinitions, formatColumnValue, matchesFilters, metricDefinition, metricLabel, metricScale, separationOf } from '../caseMetrics'
+import { buildCaseTable, categoryValueLabel, columnDefinitions, formatColumnValue, matchesFilters, metricDefinition, metricLabel, metricScale, separationOf } from '../caseMetrics'
 import { formatScore, formatTick } from '../format'
 import { href, navigate } from '../router'
 
@@ -48,6 +49,7 @@ const props = defineProps<{
 /** Keys of the selected cases; `undefined` while nothing is filtered. */
 const selection = defineModel<ReadonlySet<string> | undefined>('selection')
 
+const { t } = useI18n()
 const metrics = useQuery({
   // The same cache entries as the task page and the run's scores panel.
   key: () => (props.taskId == null ? ['runs', props.runKey, 'metrics'] : ['runs', props.runKey, 'task', props.taskId, 'metrics']),
@@ -221,17 +223,17 @@ const VIEW_ORDER: CaseView[] = ['chart', 'sets', 'matrix', 'pairs', 'groups']
 // A run-wide panel opens on the parallel sets once the matrix splits the cases (see `views`); a task opens on the chart.
 const pickedView = shallowRef<CaseView>()
 const views = computed(() => {
-  const items: { icon: string, label: string, value: CaseView }[] = [{ icon: 'i-mingcute-chart-line-line', label: 'Chart', value: 'chart' }]
+  const items: { icon: string, label: string, value: CaseView }[] = [{ icon: 'i-mingcute-chart-line-line', label: t('metrics.cases.views.chart'), value: 'chart' }]
   // Parallel sets need two category axes besides the outcome.
   if (setAxes.value.length >= 2)
-    items.push({ icon: 'i-mingcute-sitemap-line', label: 'Sets', value: 'sets' })
+    items.push({ icon: 'i-mingcute-sitemap-line', label: t('metrics.cases.views.sets'), value: 'sets' })
   if (numericAxes.value.length >= 2) {
-    items.push({ icon: 'i-mingcute-grid-line', label: 'Matrix', value: 'matrix' })
-    items.push({ icon: 'i-mingcute-layout-grid-line', label: 'Pairs', value: 'pairs' })
+    items.push({ icon: 'i-mingcute-grid-line', label: t('metrics.cases.views.matrix'), value: 'matrix' })
+    items.push({ icon: 'i-mingcute-layout-grid-line', label: t('metrics.cases.views.pairs'), value: 'pairs' })
   }
   // Groups need a category to group by besides the state.
   if (groupCategories.value.length > 0)
-    items.push({ icon: 'i-mingcute-chart-horizontal-line', label: 'Groups', value: 'groups' })
+    items.push({ icon: 'i-mingcute-chart-horizontal-line', label: t('metrics.cases.views.groups'), value: 'groups' })
   return items.length > 1 ? items : []
 })
 const view = computed<CaseView>({
@@ -312,7 +314,7 @@ const selectionSummary = computed(() => {
     return { label: labelOf(primary), value: formatScore(scores.length === 0 ? null : scores.reduce((sum, value) => sum + value, 0) / scores.length) }
   }
   const finished = rows.filter(row => row.state === 'passed' || row.state === 'failed' || row.state === 'errored' || row.state === 'timeout')
-  return { label: 'pass', value: finished.length === 0 ? '—' : `${((finished.filter(row => row.state === 'passed').length / finished.length) * 100).toFixed(1)}%` }
+  return { label: t('metrics.cases.pass'), value: finished.length === 0 ? '—' : `${((finished.filter(row => row.state === 'passed').length / finished.length) * 100).toFixed(1)}%` }
 })
 
 /**
@@ -361,7 +363,7 @@ const palette = computed<{ colorOf: (row: CaseRow) => string, legend: LegendItem
     active: picked?.has(value) === true,
     color,
     count: rows.filter(row => row.categories[name] === value).length,
-    label: value,
+    label: categoryValueLabel(name, value),
     select: () => onPick(name, value),
   })
   if (name === 'state')
@@ -378,7 +380,7 @@ const palette = computed<{ colorOf: (row: CaseRow) => string, legend: LegendItem
     const slots = new Map(values.slice(0, SERIES_SLOTS).map((value, index) => [value, `var(--series-${index + 1})`]))
     const legend = [...slots].map(([label, color]) => categoryItem(label, color))
     if (values.length > SERIES_SLOTS)
-      legend.push({ color: 'var(--chart-text)', count: rows.filter(row => !slots.has(row.categories[name] ?? '')).length, label: `${values.length - SERIES_SLOTS} more` })
+      legend.push({ color: 'var(--chart-text)', count: rows.filter(row => !slots.has(row.categories[name] ?? '')).length, label: t('metrics.summary.more', { n: values.length - SERIES_SLOTS }) })
     return { colorOf: row => slots.get(row.categories[name] ?? '') ?? 'var(--chart-text)', legend }
   }
   // A metric in bands of one hue: the viewer's cuts, else five equal steps along its scale (symlog for heavy tails).
@@ -517,18 +519,18 @@ const formatOf = (name: string, value: number) => formatColumnValue(value, metri
 <template>
   <section :class="['card mb-4']" data-testid="case-metrics">
     <h2 :class="['card-title flex-wrap']">
-      <span class="i-mingcute-chart-line-line" aria-hidden="true" />Case metrics
-      <span class="text-xs muted font-normal">every case against its recorded metrics</span>
+      <span class="i-mingcute-chart-line-line" aria-hidden="true" />{{ t('metrics.cases.title') }}
+      <span class="text-xs muted font-normal">{{ t('metrics.cases.subtitle') }}</span>
     </h2>
-    <StateView :error="metrics.error.value" :loading="metrics.isPending.value" :empty="table.rows.length === 0" empty-text="No cases yet" @retry="metrics.refetch()">
+    <StateView :error="metrics.error.value" :loading="metrics.isPending.value" :empty="table.rows.length === 0" :empty-text="t('metrics.cases.empty')" @retry="metrics.refetch()">
       <div :class="['grid gap-3 p-3']">
         <!-- One toolbar row: the axes behind a button, the color, and what the selection holds. -->
         <div :class="['flex flex-wrap items-center gap-x-2 gap-y-2 text-xs select-none']">
-          <SegmentedControl v-if="views.length > 0" v-model="view" :items="views" label="View" size="md" />
+          <SegmentedControl v-if="views.length > 0" v-model="view" :items="views" :label="t('metrics.cases.viewLabel')" size="md" />
           <AxisPicker v-model:metrics="numericAxes" v-model:categories="categoryAxes" :definition-of="name => metricDefinition(name, definitions)" :label-of="labelOf" :separation="separation" :table="table" :values-of="valuesOf" />
           <DropdownMenuRoot @update:open="open => { if (!open) highlightedColor = undefined }">
             <DropdownMenuTrigger :class="['option-trigger max-w-60']" data-testid="color-by">
-              <span :class="['muted shrink-0']">Color by</span><span :class="['truncate']">{{ labelOf(colorBy) }}</span><span class="i-mingcute-down-line muted" aria-hidden="true" />
+              <span :class="['muted shrink-0']">{{ t('metrics.cases.colorBy') }}</span><span :class="['truncate']">{{ labelOf(colorBy) }}</span><span class="i-mingcute-down-line muted" aria-hidden="true" />
             </DropdownMenuTrigger>
             <DropdownMenuPortal>
               <DropdownMenuContent as-child align="start" :side-offset="6" :collision-padding="12" :class="['floating min-w-52 p-1 text-sm']">
@@ -554,24 +556,24 @@ const formatOf = (name: string, value: number) => formatColumnValue(value, metri
             :class="['inline-flex flex-wrap items-center gap-0.5', colorIsMetric && 'rounded-lg bg-neutral-500/10 p-0.5']"
             data-testid="color-legend"
           >
-            <span v-if="colorIsMetric" :class="['muted px-2 whitespace-nowrap']">Bands of {{ labelOf(colorBy) }}</span>
+            <span v-if="colorIsMetric" :class="['muted px-2 whitespace-nowrap']">{{ t('metrics.cases.bandsOf', { metric: labelOf(colorBy) }) }}</span>
             <component
               :is="item.select ? 'button' : 'span'"
               v-for="item in palette.legend" :key="item.label"
               :type="item.select ? 'button' : undefined"
               :class="[item.select ? 'btn text-xs px-1.5! py-0.5!' : 'inline-flex items-center gap-1 px-1.5 py-0.5', item.active && 'btn-active']"
               :aria-pressed="item.select ? item.active === true : undefined"
-              :title="`${item.count} case(s)`"
+              :title="t('metrics.cases.legendCount', { n: item.count }, item.count)"
               @click="item.select?.()"
             >
               <span :class="['inline-block w-3 h-1.5 rounded-sm']" :style="{ background: item.color }" />{{ item.label }}<b v-if="colorIsMetric" :class="['mono']">{{ item.count }}</b>
             </component>
             <template v-if="colorIsMetric">
-              <button type="button" :class="['btn text-xs px-1.5! py-0.5!']" title="Split the widest band; drag the new line on the metric's axis" data-testid="add-cut" @click="addCut">
-                <span class="i-mingcute-add-line" aria-hidden="true" />cut
+              <button type="button" :class="['btn text-xs px-1.5! py-0.5!']" :title="t('metrics.cases.addCutHint')" data-testid="add-cut" @click="addCut">
+                <span class="i-mingcute-add-line" aria-hidden="true" />{{ t('metrics.cases.addCut') }}
               </button>
-              <button v-if="(cuts[colorBy] ?? []).length > 0" type="button" :class="['btn text-xs px-1.5! py-0.5! muted']" title="Back to five equal steps" @click="setCuts(colorBy, [])">
-                <span class="i-mingcute-refresh-2-line" aria-hidden="true" />steps
+              <button v-if="(cuts[colorBy] ?? []).length > 0" type="button" :class="['btn text-xs px-1.5! py-0.5! muted']" :title="t('metrics.cases.resetCutsHint')" @click="setCuts(colorBy, [])">
+                <span class="i-mingcute-refresh-2-line" aria-hidden="true" />{{ t('metrics.cases.resetCuts') }}
               </button>
             </template>
           </span>
@@ -579,7 +581,7 @@ const formatOf = (name: string, value: number) => formatColumnValue(value, metri
             <b class="mono">{{ selected.size }}</b><span class="muted"> / {{ table.rows.length }} · {{ selectionSummary.label }}&nbsp;</span><b class="mono">{{ selectionSummary.value }}</b>
           </span>
           <button v-if="filtering" type="button" class="btn" @click="clearFilters">
-            <span class="i-mingcute-close-line" aria-hidden="true" />Clear selection
+            <span class="i-mingcute-close-line" aria-hidden="true" />{{ t('metrics.cases.clearSelection') }}
           </button>
         </div>
 
@@ -589,10 +591,10 @@ const formatOf = (name: string, value: number) => formatColumnValue(value, metri
           <Transition mode="out-in" :css="false" @enter="fadeIn" @leave="fadeOut">
             <div v-if="view === 'matrix'" key="matrix" :class="['grid gap-1']">
               <div :class="['text-xs muted']">
-                Every pair of {{ matrixMetrics.map(labelOf).join(', ') }}<template v-if="numericAxes.length > MAX_MATRIX_METRICS">
-                  (the first {{ MAX_MATRIX_METRICS }} picked metrics)
+                {{ t('metrics.cases.matrixPairs', { metrics: matrixMetrics.map(labelOf).join(t('scores.listSeparator')) }) }}<template v-if="numericAxes.length > MAX_MATRIX_METRICS">
+                  {{ t('metrics.cases.matrixFirst', { n: MAX_MATRIX_METRICS }) }}
                 </template>
-                · drag in a cell to select
+                {{ t('metrics.cases.matrixHint') }}
               </div>
               <ScatterMatrix :color-of="colorOf" :filters="filters" :metrics="matrixMetrics" :label-of="labelOf" :rows="table.rows" :scales="scales" :selected="selected" :pinned-key="pinned?.key" @box="box => filters = { ...filters, box }" @hover="onHover" @pin="onPin" />
             </div>
@@ -618,7 +620,11 @@ const formatOf = (name: string, value: number) => formatColumnValue(value, metri
               />
             </div>
             <p v-else-if="dimensions.length === 0" key="empty" :class="['text-sm muted py-6 text-center']">
-              Pick a metric or a category in <b>Axes</b> to draw the cases.
+              <i18n-t keypath="metrics.cases.pickAxes" scope="global">
+                <template #axes>
+                  <b>{{ t('metrics.axes.title') }}</b>
+                </template>
+              </i18n-t>
             </p>
             <CaseCartesian
               v-else-if="!parallel" key="plane"
@@ -669,10 +675,10 @@ const formatOf = (name: string, value: number) => formatColumnValue(value, metri
         >
           <DrawerHandle :class="['bg-neutral-300! dark:bg-neutral-600!']" />
           <DrawerTitle :class="['sr-only']">
-            Case {{ pinnedRow?.name }}
+            {{ t('metrics.cases.caseTitle', { name: pinnedRow?.name }) }}
           </DrawerTitle>
           <DrawerDescription :class="['sr-only']">
-            The case's value on every axis and where it sits among all cases.
+            {{ t('metrics.cases.caseDescription') }}
           </DrawerDescription>
           <div v-if="pinnedRow" :class="['overflow-y-auto min-h-0']">
             <CaseCard :active-axis="pinned?.axis ?? undefined" :axes="axes" :href="caseHref(pinnedRow)" :label-of="labelOf" layout="drawer" pinned :row="pinnedRow" :rows="table.rows" :scales="scales" :format-of="formatOf" :value-counts="table.valueCounts" @unpin="pinned = undefined" />

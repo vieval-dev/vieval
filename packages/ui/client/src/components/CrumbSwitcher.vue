@@ -4,6 +4,7 @@ import type { SwitcherOption } from '../switcher'
 
 import { ComboboxContent, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxItemIndicator, ComboboxRoot, ComboboxViewport, PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
 import { computed, shallowRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import AnimatedContent from './AnimatedContent.vue'
 import CountsBar from './CountsBar.vue'
@@ -11,7 +12,7 @@ import StateBadge from './StateBadge.vue'
 import TimeAgo from './TimeAgo.vue'
 
 import { formatScore } from '../format'
-import { levelLabels } from '../hierarchy'
+import { levelLabel } from '../hierarchy'
 import { filterOptions } from '../switcher'
 
 /**
@@ -31,7 +32,10 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ select: [option: SwitcherOption] }>()
 
+const { t } = useI18n()
 const open = shallowRef(false)
+/** Name of the level inside a sentence ("switch experiment"). */
+const levelNoun = computed(() => levelLabel(props.level).toLowerCase())
 const query = shallowRef('')
 const visible = computed(() => filterOptions(props.options, query.value))
 
@@ -54,7 +58,7 @@ function choose(id: unknown): void {
         'hover:bg-primary-500/10 data-[state=open]:bg-primary-500/15 focus-visible:(outline-2 outline-offset-1 outline-primary-500)',
       ]"
       :title="props.current"
-      :aria-label="`${props.label} — switch ${levelLabels[props.level].toLowerCase()}`"
+      :aria-label="t('runs.switcher.trigger', { label: props.label, level: levelNoun })"
       :data-testid="`switch-${props.level}`"
     >
       <span :class="['truncate']">{{ props.label }}</span>
@@ -64,7 +68,7 @@ function choose(id: unknown): void {
       <PopoverContent as-child :side-offset="6" :collision-padding="12" align="start" :class="['floating w-[min(24rem,calc(100vw-1.5rem))] overflow-hidden']">
         <AnimatedContent>
           <div :class="['px-3 py-2 text-sm font-semibold border-b border-neutral-200/50 dark:border-neutral-700/40']">
-            Switch {{ levelLabels[props.level].toLowerCase() }}
+            {{ t('runs.switcher.title', { level: levelNoun }) }}
           </div>
           <ComboboxRoot :model-value="props.current" :open="true" ignore-filter :reset-search-term-on-blur="false" @update:model-value="choose">
             <div :class="['p-2 border-b border-neutral-200/50 dark:border-neutral-700/40']">
@@ -74,7 +78,7 @@ function choose(id: unknown): void {
                 v-model="query"
                 :display-value="() => ''"
                 auto-focus
-                :placeholder="`Find ${/^[aeiou]/i.test(levelLabels[props.level]) ? 'an' : 'a'} ${levelLabels[props.level].toLowerCase()}…`"
+                :placeholder="t(`runs.switcher.find.${props.level}`)"
                 :class="['w-full rounded-md px-2 py-1.5 text-sm outline-none', 'bg-neutral-500/8 focus:(ring-2 ring-primary-500/40)']"
                 data-testid="switch-search"
               />
@@ -82,7 +86,7 @@ function choose(id: unknown): void {
             <ComboboxContent position="inline" :class="['max-h-96 overflow-y-auto p-1']">
               <ComboboxViewport>
                 <ComboboxEmpty :class="['px-2 py-3 text-sm muted text-center']">
-                  Nothing matches “{{ query }}”
+                  {{ t('runs.switcher.nothingMatches', { query }) }}
                 </ComboboxEmpty>
                 <ComboboxItem
                   v-for="option in visible"

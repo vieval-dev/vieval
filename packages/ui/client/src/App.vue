@@ -6,10 +6,11 @@ import { useHead } from '@unhead/vue'
 import { useDark, useToggle } from '@vueuse/core'
 import { DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle, TooltipProvider } from 'reka-ui'
 import { computed, shallowRef, useTemplateRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import CompareMenu from './components/CompareMenu.vue'
-import HuePicker from './components/HuePicker.vue'
 import IconButton from './components/IconButton.vue'
+import PreferencesMenu from './components/PreferencesMenu.vue'
 import Sidebar from './components/Sidebar.vue'
 import CasePage from './pages/CasePage.vue'
 import ComparePage from './pages/ComparePage.vue'
@@ -20,8 +21,13 @@ import RunPage from './pages/RunPage.vue'
 import TaskPage from './pages/TaskPage.vue'
 
 import { api } from './api'
+import { useLocale } from './composables/useLocale'
 import { FAVICON_KEYS } from './composables/useStatusFavicon'
 import { currentRoute, href } from './router'
+
+const { t } = useI18n()
+// Applies the saved language from the start, before the Preferences popover is opened.
+const { locale } = useLocale()
 
 const route = currentRoute
 const routeRunKey = computed(() => ('runKey' in route.value ? route.value.runKey : undefined))
@@ -69,6 +75,7 @@ watch(pageKey, () => main.value?.scrollTo({ top: 0 }))
 // (`useStatusFavicon`). `vieval-logo.svg` is `docs/content/public/vieval-logo.svg` with its embedded 1200 px gradient
 // re-encoded as a 300 px WebP (4.3 MB → 7 KB); the PNG is the docs' 96 px favicon for browsers without SVG favicons.
 useHead({
+  htmlAttrs: { lang: locale },
   link: [
     { href: './vieval-logo.svg', key: FAVICON_KEYS.svg, rel: 'icon', type: 'image/svg+xml' },
     { href: './favicon-96x96.png', key: FAVICON_KEYS.png, rel: 'icon', sizes: '96x96', type: 'image/png' },
@@ -87,15 +94,15 @@ watch(route, () => (drawerOpen.value = false))
     <div :class="['flex h-full max-md:flex-col']">
       <!-- Narrow screens: a top bar with the drawer toggle replaces the sidebar column. -->
       <header :class="['md:hidden shrink-0 flex items-center gap-1 px-2 h-12 pt-[env(safe-area-inset-top)] box-content', 'border-b border-neutral-200/50 dark:border-neutral-800/50 bg-white/90 dark:bg-neutral-950/90 backdrop-blur']">
-        <IconButton icon="i-mingcute-menu-line" label="Projects and runs" @click="drawerOpen = true" />
+        <IconButton icon="i-mingcute-menu-line" :label="t('navigation.projectsAndRuns')" @click="drawerOpen = true" />
         <a :href="href({ name: 'scope' })" :class="['flex items-center gap-2 px-1 font-semibold']">
           <img src="/vieval-logo.svg" alt="" width="20" height="20" :class="['size-5']">
           Vieval
         </a>
         <div :class="['ml-auto flex items-center gap-0.5']">
           <CompareMenu v-bind="compareScope" />
-          <HuePicker />
-          <IconButton :icon="dark ? 'i-mingcute-sun-line' : 'i-mingcute-moon-line'" :label="dark ? 'Light mode' : 'Dark mode'" @click="toggleScheme()" />
+          <PreferencesMenu />
+          <IconButton :icon="dark ? 'i-mingcute-sun-line' : 'i-mingcute-moon-line'" :label="dark ? t('preferences.scheme.light') : t('preferences.scheme.dark')" @click="toggleScheme()" />
         </div>
       </header>
       <DialogRoot v-model:open="drawerOpen">
@@ -105,12 +112,12 @@ watch(route, () => (drawerOpen.value = false))
           <DialogContent :class="['vv-drawer fixed inset-y-0 left-0 z-50 w-[min(20rem,85vw)] flex flex-col md:hidden', 'bg-white dark:bg-neutral-950 shadow-xl outline-none pt-[env(safe-area-inset-top)]']" @open-auto-focus.prevent>
             <div :class="['flex items-center gap-2 px-3 h-12 shrink-0 border-b border-neutral-200/50 dark:border-neutral-800/50']">
               <DialogTitle :class="['font-semibold']">
-                Projects and runs
+                {{ t('navigation.projectsAndRuns') }}
               </DialogTitle>
               <DialogDescription :class="['sr-only']">
-                Navigate to a project, an experiment, or a recent run.
+                {{ t('navigation.drawerDescription') }}
               </DialogDescription>
-              <IconButton :class="['ml-auto']" icon="i-mingcute-close-line" label="Close" @click="drawerOpen = false" />
+              <IconButton :class="['ml-auto']" icon="i-mingcute-close-line" :label="t('common.close')" @click="drawerOpen = false" />
             </div>
             <!-- A link to the page already shown does not change the route; close on every followed link instead. -->
             <div :class="['flex-1 overflow-auto p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]']" @click="($event.target as HTMLElement).closest('a') && (drawerOpen = false)">
@@ -127,8 +134,8 @@ watch(route, () => (drawerOpen.value = false))
           </a>
           <div :class="['ml-auto flex items-center gap-0.5']">
             <CompareMenu v-bind="compareScope" />
-            <HuePicker />
-            <IconButton :icon="dark ? 'i-mingcute-sun-line' : 'i-mingcute-moon-line'" :label="dark ? 'Light mode' : 'Dark mode'" @click="toggleScheme()" />
+            <PreferencesMenu />
+            <IconButton :icon="dark ? 'i-mingcute-sun-line' : 'i-mingcute-moon-line'" :label="dark ? t('preferences.scheme.light') : t('preferences.scheme.dark')" @click="toggleScheme()" />
           </div>
         </div>
         <div :class="['flex-1 overflow-auto p-2']">

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { TooltipArrow, TooltipContent, TooltipPortal, TooltipRoot, TooltipTrigger } from 'reka-ui'
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import { formatCount, formatTick } from '../format'
 
@@ -20,6 +21,7 @@ const props = defineProps<{
   /** One score per case (0–1); cases without a score are left out. */
   scores: readonly (null | number | undefined)[]
 }>()
+const { t } = useI18n()
 
 /** Distinct scores up to this many get a segment each; more are binned into as many equal parts of the range. */
 const MAX_SEGMENTS = 5
@@ -41,7 +43,7 @@ const parts = computed(() => {
     width: `${(group.count / values.length) * 100}%`,
   }))
 })
-const summary = computed(() => parts.value.map(part => `${part.count} at ${part.label}`).join(', '))
+const summary = computed(() => parts.value.map(part => t('matrix.scoreBar.part', { count: formatCount(part.count), score: part.label })).join(', '))
 
 function binned(values: readonly number[]): { count: number, label: string }[] {
   const min = Math.min(...values)
@@ -62,7 +64,7 @@ function binned(values: readonly number[]): { count: number, label: string }[] {
   <TooltipRoot v-if="parts.length > 0" :delay-duration="150">
     <TooltipTrigger as-child>
       <!-- The padding widens the hover target of a 6 px bar without moving it (as in CountsBar). -->
-      <div v-bind="$attrs" :class="['group py-1.5 -my-1.5 min-w-12 outline-none']" tabindex="0" role="img" :aria-label="`Scores: ${summary}`" data-testid="score-bar">
+      <div v-bind="$attrs" :class="['group py-1.5 -my-1.5 min-w-12 outline-none']" tabindex="0" role="img" :aria-label="t('matrix.scoreBar.label', { summary })" data-testid="score-bar">
         <div :class="['flex h-1.5 gap-[2px] overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800', 'transition-[height] duration-200 group-hover:h-2 group-focus-visible:h-2']">
           <div v-for="part in parts" :key="part.label" :class="['h-full rounded-full min-w-1.5']" :style="{ background: part.color, width: part.width }" />
         </div>
@@ -71,7 +73,7 @@ function binned(values: readonly number[]): { count: number, label: string }[] {
     <TooltipPortal>
       <TooltipContent :side-offset="4" :class="['tooltip', 'flex items-center gap-2 tabular-nums']">
         <span v-for="part in parts" :key="part.label" :class="['inline-flex items-center gap-1']">
-          <span :class="['size-2 rounded-full']" :style="{ background: part.color }" aria-hidden="true" />{{ formatCount(part.count) }} at {{ part.label }}
+          <span :class="['size-2 rounded-full']" :style="{ background: part.color }" aria-hidden="true" />{{ t('matrix.scoreBar.part', { count: formatCount(part.count), score: part.label }) }}
         </span>
         <TooltipArrow :class="['tooltip-arrow']" />
       </TooltipContent>

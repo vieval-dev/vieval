@@ -7,6 +7,7 @@ import { useMediaQuery } from '@vueuse/core'
 import { PopoverArrow, PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
 import { DrawerContent, DrawerDescription, DrawerHandle, DrawerOverlay, DrawerPortal, DrawerRoot, DrawerTitle } from 'vaul-vue'
 import { computed, shallowRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import AnimatedContent from './AnimatedContent.vue'
 import ScoreDetail from './ScoreDetail.vue'
@@ -27,6 +28,7 @@ const props = defineProps<{
   text: string
 }>()
 
+const { t } = useI18n()
 const isDesktop = useMediaQuery('(min-width: 768px)')
 const open = shallowRef(false)
 const label = computed(() => scoreLabel(props.name, props.definitions))
@@ -63,7 +65,7 @@ const badge = computed(() => ['badge cursor-pointer transition-colors hover:bg-p
           {{ label }}
         </DrawerTitle>
         <DrawerDescription :class="['sr-only']">
-          Why the score has this value, and what graded it.
+          {{ t('scores.detail.drawerDescription') }}
         </DrawerDescription>
         <div :class="['overflow-y-auto min-h-0']">
           <ScoreDetail :call-count="props.callCount" :calls-href="props.callsHref" :definitions="props.definitions" :name="props.name" :record="props.record" :text="props.text" />

@@ -3,6 +3,7 @@ import type { CaseCounts } from '../../../src/shared/contract'
 
 import { TooltipArrow, TooltipContent, TooltipPortal, TooltipRoot, TooltipTrigger } from 'reka-ui'
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import { formatCount } from '../format'
 
@@ -32,20 +33,21 @@ const props = withDefaults(defineProps<{
   labels?: 'hover' | 'none' | 'tooltip'
 }>(), { labels: 'tooltip' })
 
+const { t } = useI18n()
 const parts = computed(() => {
   const { errored, failed, passed, running, skipped, timeout, total } = props.counts
   const other = Math.max(0, total - passed - failed - errored - running - timeout - skipped) + skipped
   const sum = Math.max(1, total)
   return [
-    { class: '[background-color:var(--mark-passed)]', label: 'passed', text: '[color:var(--ink-passed)]', value: passed },
-    { class: '[background-color:var(--mark-failed)]', label: 'failed', text: '[color:var(--ink-failed)]', value: failed },
-    { class: '[background-color:var(--mark-errored)] vv-hatch', label: 'no result', text: '[color:var(--ink-errored)]', value: errored + timeout },
-    { class: '[background-color:var(--mark-running)] vv-pulse', label: 'running', text: '[color:var(--ink-running)]', value: running },
+    { class: '[background-color:var(--mark-passed)]', key: 'passed', label: t('runs.counts.passed'), text: '[color:var(--ink-passed)]', value: passed },
+    { class: '[background-color:var(--mark-failed)]', key: 'failed', label: t('runs.counts.failed'), text: '[color:var(--ink-failed)]', value: failed },
+    { class: '[background-color:var(--mark-errored)] vv-hatch', key: 'noResult', label: t('runs.counts.noResult'), text: '[color:var(--ink-errored)]', value: errored + timeout },
+    { class: '[background-color:var(--mark-running)] vv-pulse', key: 'running', label: t('runs.counts.running'), text: '[color:var(--ink-running)]', value: running },
     // Cases waiting to rerun have not ended, so they stay in this segment; the label says how many wait.
-    { class: 'bg-neutral-400 dark:bg-neutral-600', label: props.counts.requeued > 0 ? `not run (${props.counts.requeued} waiting to rerun)` : 'not run', text: 'muted', value: other },
+    { class: 'bg-neutral-400 dark:bg-neutral-600', key: 'notRun', label: props.counts.requeued > 0 ? t('runs.counts.notRunWaiting', { n: props.counts.requeued }) : t('runs.counts.notRun'), text: 'muted', value: other },
   ].filter(part => part.value > 0).map(part => ({ ...part, width: `${(part.value / sum) * 100}%` }))
 })
-const summary = computed(() => [...parts.value.map(part => `${part.value} ${part.label}`), `${props.counts.total} total`].join(', '))
+const summary = computed(() => [...parts.value.map(part => `${part.value} ${part.label}`), t('runs.counts.total', { n: props.counts.total })].join(t('runs.counts.separator')))
 </script>
 
 <template>
@@ -62,29 +64,29 @@ const summary = computed(() => [...parts.value.map(part => `${part.value} ${part
     data-testid="counts-bar-hover"
   >
     <div :class="['absolute inset-x-0 bottom-full z-1 flex gap-[2px] pointer-events-none', 'opacity-0 translate-y-1 transition-all duration-200', 'group-hover:(opacity-100 translate-y-0) group-focus-visible:(opacity-100 translate-y-0)']" aria-hidden="true">
-      <span v-for="part in parts" :key="part.label" :class="['flex justify-center min-w-1.5']" :style="{ width: part.width }">
+      <span v-for="part in parts" :key="part.key" :class="['flex justify-center min-w-1.5']" :style="{ width: part.width }">
         <span :class="['rounded px-1 text-xs font-semibold tabular-nums whitespace-nowrap bg-neutral-100 dark:bg-neutral-800', part.text]" data-testid="counts-segment-label">{{ formatCount(part.value) }}</span>
       </span>
     </div>
     <div :class="['flex h-1.5 gap-[2px] overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800', 'transition-[height] duration-200 group-hover:h-2.5 group-focus-visible:h-2.5']" data-testid="counts-bar">
-      <div v-for="part in parts" :key="part.label" :class="[part.class, 'h-full rounded-full min-w-1.5']" :style="{ width: part.width }" />
+      <div v-for="part in parts" :key="part.key" :class="[part.class, 'h-full rounded-full min-w-1.5']" :style="{ width: part.width }" />
     </div>
   </div>
   <div v-else-if="props.labels === 'none'" v-bind="$attrs" role="img" :aria-label="summary" :class="['flex h-1.5 gap-[2px] overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800']" data-testid="counts-bar">
-    <div v-for="part in parts" :key="part.label" :class="[part.class, 'h-full rounded-full min-w-1.5']" :style="{ width: part.width }" />
+    <div v-for="part in parts" :key="part.key" :class="[part.class, 'h-full rounded-full min-w-1.5']" :style="{ width: part.width }" />
   </div>
   <TooltipRoot v-else :delay-duration="150">
     <TooltipTrigger as-child>
       <!-- The padding widens the hover target of a 6 px bar without moving it. -->
       <div v-bind="$attrs" :class="['group py-1.5 -my-1.5 min-w-12 outline-none']" tabindex="0" role="img" :aria-label="summary" data-testid="counts-bar-tooltip">
         <div :class="['flex h-1.5 gap-[2px] overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800', 'transition-[height] duration-200 group-hover:h-2 group-focus-visible:h-2']" data-testid="counts-bar">
-          <div v-for="part in parts" :key="part.label" :class="[part.class, 'h-full rounded-full min-w-1.5']" :style="{ width: part.width }" />
+          <div v-for="part in parts" :key="part.key" :class="[part.class, 'h-full rounded-full min-w-1.5']" :style="{ width: part.width }" />
         </div>
       </div>
     </TooltipTrigger>
     <TooltipPortal>
       <TooltipContent :side-offset="4" :class="['tooltip', 'flex items-center gap-2 tabular-nums']" data-testid="counts-tooltip">
-        <span v-for="part in parts" :key="part.label" :class="['inline-flex items-center gap-1']">
+        <span v-for="part in parts" :key="part.key" :class="['inline-flex items-center gap-1']">
           <span :class="[part.class, 'size-2 rounded-full']" aria-hidden="true" />{{ formatCount(part.value) }} {{ part.label }}
         </span>
         <span :class="['opacity-70']">/ {{ formatCount(props.counts.total) }}</span>

@@ -6,6 +6,7 @@
 import type { Crumb } from './components/Breadcrumbs.vue'
 
 import { shortTaskId } from './format'
+import { i18n } from './i18n'
 import { href } from './router'
 
 /**
@@ -31,21 +32,6 @@ export const levelIcons: Record<HierarchyLevel, string> = {
   task: 'i-mingcute-list-check-2-line',
   try: 'i-mingcute-history-anticlockwise-line',
   workspace: 'i-mingcute-box-3-line',
-}
-
-/** Name of every hierarchy level for labels and tooltips. */
-export const levelLabels: Record<HierarchyLevel, string> = {
-  attempt: 'Attempt',
-  case: 'Case',
-  comparison: 'Comparison',
-  experiment: 'Experiment',
-  home: 'Projects',
-  project: 'Project',
-  round: 'Round',
-  run: 'Run',
-  task: 'Task',
-  try: 'Try',
-  workspace: 'Workspace',
 }
 
 /** Readable names of the levels of a {@link HierarchyPosition} (`labels.ts`); ids are used where a name is missing. */
@@ -80,7 +66,7 @@ export interface HierarchyPosition {
  */
 export function hierarchyCrumbs(position: HierarchyPosition, names: HierarchyNames = {}, pageLevel?: HierarchyLevel): Crumb[] {
   const { attempt, caseId, caseName, experiment, project, runKey, taskId, taskName, workspace } = position
-  const crumbs: Crumb[] = [{ href: href({ name: 'scope' }), label: 'Projects', level: 'home' }]
+  const crumbs: Crumb[] = [{ href: href({ name: 'scope' }), label: levelLabel('home'), level: 'home' }]
   if (workspace != null)
     crumbs.push({ href: href({ name: 'scope', workspace }), id: workspace, label: workspace, level: 'workspace' })
   if (workspace != null && project != null)
@@ -101,4 +87,14 @@ export function hierarchyCrumbs(position: HierarchyPosition, names: HierarchyNam
   if (last != null && shown.length > 1)
     delete last.href
   return shown
+}
+
+/**
+ * Name of a hierarchy level in the viewer's language, for labels and tooltips (`Experiment`, `实验`).
+ *
+ * Use when:
+ * - a breadcrumb, page title icon, or tree row names its level; reactive in the locale inside a template or `computed`
+ */
+export function levelLabel(level: HierarchyLevel): string {
+  return i18n.global.t(`runs.levels.${level}`)
 }

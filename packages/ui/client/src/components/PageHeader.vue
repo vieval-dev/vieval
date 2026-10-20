@@ -9,7 +9,7 @@ import Breadcrumbs from './Breadcrumbs.vue'
 import IdMenu from './IdMenu.vue'
 
 import { useCatalog } from '../composables/useCatalog'
-import { hierarchyCrumbs, levelIcons, levelLabels } from '../hierarchy'
+import { hierarchyCrumbs, levelIcons, levelLabel } from '../hierarchy'
 import { attemptLabel, experimentLabel, runLabel } from '../labels'
 import { switcherOptions } from '../switcher'
 
@@ -62,7 +62,7 @@ const siblings = computed(() => {
     <div :class="['flex items-start gap-x-3 gap-y-2 flex-wrap']">
       <div :class="['min-w-0 flex-1', $slots.actions && 'max-md:basis-full']">
         <h1 :class="['flex items-start gap-2 text-lg font-semibold break-all leading-7']">
-          <span v-if="props.level" :class="[levelIcons[props.level], 'shrink-0 mt-1 muted']" role="img" :aria-label="levelLabels[props.level]" :title="levelLabels[props.level]" />
+          <span v-if="props.level" :class="[levelIcons[props.level], 'shrink-0 mt-1 muted']" role="img" :aria-label="levelLabel(props.level)" :title="levelLabel(props.level)" />
           <span v-if="props.loading" :class="['skeleton h-6 my-0.5 w-56 max-w-full']" data-testid="page-header-skeleton" />
           <slot v-else name="title">
             {{ props.title }}
@@ -78,7 +78,7 @@ const siblings = computed(() => {
       <!-- As tall as the title's first line, so actions line up with the title wherever the header wraps. -->
       <div :class="['flex items-center gap-2 flex-wrap min-h-7']">
         <slot name="actions" />
-        <IdMenu v-if="props.id && props.level" :id="props.id" :kind="levelLabels[props.level].toLowerCase()" />
+        <IdMenu v-if="props.id && props.level" :id="props.id" :kind="props.level" />
       </div>
     </div>
   </header>

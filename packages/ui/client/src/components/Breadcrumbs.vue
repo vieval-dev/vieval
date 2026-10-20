@@ -3,10 +3,11 @@ import type { HierarchyLevel } from '../hierarchy'
 import type { SwitcherOption } from '../switcher'
 
 import { onMounted, useTemplateRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import CrumbSwitcher from './CrumbSwitcher.vue'
 
-import { levelIcons, levelLabels } from '../hierarchy'
+import { levelIcons, levelLabel } from '../hierarchy'
 
 /** One level of the hierarchy shown in the top bar. */
 export interface Crumb {
@@ -31,6 +32,7 @@ const props = defineProps<{
   siblings?: SwitcherOption[]
 }>()
 
+const { t } = useI18n()
 const nav = useTemplateRef<HTMLElement>('nav')
 function scrollToEnd(): void {
   nav.value?.scrollTo({ left: nav.value.scrollWidth })
@@ -41,12 +43,12 @@ watch(() => props.items.map(item => item.label).join('/'), scrollToEnd, { flush:
 </script>
 
 <template>
-  <nav ref="nav" aria-label="Hierarchy" :class="['flex items-center gap-x-1 gap-y-0.5 min-w-0 text-sm', 'relative md:flex-wrap max-md:(overflow-x-auto whitespace-nowrap py-0.5 -my-0.5) vv-scrollbar-none']">
+  <nav ref="nav" :aria-label="t('runs.header.breadcrumb')" :class="['flex items-center gap-x-1 gap-y-0.5 min-w-0 text-sm', 'relative md:flex-wrap max-md:(overflow-x-auto whitespace-nowrap py-0.5 -my-0.5) vv-scrollbar-none']">
     <template v-for="(item, index) in props.items" :key="index">
       <span v-if="index > 0" :class="['i-mingcute-right-small-line muted shrink-0']" aria-hidden="true" />
-      <span :class="['inline-flex items-center gap-1 min-w-0 max-md:shrink-0']" :title="`${levelLabels[item.level]}: ${item.id ?? item.label}`">
+      <span :class="['inline-flex items-center gap-1 min-w-0 max-md:shrink-0']" :title="t('runs.header.crumbTitle', { id: item.id ?? item.label, level: levelLabel(item.level) })">
         <span :class="[levelIcons[item.level], 'muted shrink-0']" aria-hidden="true" />
-        <span :class="['sr-only']">{{ levelLabels[item.level] }}:</span>
+        <span :class="['sr-only']">{{ t('runs.header.crumbLevel', { level: levelLabel(item.level) }) }}</span>
         <a v-if="item.href" :href="item.href" :class="['link truncate max-w-40 md:max-w-64']">{{ item.label }}</a>
         <CrumbSwitcher
           v-else-if="index === props.items.length - 1 && props.siblings && props.siblings.length > 0"

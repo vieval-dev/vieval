@@ -6,6 +6,8 @@ import { page, userEvent } from 'vitest/browser'
 
 import CrumbSwitcher from './CrumbSwitcher.vue'
 
+import { i18n } from '../i18n'
+
 /** Experiments of one project as the breadcrumb of an experiment page offers them. */
 const options: SwitcherOption[] = [
   { detail: '10 attempt(s)', href: '#/?experiment=matrix-run-model-gpt-5.5-repeat-1&project=p&workspace=w', id: 'matrix-run-model-gpt-5.5-repeat-1', label: 'model gpt-5.5 · repeat 1', score: 0.438, scoreLabel: 'Pass', state: 'ended' },
@@ -57,5 +59,19 @@ describe('crumbSwitcher', () => {
 
     await page.getByTestId('switch-search').fill('nope')
     await expect.element(page.getByText('Nothing matches “nope”')).toBeVisible()
+  })
+
+  /**
+   * @example
+   * expect(page.getByText('切换实验')).toBeVisible()
+   */
+  it('names the level in the viewer\'s language', async () => {
+    i18n.global.locale.value = 'zh-Hans'
+    const screen = await render(CrumbSwitcher, { props: { current: 'auv-c759d695', label: 'auv-c759d695', level: 'experiment', options } })
+
+    await expect.element(screen.getByTestId('switch-experiment')).toHaveAttribute('aria-label', 'auv-c759d695 — 切换实验')
+    await screen.getByTestId('switch-experiment').click()
+    await expect.element(page.getByText('切换实验')).toBeVisible()
+    await expect.element(page.getByTestId('switch-search')).toHaveAttribute('placeholder', '查找实验…')
   })
 })

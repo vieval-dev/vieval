@@ -3,6 +3,7 @@ import type { ViewTab } from '../components/ViewTabs.vue'
 import type { Route } from '../router'
 
 import { computed, nextTick, shallowRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import CountsBar from '../components/CountsBar.vue'
 import ExperimentName from '../components/ExperimentName.vue'
@@ -32,14 +33,16 @@ import { headlineValue, headlineView } from '../scores'
  */
 const props = defineProps<{ attempt?: string, experiment: string, project: string, tab?: string, workspace: string }>()
 
+const { t } = useI18n()
+
 type Tab = 'attempts' | 'matrix'
-const tabs: ViewTab<Tab>[] = [
-  { icon: levelIcons.attempt, label: 'Attempts', value: 'attempts' },
-  { icon: 'i-mingcute-layout-grid-line', label: 'Matrix', value: 'matrix' },
-]
+const tabs = computed<ViewTab<Tab>[]>(() => [
+  { icon: levelIcons.attempt, label: t('runs.experiment.tabs.attempts'), value: 'attempts' },
+  { icon: 'i-mingcute-layout-grid-line', label: t('runs.project.tabs.matrix'), value: 'matrix' },
+])
 const tabRoute = (value: Tab): Route => ({ experiment: props.experiment, name: 'scope', project: props.project, tab: value === 'attempts' ? undefined : value, workspace: props.workspace })
 const tab = computed<Tab>({
-  get: () => tabs.find(item => item.value === props.tab)?.value ?? 'attempts',
+  get: () => tabs.value.find(item => item.value === props.tab)?.value ?? 'attempts',
   set: value => navigate(tabRoute(value)),
 })
 
@@ -52,7 +55,7 @@ const trend = computed(() => runs.value.map(run => headlineValue(run.headline)).
 /** What the trend shows: the headline label of the newest run. */
 const trendLabel = computed(() => {
   const newest = runs.value[0]
-  return newest?.headline == null ? 'score' : headlineView(newest.headline, newest.headlineDefinitions).label
+  return newest?.headline == null ? t('runs.trend.score') : headlineView(newest.headline, newest.headlineDefinitions).label
 })
 
 /** Attempts newest first, each with its runs (one per attempt unless a run was repeated under the same label). */
@@ -110,27 +113,27 @@ watch([() => props.attempt, () => attempts.value.length], async ([attempt]) => {
       <ExperimentName :experiment-id="props.experiment" :matrix="matrix" />
     </template>
     <template #subtitle>
-      {{ attempts.length }} attempt(s) · {{ runs.length }} run(s)
+      {{ t('runs.count.attempts', { n: attempts.length }, attempts.length) }} · {{ t('runs.count.runs', { n: runs.length }, runs.length) }}
     </template>
     <template #actions>
       <!-- Phones need the width for the name; every attempt row below shows its score. -->
-      <Sparkline :class="['max-md:hidden']" :values="trend" :label="`${trendLabel} of ${runs.length} runs`" :width="140" :height="32" />
+      <Sparkline :class="['max-md:hidden']" :values="trend" :label="t('runs.trend.label', { n: runs.length, score: trendLabel }, runs.length)" :width="140" :height="32" />
     </template>
   </PageHeader>
 
-  <StateView :error="catalog.query.error.value" :loading="catalog.query.isPending.value" :empty="runs.length === 0" empty-text="No runs in this experiment" empty-hint="Runs appear here once `vieval run` writes a report below the viewer's report roots." skeleton="rows" @retry="catalog.query.refetch()">
-    <ViewTabs v-model="tab" :items="tabs" label="Experiment views" :href="value => href(tabRoute(value))">
+  <StateView :error="catalog.query.error.value" :loading="catalog.query.isPending.value" :empty="runs.length === 0" :empty-text="t('runs.experiment.empty')" :empty-hint="t('runs.emptyHint')" skeleton="rows" @retry="catalog.query.refetch()">
+    <ViewTabs v-model="tab" :items="tabs" :label="t('runs.experiment.tabs.label')" :href="value => href(tabRoute(value))">
       <template v-if="tab === 'attempts'">
         <div :class="['flex items-center flex-wrap gap-2 mb-2 text-xs muted']">
-          Newest first. Select two or more runs to compare them case by case.
+          {{ t('runs.experiment.hint') }}
           <button type="button" :class="['btn ml-auto text-xs']" :disabled="selected.length < 2" @click="navigate({ name: 'compare', query: { runs: selected.join(','), view: 'runs' } })">
-            <span :class="levelIcons.comparison" aria-hidden="true" />Compare {{ selected.length }} runs
+            <span :class="levelIcons.comparison" aria-hidden="true" />{{ t('runs.experiment.compare', { n: selected.length }, selected.length) }}
           </button>
         </div>
         <section :class="['card']">
           <div :class="[...rowGrid, 'max-md:hidden px-3 py-1.5 border-b border-neutral-200/50 dark:border-neutral-800/50', 'text-xs font-medium muted']" aria-hidden="true">
-            <span /><span>Attempt</span><span>Run</span><span>Duration</span><span>Cases</span><span class="text-right">
-              Score
+            <span /><span>{{ t('runs.experiment.columns.attempt') }}</span><span>{{ t('runs.experiment.columns.run') }}</span><span>{{ t('runs.experiment.columns.duration') }}</span><span>{{ t('runs.experiment.columns.cases') }}</span><span class="text-right">
+              {{ t('runs.experiment.columns.score') }}
             </span><span />
           </div>
           <ol>
@@ -146,7 +149,7 @@ watch([() => props.attempt, () => attempts.value.length], async ([attempt]) => {
                 :key="run.runKey"
                 :class="[...rowGrid, 'relative px-3 text-sm transition-colors hover:bg-primary-500/5', index === 0 ? 'py-2.5 md:py-2' : 'pb-2.5 md:pb-2 pt-0']"
               >
-                <input type="checkbox" :checked="selected.includes(run.runKey)" :aria-label="`Select ${run.runKey} for comparison`" :class="['relative z-1 accent-[var(--series-1)]']" @change="toggle(run.runKey)">
+                <input type="checkbox" :checked="selected.includes(run.runKey)" :aria-label="t('runs.experiment.select', { run: run.runKey })" :class="['relative z-1 accent-[var(--series-1)]']" @change="toggle(run.runKey)">
                 <!-- The attempt (its time) once per attempt; further runs of the same attempt are sub-rows. -->
                 <span v-if="index === 0" :class="['flex flex-col gap-1 min-w-0']">
                   <span :class="['flex items-center gap-2 min-w-0']">
@@ -161,7 +164,7 @@ watch([() => props.attempt, () => attempts.value.length], async ([attempt]) => {
                     </span>
                   </span>
                 </span>
-                <span v-else :class="['text-xs muted pl-6']">another run of this attempt</span>
+                <span v-else :class="['text-xs muted pl-6']">{{ t('runs.experiment.anotherRun') }}</span>
                 <span :class="['flex items-center gap-2 min-w-0 max-md:(row-start-2 col-start-2)']">
                   <StateBadge :state="run.state" />
                   <a v-if="index > 0" :href="href({ name: 'run', runKey: run.runKey })" :class="['link mono text-xs stretched-link']" :title="run.runKey">{{ shortRunHash(run.runKey) }}</a>
@@ -170,7 +173,7 @@ watch([() => props.attempt, () => attempts.value.length], async ([attempt]) => {
                 <span :class="['text-xs muted tabular-nums whitespace-nowrap max-md:(row-start-2 col-start-3 col-span-2 text-right)']">{{ formatDuration(duration(run)) }}</span>
                 <span :class="['flex items-center gap-2 min-w-0', 'max-md:(row-start-3 col-start-2 col-span-3)']">
                   <CountsBar :class="['flex-1']" :counts="expectedCounts(run)" />
-                  <span v-if="isPartial(run)" :class="['badge state-interrupted shrink-0']" :title="`${run.counts.total} of ${run.caseTotal} expected cases ran`" data-testid="attempt-partial">{{ run.counts.total }} / {{ run.caseTotal }}</span>
+                  <span v-if="isPartial(run)" :class="['badge state-interrupted shrink-0']" :title="t('runs.experiment.partial', { ran: run.counts.total, total: run.caseTotal })" data-testid="attempt-partial">{{ run.counts.total }} / {{ run.caseTotal }}</span>
                 </span>
                 <HeadlineScore :class="['relative z-1 justify-self-end min-w-0 max-w-full max-md:(row-start-1 col-start-3)']" :result="run.headline" :definitions="run.headlineDefinitions" size="sm" align="end" />
                 <!-- IdMenu renders no element of its own; the wrapper carries the grid placement. -->

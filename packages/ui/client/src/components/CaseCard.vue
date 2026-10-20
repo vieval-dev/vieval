@@ -6,6 +6,7 @@ import type { ParallelAxis } from './ParallelCoordinates.vue'
 
 import { TooltipContent, TooltipPortal, TooltipRoot, TooltipTrigger } from 'reka-ui'
 import { computed, shallowRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import StateBadge from './StateBadge.vue'
 
@@ -41,6 +42,7 @@ const props = defineProps<{
   valueCounts: Readonly<Record<string, ReadonlyMap<string, number>>>
 }>()
 const emit = defineEmits<{ unpin: [] }>()
+const { t } = useI18n()
 const drawer = computed(() => props.layout === 'drawer')
 
 /** Bins of each numeric row's histogram; enough to show a long tail or two peaks in a row about 10 rem wide. */
@@ -67,7 +69,7 @@ const lines = computed(() => props.axes.map((axis) => {
     const value = props.row.categories[axis.name]
     const counts = props.valueCounts[axis.name]
     const total = [...counts?.values() ?? []].reduce((sum, count) => sum + count, 0)
-    return { detail: value == null ? '' : `${counts?.get(value) ?? 0} / ${total} cases`, kind: 'category' as const, name: axis.name, text: value ?? '—', value }
+    return { detail: value == null ? '' : t('cases.card.casesOfValue', { count: counts?.get(value) ?? 0, total }), kind: 'category' as const, name: axis.name, text: value ?? '—', value }
   }
   const distribution = distributions.value.get(axis.name)
   const value = props.row.numbers[axis.name]
@@ -110,7 +112,7 @@ function categoryText(name: string, value: string): string {
   if (value === 'true')
     return props.labelOf(name)
   if (value === 'false')
-    return `not ${props.labelOf(name)}`
+    return t('cases.card.not', { label: props.labelOf(name) })
   return value
 }
 const numericLines = computed(() => lines.value.filter(line => line.kind === 'numeric'))
@@ -145,25 +147,25 @@ const rows = computed(() => (showTypical.value ? [...notable.value, ...typical.v
       <template v-if="props.pinned && !drawer">
         <TooltipRoot>
           <TooltipTrigger as-child>
-            <a :href="props.href" :class="[action]" aria-label="Open case">
+            <a :href="props.href" :class="[action]" :aria-label="t('cases.card.openCase')">
               <span class="i-mingcute-arrow-right-up-line" aria-hidden="true" />
             </a>
           </TooltipTrigger>
           <TooltipPortal>
             <TooltipContent :side-offset="4" :class="['tooltip']">
-              Open case <kbd :class="['mono opacity-70']">Enter</kbd>
+              {{ t('cases.card.openCase') }} <kbd :class="['mono opacity-70']">Enter</kbd>
             </TooltipContent>
           </TooltipPortal>
         </TooltipRoot>
         <TooltipRoot>
           <TooltipTrigger as-child>
-            <button type="button" :class="[action]" aria-label="Unpin" @click="emit('unpin')">
+            <button type="button" :class="[action]" :aria-label="t('cases.card.unpin')" @click="emit('unpin')">
               <span class="i-mingcute-close-line" aria-hidden="true" />
             </button>
           </TooltipTrigger>
           <TooltipPortal>
             <TooltipContent :side-offset="4" :class="['tooltip']">
-              Unpin <kbd :class="['mono opacity-70']">Esc</kbd>
+              {{ t('cases.card.unpin') }} <kbd :class="['mono opacity-70']">Esc</kbd>
             </TooltipContent>
           </TooltipPortal>
         </TooltipRoot>
@@ -208,15 +210,15 @@ const rows = computed(() => (showTypical.value ? [...notable.value, ...typical.v
       :aria-expanded="showTypical"
       @click="showTypical = !showTypical"
     >
-      <span :class="['i-mingcute-right-line transition-transform', showTypical && 'rotate-90']" aria-hidden="true" />{{ showTypical ? 'Show fewer' : `${typical.length} more, near the median` }}
+      <span :class="['i-mingcute-right-line transition-transform', showTypical && 'rotate-90']" aria-hidden="true" />{{ showTypical ? t('cases.card.showFewer') : t('cases.card.nearMedian', { n: typical.length }) }}
     </button>
     <!-- Drawer: the actions sit under the content, where the thumb already is. -->
     <div v-if="drawer && props.pinned" :class="['grid grid-cols-2 gap-2 pt-1']">
       <a :href="props.href" :class="['btn justify-center py-2.5! text-sm! font-medium bg-primary-500/15! text-primary-800! dark:text-primary-200!']">
-        <span class="i-mingcute-arrow-right-up-line" aria-hidden="true" />Open case
+        <span class="i-mingcute-arrow-right-up-line" aria-hidden="true" />{{ t('cases.card.openCase') }}
       </a>
       <button type="button" :class="['btn justify-center py-2.5! text-sm! border border-neutral-200 dark:border-neutral-700/60']" @click="emit('unpin')">
-        <span class="i-mingcute-close-line" aria-hidden="true" />Close
+        <span class="i-mingcute-close-line" aria-hidden="true" />{{ t('common.close') }}
       </button>
     </div>
   </div>

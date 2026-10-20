@@ -2,9 +2,10 @@
 import type { CaseFilters, CaseRow } from '../caseMetrics'
 
 import { computed, shallowRef, useTemplateRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import { useElementWidth } from '../composables/useElementWidth'
-import { formatScore } from '../format'
+import { formatCount, formatScore } from '../format'
 
 /**
  * Parallel sets of cases over category axes (matrix axes such as `tts` and `language`, string metrics such as a
@@ -39,6 +40,7 @@ const emit = defineEmits<{
   /** Axis names in their new left-to-right order, after an axis title was dragged. */
   reorder: [names: string[]]
 }>()
+const { t } = useI18n()
 
 const root = useTemplateRef<HTMLElement>('root')
 const width = useElementWidth(root, 800)
@@ -153,7 +155,10 @@ const layout = computed(() => {
         d: `M${x0},${y0} C${xm},${y0} ${xm},${y1} ${x1},${y1} L${x1},${y1 + h1} C${xm},${y1 + h1} ${xm},${y0 + h0} ${x0},${y0 + h0} Z`,
         key: `${index}\u0000${group.leftValue}\u0000${group.rightValue}\u0000${group.selected}\u0000${group.color}`,
         selected: group.selected,
-        title: `${group.leftValue} → ${group.rightValue} · ${group.count} case(s)${filtering.value && !group.selected ? ' (not selected)' : ''}`,
+        title: [
+          t('matrix.parallelSets.ribbonTitle', { from: group.leftValue, n: formatCount(group.count), to: group.rightValue }, group.count),
+          ...(filtering.value && !group.selected ? [t('matrix.parallelSets.notSelected')] : []),
+        ].join(' '),
       })
     }
   })
@@ -190,7 +195,7 @@ function startDrag(name: string, event: PointerEvent): void {
 
 <template>
   <div ref="root" :class="['overflow-x-auto select-none']" data-testid="parallel-sets">
-    <svg :width="layout.width" :height="height" :viewBox="`0 0 ${layout.width} ${height}`" role="img" :aria-label="`Parallel sets of ${props.rows.length} cases over ${props.axes.map(props.labelOf).join(', ')}`" :class="['block']">
+    <svg :width="layout.width" :height="height" :viewBox="`0 0 ${layout.width} ${height}`" role="img" :aria-label="t('matrix.parallelSets.label', { axes: props.axes.map(props.labelOf).join(', '), n: formatCount(props.rows.length) }, props.rows.length)" :class="['block']">
       <path v-for="ribbon in layout.ribbons" :key="ribbon.key" :d="ribbon.d" :fill="ribbon.selected ? ribbon.color : 'var(--chart-text)'" :fill-opacity="ribbon.selected ? 0.55 : 0.08" :class="['transition-[fill-opacity] hover:fill-opacity-80']">
         <title>{{ ribbon.title }}</title>
       </path>
@@ -203,9 +208,9 @@ function startDrag(name: string, event: PointerEvent): void {
           @pointerenter="event => dragging == null && emit('inspect', axis.name, (event.currentTarget as SVGTextElement).getBoundingClientRect())"
           @pointerleave="emit('inspect', null, null)"
         >{{ props.labelOf(axis.name) }}</text>
-        <text :x="axis.x" y="27" text-anchor="middle" font-size="10" fill="var(--chart-text)">click to pick · drag title</text>
+        <text :x="axis.x" y="27" text-anchor="middle" font-size="10" fill="var(--chart-text)">{{ t('matrix.parallelSets.axisHint') }}</text>
         <g v-for="block in axis.blocks" :key="block.value" :class="['cursor-pointer']" @click="emit('pick', axis.name, block.value)">
-          <title>{{ block.value }} · {{ block.count }} case(s)<template v-if="props.score"> · {{ props.labelOf(props.score) }} {{ formatScore(block.mean) }}</template></title>
+          <title>{{ t('matrix.parallelSets.blockTitle', { n: formatCount(block.count), value: block.value }, block.count) }}<template v-if="props.score"> · {{ props.labelOf(props.score) }} {{ formatScore(block.mean) }}</template></title>
           <rect
             :x="axis.x - BLOCK_PX / 2" :y="block.from" :width="BLOCK_PX" :height="Math.max(1, block.height)" rx="2"
             :fill="block.picked ? 'var(--series-1)' : 'var(--chart-grid)'" :stroke="block.picked ? 'var(--series-1)' : 'none'"

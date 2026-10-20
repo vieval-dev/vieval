@@ -2,7 +2,8 @@ import type { CaseNode, MetricsResponse, ScoreDefinition } from '../../src/share
 
 import { describe, expect, it } from 'vitest'
 
-import { buildCaseTable, columnDefinitions, derivedMetricName, formatColumnValue, matchesFilters, metricDefinition, metricLabel, separationOf } from './caseMetrics'
+import { buildCaseTable, categoryValueLabel, columnDefinitions, derivedMetricName, formatColumnValue, matchesFilters, metricDefinition, metricLabel, separationOf } from './caseMetrics'
+import { i18n } from './i18n'
 
 function caseNode(index: number, name: string, state: CaseNode['state']): CaseNode {
   const caseId = `${index}:${name}`
@@ -150,6 +151,21 @@ describe('buildCaseTable list metrics', () => {
 
     expect(metricLabel('votes#mean', definitions)).toBe('Listener votes · mean')
     expect(metricLabel('steps', definitions)).toBe('steps')
+  })
+
+  /**
+   * @example
+   * i18n.global.locale.value = 'zh-Hans'
+   * expect(metricLabel('votes#mean', definitions)).toBe('Listener votes · 平均值')
+   */
+  it('names the summary of a derived metric and the case states in the language picked for the viewer', () => {
+    const definitions = new Map([['votes', { label: 'Listener votes', name: 'votes' }]])
+    i18n.global.locale.value = 'zh-Hans'
+
+    expect(metricLabel('votes#mean', definitions)).toBe('Listener votes · 平均值')
+    expect(categoryValueLabel('state', 'passed')).toBe('通过')
+    expect(categoryValueLabel('group', 'passed')).toBe('passed')
+    expect(categoryValueLabel('state', 'custom')).toBe('custom')
   })
 })
 
@@ -327,5 +343,16 @@ describe('columnDefinitions', () => {
     expect(formatColumnValue(0.875, metricDefinition('pass', definitions))).toBe('87.5%')
     expect(formatColumnValue(1234.5, metricDefinition('latency', definitions))).toBe('1.2K ms')
     expect(formatColumnValue(1.23456, undefined)).toBe('1.23')
+  })
+
+  /**
+   * @example
+   * i18n.global.locale.value = 'zh-Hans'
+   * expect(formatColumnValue(48_213, { unit: 'tokens' })).toBe('4.8万 tokens')
+   */
+  it('shortens large metric values in the language picked for the viewer', () => {
+    i18n.global.locale.value = 'zh-Hans'
+
+    expect(formatColumnValue(48_213, { name: 'tokens', unit: 'tokens' })).toBe('4.8万 tokens')
   })
 })

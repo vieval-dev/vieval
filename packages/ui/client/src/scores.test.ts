@@ -2,6 +2,7 @@ import type { HeadlineResult, ScoreDefinition, ScoreSummary } from '../../src/sh
 
 import { describe, expect, it } from 'vitest'
 
+import { i18n } from './i18n'
 import { caseScoreText, completionText, formulaText, gradersDiffer, graderText, headlineOf, headlineValue, headlineView, isGraderCall, primaryScoreName, unscoredText } from './scores'
 
 /** The scores of airi's `tts-speech-formula` eval, the first eval migrated to named scores. */
@@ -123,6 +124,22 @@ describe('score texts', () => {
     expect(caseScoreText({ unscored: { natural: 'invalid_response' }, values: { pass: 1 } }, 'natural')).toBe('invalid response')
     expect(caseScoreText({ unscored: {}, values: { pass: 1 } }, 'pass')).toBe('100.0%')
     expect(caseScoreText({ unscored: {}, values: {} }, 'pass')).toBe('—')
+  })
+
+  /**
+   * @example
+   * i18n.global.locale.value = 'zh-Hans'
+   * expect(completionText(completion)).toBe('执行成功率 96.8% （4 个出错）')
+   */
+  it('writes the headline words, formulas, graders, and unscored reasons in the language picked for the viewer', () => {
+    i18n.global.locale.value = 'zh-Hans'
+
+    expect(headlineView({ completion, headline: { kind: 'passed-cases', score: summary('passed', 0.5) } }, []).label).toBe('通过的用例')
+    expect(completionText(summary('completion', 0.9, { errored: 1, timeout: 2 }))).toBe('执行成功率 90.0% （1 个出错、2 个超时）')
+    expect(formulaText(definitions[2], definitions)).toBe('全部满足：听写正确、读法自然 ≥ 50%')
+    expect(graderText({ kind: 'model', model: 'gpt-5.5', reducer: 'median', votes: 3 })).toBe('模型 · gpt-5.5 · 3 票，median')
+    expect(graderText({ kind: 'rule', version: '2' })).toBe('规则 · 版本 2')
+    expect(unscoredText({ 'grader_failed': 2, 'judge timed out': 1 })).toBe('2 个评分失败、1 个judge timed out')
   })
 })
 
