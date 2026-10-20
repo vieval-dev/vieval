@@ -12,6 +12,7 @@ function caseNode(index: number, name: string, state: CaseNode['state']): CaseNo
     // Durations that do not follow the metrics below, so they stay their own signal.
     durationMs: [5, 1, 4, 2][index]! * 1000,
     evidenceLinkCount: 0,
+    identity: caseId,
     index,
     key: `task\u0000${caseId}`,
     logLineCount: 0,

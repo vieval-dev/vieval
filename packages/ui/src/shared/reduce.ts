@@ -982,6 +982,7 @@ export function toCaseNode(reduced: ReducedCase, options: { evidenceLinkCount: n
     errorMessage: lastRound?.errorMessage,
     errorName: lastRound?.errorName,
     evidenceLinkCount: options.evidenceLinkCount,
+    identity: identityOf(reduced),
     index: reduced.index,
     key: reduced.key,
     logLineCount: reduced.logLineCount,
@@ -1026,6 +1027,26 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined
+}
+
+/**
+ * Identity of a case across runs (see `CaseNode.identity`), resolved in the order of `vieval report compare`.
+ *
+ * Before:
+ * - metrics `benchmark.case.id = "lim-sinx|en|none"`, name `case #2`
+ * - no id metric, name `case #2`
+ *
+ * After:
+ * - "lim-sinx|en|none"
+ * - "case #2"
+ */
+function identityOf(reduced: ReducedCase): string {
+  for (const name of ['benchmark.case.id', 'vieval.case.id']) {
+    const value = reduced.metrics.findLast(metric => metric.name === name)?.value
+    if (typeof value === 'string' || typeof value === 'number')
+      return String(value)
+  }
+  return reduced.name
 }
 
 function parseCaseIndex(caseId: string): number {

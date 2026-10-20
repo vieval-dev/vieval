@@ -7,24 +7,26 @@ import { buildTaskNodes, createRunReducer } from '../shared/reduce'
 import { buildMatrix } from './compare'
 
 const TASK = 'evals%2Fdemo::default::run=tts%3Dofficial::eval=asr%3Dwhisper-1'
+const TASK_WITH_JUDGE = 'evals%2Fdemo::default::run=tts%3Dofficial::eval=judge%3Dgpt-5.5'
 
 interface CaseResult {
   exact?: number
   state: 'errored' | 'failed' | 'passed'
 }
 
-/** One ended run of {@link TASK}: the given cases settle, out of `total` expected ones. */
-function runOf(runKey: string, startedAt: string, total: number, results: readonly CaseResult[]): { item: RunListItem, tasks: TaskNode[] } {
+/** One ended run of {@link TASK}: the given cases (named `<prefix>-<index>`) settle, out of `total` expected ones. */
+function runOf(runKey: string, startedAt: string, total: number, results: readonly CaseResult[], options: { prefix?: string, taskId?: string } = {}): { item: RunListItem, tasks: TaskNode[] } {
+  const { prefix = 'case', taskId = TASK } = options
   const envelope = createEnvelopeFactory(runKey)
   const reducer = createRunReducer()
-  const taskScope = { projectId: 'demo', taskId: TASK }
+  const taskScope = { projectId: 'demo', taskId }
   reducer.apply(envelope('task.started', {}, taskScope))
   results.forEach((result, index) => {
-    const scope = { caseId: `${index}:case-${index}`, projectId: 'demo', taskId: TASK }
-    reducer.apply(envelope('case.started', { index, name: `case-${index}`, total }, scope))
+    const scope = { caseId: `${index}:${prefix}-${index}`, projectId: 'demo', taskId }
+    reducer.apply(envelope('case.started', { index, name: `${prefix}-${index}`, total }, scope))
     if (result.exact != null)
       reducer.apply(envelope('score.recorded', { kind: 'exact', score: result.exact }, scope))
-    reducer.apply(envelope('case.ended', { index, name: `case-${index}`, state: result.state, total }, scope))
+    reducer.apply(envelope('case.ended', { index, name: `${prefix}-${index}`, state: result.state, total }, scope))
   })
   reducer.apply(envelope('task.ended', { state: 'passed' }, taskScope))
   const item: RunListItem = {
@@ -119,5 +121,62 @@ describe('buildMatrix', () => {
 
     expect(cell.latest.runKey).toBe('run-new')
     expect(cell.history.map(point => point.runKey)).toEqual(['run-old', 'run-partial', 'run-new'])
+  })
+
+  // ROOT CAUSE:
+  //
+  // A run that settled every case it planned counted as full, whatever it planned. A 5-case smoke run after a 67-case
+  // run became the headline, and the change from the previous run compared scores over different cases (0% "↓65.7"
+  // from a 5-case run, "↑12.5" against a run of another 120-case set under the same entry):
+  //
+  // passed + failed + errored + skipped + timeout >= expected ? 'full' : 'partial'
+  //
+  // We fixed this by scoring every cell over the cases (`identity`) of its newest run that settled everything and is no
+  // strict subset of another run; a settled run over other cases is `other`, kept in the history like a partial run,
+  // but never the headline or a baseline.
+  /**
+   * @example
+   * expect(cell.history.map(point => point.coverage)).toEqual(['other', 'full', 'other'])
+   */
+  it('marks a settled run over some of the cell\'s cases as other, and keeps the full run as the headline', () => {
+    const smoke = runOf('run-smoke', '2026-10-19T06:00:00.000Z', 3, scored(3, 1))
+    const full = runOf('run-full', '2026-10-19T06:36:00.000Z', 6, scored(6, 0.5))
+    const limited = runOf('run-limited', '2026-10-19T07:00:00.000Z', 2, scored(2, 0))
+
+    const [cell] = buildMatrix([smoke, full, limited]).cells
+
+    expect(cell.caseCount).toBe(6)
+    expect(cell.history.map(point => point.coverage)).toEqual(['other', 'full', 'other'])
+    expect(cell.latest.runKey).toBe('run-full')
+    expect(cell.latest.caseScores).toEqual([0.5, 0.5, 0.5, 0.5, 0.5, 0.5])
+  })
+
+  /**
+   * @example
+   * expect(cells.map(cell => cell.superseded)).toEqual([true, false])
+   */
+  it('marks a cell superseded when a newer run ran the same run row with other eval values', () => {
+    const old = runOf('run-old', '2026-10-19T06:36:00.000Z', 2, scored(2, 0.5))
+    const fresh = runOf('run-new', '2026-10-20T06:36:00.000Z', 2, scored(2, 1), { taskId: TASK_WITH_JUDGE })
+
+    const cells = buildMatrix([old, fresh]).cells
+
+    expect(cells.map(cell => [cell.eval, cell.superseded])).toEqual([[{ asr: 'whisper-1' }, true], [{ judge: 'gpt-5.5' }, false]])
+  })
+
+  /**
+   * @example
+   * expect(cell.latest.runKey).toBe('run-formula-new')
+   */
+  it('scores a cell over the cases of its newest full run when another case set ran under the same entry', () => {
+    const formula = runOf('run-formula', '2026-10-19T06:36:00.000Z', 3, scored(3, 0.5), { prefix: 'formula' })
+    const other = runOf('run-other-set', '2026-10-19T07:00:00.000Z', 5, scored(5, 1), { prefix: 'mb' })
+    const fresh = runOf('run-formula-new', '2026-10-19T08:00:00.000Z', 3, scored(3, 1), { prefix: 'formula' })
+
+    const [cell] = buildMatrix([formula, other, fresh]).cells
+
+    expect(cell.latest.runKey).toBe('run-formula-new')
+    expect(cell.caseCount).toBe(3)
+    expect(cell.history.map(point => point.coverage)).toEqual(['full', 'other', 'full'])
   })
 })

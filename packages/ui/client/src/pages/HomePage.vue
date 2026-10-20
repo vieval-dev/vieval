@@ -27,11 +27,16 @@ const workspaces = computed(() => catalog.workspaces.value.filter(workspace => p
 const projectCount = computed(() => workspaces.value.reduce((sum, workspace) => sum + workspace.projects.length, 0))
 const runCount = computed(() => workspaces.value.reduce((sum, workspace) => sum + workspace.projects.reduce((count, project) => count + project.runs.length, 0), 0))
 
-/** Card data of a project: the best exact score of any of its runs and its matrix axes. */
+/**
+ * Card data of a project: its matrix axes, with the score of its newest run.
+ *
+ * The score is the newest run's own, like the state and the case bar beside it, and empty when that run scored no case.
+ * It previously was the best exact score of any run, so a 3-case smoke run that got everything right showed 100% above
+ * a newer full run's 94%.
+ */
 function toCard(project: ProjectEntry) {
-  const best = project.runs.reduce<null | number>((max, run) => (run.exactAverage == null ? max : Math.max(max ?? 0, run.exactAverage)), null)
   const matrix = mergeMatrices(project.runs.map(run => run.matrix))
-  return { ...project, axes: Object.entries(matrix).map(([axis, values]) => ({ axis, values: formatAxisValues(values) })), best }
+  return { ...project, axes: Object.entries(matrix).map(([axis, values]) => ({ axis, values: formatAxisValues(values) })) }
 }
 const sections = computed(() => workspaces.value.map(workspace => ({ id: workspace.id, projects: workspace.projects.map(toCard) })))
 </script>
@@ -56,8 +61,8 @@ const sections = computed(() => workspaces.value.map(workspace => ({ id: workspa
           v-for="project in section.projects"
           :key="project.id"
           :href="href({ name: 'scope', project: project.id, workspace: section.id })"
-          :score="project.best"
-          :score-label="`best exact score of ${countOf(project.runs.length, 'run')}`"
+          :score="project.latest.exactAverage"
+          score-label="exact score of the newest run"
           :state="project.latest.state"
           :counts="project.latest.counts"
           :run="project.latest"
@@ -76,7 +81,7 @@ const sections = computed(() => workspaces.value.map(workspace => ({ id: workspa
             </template>
           </span>
           <template v-if="project.axes.length > 0" #footer>
-            <span v-for="axis in project.axes" :key="axis.axis" :class="['badge state-neutral font-normal']">
+            <span v-for="axis in project.axes" :key="axis.axis" :class="['inline-flex items-center gap-1 px-1 text-xs text-neutral-700 dark:text-neutral-300 whitespace-nowrap']">
               <span class="muted">{{ axis.axis }}</span>{{ axis.values }}
             </span>
           </template>

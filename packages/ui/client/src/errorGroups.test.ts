@@ -8,6 +8,7 @@ function caseOf(fields: Partial<CaseNode> & Pick<CaseNode, 'caseId' | 'state'>):
   return {
     artifactCount: 0,
     evidenceLinkCount: 0,
+    identity: fields.caseId,
     index: 0,
     key: `task\u0000${fields.caseId}`,
     logLineCount: 0,

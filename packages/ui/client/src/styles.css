@@ -27,12 +27,19 @@
   --ink-running: #174ea6;
   /* Stripes over the `errored` mark (`.vv-hatch`): "no data", and a second cue next to green for red-green CVD. */
   --hatch-stripe: rgb(255 255 255 / 0.5);
-  /* Five-step sequential ramp (dataviz reference blue) for coloring by a metric, low to high. */
-  --seq-1: #b7d3f6;
-  --seq-2: #6da7ec;
-  --seq-3: #2a78d6;
-  --seq-4: #1c5cab;
-  --seq-5: #0d366b;
+  /*
+   * Five-step sequential ramp for coloring by a metric, low to high: the theme hue from light to deep, so scores read
+   * in the page's own color. It was the dataviz reference blue, which on an orange theme turned every score bar and
+   * score-colored chart navy. Lightness steps are even in OKLCH, so the five steps stay apart for any hue; chroma
+   * tapers toward the light end to stay inside sRGB without `--chromatic-sat`. The deep end stops at a mid tone (58%):
+   * a 0 / 1 score bar uses only both ends, and a deeper end turned most of a low-scoring bar dark brown, heavier than
+   * anything else on the card. Checked by eye for the hues 55, 145, 250, and 320 on light and dark pages.
+   */
+  --seq-1: oklch(92% calc(var(--chromatic-chroma-500) * 0.3) var(--chromatic-hue));
+  --seq-2: oklch(84% calc(var(--chromatic-chroma-500) * 0.5) var(--chromatic-hue));
+  --seq-3: oklch(76% calc(var(--chromatic-chroma-500) * 0.7) var(--chromatic-hue));
+  --seq-4: oklch(67% calc(var(--chromatic-chroma-500) * 0.85) var(--chromatic-hue));
+  --seq-5: oklch(58% calc(var(--chromatic-chroma-500) * 0.9) var(--chromatic-hue));
   --chart-grid: #e5e5e5;
   --chart-text: #52514e;
   color-scheme: light;
@@ -69,11 +76,11 @@
   --ink-running: #a5d8ff;
   --hatch-stripe: rgb(0 0 0 / 0.4);
   /* Dark pages run the ramp the other way: low values sink toward the ground, high values stand out. */
-  --seq-1: #184f95;
-  --seq-2: #2a78d6;
-  --seq-3: #5598e7;
-  --seq-4: #86b6ef;
-  --seq-5: #cde2fb;
+  --seq-1: oklch(58% calc(var(--chromatic-chroma-500) * 0.9) var(--chromatic-hue));
+  --seq-2: oklch(67% calc(var(--chromatic-chroma-500) * 0.85) var(--chromatic-hue));
+  --seq-3: oklch(76% calc(var(--chromatic-chroma-500) * 0.7) var(--chromatic-hue));
+  --seq-4: oklch(84% calc(var(--chromatic-chroma-500) * 0.5) var(--chromatic-hue));
+  --seq-5: oklch(92% calc(var(--chromatic-chroma-500) * 0.3) var(--chromatic-hue));
   --chart-grid: #333332;
   --chart-text: #c3c2b7;
   color-scheme: dark;

@@ -6,7 +6,7 @@ import { render } from 'vitest-browser-vue'
 import ErrorGroupsPanel from './ErrorGroupsPanel.vue'
 
 function caseOf(caseId: string, state: CaseNode['state'], errorMessage?: string): CaseNode {
-  return { artifactCount: 0, caseId, errorMessage, errorName: errorMessage == null ? undefined : 'APICallError', evidenceLinkCount: 0, index: 0, key: `task\u0000${caseId}`, logLineCount: 0, metricCount: 0, name: caseId, rounds: [], scores: {}, startedAt: '2026-10-19T06:36:26.000Z', state, taskId: 'task' }
+  return { artifactCount: 0, caseId, errorMessage, errorName: errorMessage == null ? undefined : 'APICallError', evidenceLinkCount: 0, identity: caseId, index: 0, key: `task\u0000${caseId}`, logLineCount: 0, metricCount: 0, name: caseId, rounds: [], scores: {}, startedAt: '2026-10-19T06:36:26.000Z', state, taskId: 'task' }
 }
 
 describe('errorGroupsPanel', () => {
