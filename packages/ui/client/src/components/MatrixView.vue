@@ -2,8 +2,9 @@
 import type { MatrixCell, MatrixResponse } from '../../../src/shared/contract'
 
 import { useQuery } from '@pinia/colada'
-import { computed, watch } from 'vue'
+import { computed, shallowRef, watch } from 'vue'
 
+import ScoreBar from './ScoreBar.vue'
 import ScoreCard from './ScoreCard.vue'
 import Sparkline from './Sparkline.vue'
 import StateView from './StateView.vue'
@@ -18,6 +19,9 @@ import { href } from '../router'
  * Matrix of a project or experiment (`GET /api/matrix`): one grid per eval entry, rows along the run axis with the
  * most values (for example `model`), columns for the combinations of the other axes (for example `repeat`). A cell
  * is the newest run that covered that combination fully (see `MatrixCell.latest`), with the trend of every run.
+ *
+ * Columns of a configuration the project moved away from (every cell `superseded`, for example an eval axis dropped
+ * since) are folded until asked for, so the table opens on what the newest runs measure.
  */
 const props = defineProps<{ experiment?: string, project: string, workspace: string }>()
 
@@ -45,12 +49,14 @@ function runOf(cell: MatrixCell) {
 const axisName = (key: string) => key.replace(/^(?:run|eval)\./, '')
 
 interface Grid {
-  columns: { key: string, label: string }[]
+  columns: { key: string, label: string, superseded: boolean }[]
   entryId: string
   name: string
   rowAxis: string | undefined
   /** One row per value of `rowAxis`; `cells` line up with `columns` (`undefined`: combination never ran). */
   rows: { cells: (MatrixCell | undefined)[], key: string, label: string }[]
+  /** Axis values every column has (for example `listener gpt-6-luna`), said once above the table instead of per column. */
+  shared: string
 }
 
 function buildGrid(entryId: string, cells: MatrixCell[], response: MatrixResponse): Grid {
@@ -68,8 +74,23 @@ function buildGrid(entryId: string, cells: MatrixCell[], response: MatrixRespons
   }
   const columnKey = (cell: MatrixCell) => columnAxes.map(key => `${axisName(key)} ${coordinates(cell)[key] ?? '—'}`).join(' · ')
   const rowKey = (cell: MatrixCell) => (rowAxis == null ? '' : coordinates(cell)[rowAxis] ?? '—')
+  // With several columns, an axis with one value in every cell says nothing about a column; it moves above the table.
+  // The other axes name a column by the values it has; an axis a column lacks (it ran before the axis was added, or
+  // after it was dropped) is left out instead of shown as `asr —`.
+  const multiColumn = new Set(cells.map(columnKey)).size > 1
+  const sharedAxes = multiColumn ? columnAxes.filter(key => cells.every(cell => coordinates(cell)[key] != null && coordinates(cell)[key] === coordinates(cells[0]!)[key])) : []
+  const varyingAxes = columnAxes.filter(key => !sharedAxes.includes(key))
+  const columnLabel = (cell: MatrixCell) => {
+    const present = varyingAxes.filter(key => coordinates(cell)[key] != null)
+    if (present.length > 0)
+      return present.map(key => `${axisName(key)} ${coordinates(cell)[key]}`).join(' · ')
+    return varyingAxes.length > 0 ? `without ${varyingAxes.map(axisName).join(', ')}` : 'all'
+  }
 
-  const columns = [...new Set(cells.map(columnKey))].map(key => ({ key, label: key === '' ? 'all' : key }))
+  const columns = [...new Set(cells.map(columnKey))].map((key) => {
+    const columnCells = cells.filter(cell => columnKey(cell) === key)
+    return { key, label: columnLabel(columnCells[0]!), superseded: columnCells.every(cell => cell.superseded) }
+  })
   // Column order follows the axis order of the API (numeric for `repeat`), not the order cells arrived in.
   columns.sort((a, b) => {
     const cellA = cells.find(cell => columnKey(cell) === a.key)!
@@ -88,7 +109,14 @@ function buildGrid(entryId: string, cells: MatrixCell[], response: MatrixRespons
     key: value,
     label: rowAxis == null ? 'all' : value,
   }))
-  return { columns, entryId, name: shortTaskId(entryId).split('/').at(-1) ?? entryId, rowAxis: rowAxis == null ? undefined : axisName(rowAxis), rows }
+  return {
+    columns,
+    entryId,
+    name: shortTaskId(entryId).split('/').at(-1) ?? entryId,
+    rowAxis: rowAxis == null ? undefined : axisName(rowAxis),
+    rows,
+    shared: sharedAxes.map(key => `${axisName(key)} ${coordinates(cells[0]!)[key]}`).join(' · '),
+  }
 }
 
 const grids = computed<Grid[]>(() => {
@@ -105,6 +133,25 @@ const grids = computed<Grid[]>(() => {
   }
   return [...byEntry.entries()].map(([entryId, cells]) => buildGrid(entryId, cells, response))
 })
+
+const showSuperseded = shallowRef(false)
+/** Labels of the folded columns across the grids (one label per configuration, however many entries ran it). */
+const supersededLabels = computed(() => new Set(grids.value.flatMap(grid => grid.columns.filter(column => column.superseded).map(column => column.label))))
+const visibleGrids = computed(() => grids.value.map((grid) => {
+  if (showSuperseded.value)
+    return grid
+  const kept = grid.columns.flatMap((column, index) => (column.superseded ? [] : [index]))
+  return { ...grid, columns: kept.map(index => grid.columns[index]!), rows: grid.rows.map(row => ({ ...row, cells: kept.map(index => row.cells[index]) })) }
+}))
+
+/**
+ * Whether a cell is read by its score: every case of its run got a result and none failed an assertion, so the case
+ * counts are all green and say nothing; how the scores spread does.
+ */
+function isScored(cell: MatrixCell): boolean {
+  const { counts, exact, state } = cell.latest
+  return exact != null && counts.failed === 0 && state !== 'running' && state !== 'queued'
+}
 /** When a point of a cell's history started: its run's start time, else the attempt label. */
 function pointTime(point: MatrixCell['history'][number]): string {
   return point.startedAt == null ? attemptLabel(point.attemptId) : formatShortDateTime(new Date(point.startedAt))
@@ -122,25 +169,30 @@ function scoreDelta(cell: MatrixCell): number | undefined {
   return previous == null ? undefined : (cell.latest.exact - previous.exact!) * 100
 }
 
-const COVERAGE_TEXT = { full: 'every case', none: 'no result', partial: 'some cases' } as const
+const COVERAGE_TEXT = { full: 'every case', none: 'no result', other: 'other cases', partial: 'some cases' } as const
 /** Tooltip of one history point: when, how much it measured, and its score. */
-function pointTitle(point: MatrixCell['history'][number]): string {
+function pointTitle(cell: MatrixCell, point: MatrixCell['history'][number]): string {
   const measured = point.counts.passed + point.counts.failed
-  return `${pointTime(point)} · ${COVERAGE_TEXT[point.coverage]} (${measured} with a result) · exact ${formatScore(point.exact)}`
+  return `${pointTime(point)} · ${COVERAGE_TEXT[point.coverage]} (${measured} of ${cell.caseCount} cases with a result) · exact ${formatScore(point.exact)}`
 }
 </script>
 
 <template>
   <StateView :error="matrix.error.value" :loading="matrix.isPending.value" :empty="grids.length === 0" empty-text="No matrix rows" empty-hint="Runs without tasks have nothing to show here." skeleton="matrix" @retry="matrix.refetch()">
     <p :class="['flex flex-wrap items-center gap-x-3 gap-y-1 text-xs muted mb-3']">
-      <span>Newest full run of every combination across {{ matrix.data.value?.runCount }} run(s); a partial re-run never replaces it.</span>
+      <span>Newest full run of every combination across {{ matrix.data.value?.runCount }} run(s); a partial run or one over other cases never replaces it.</span>
       <span :class="['inline-flex items-center gap-1']"><svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="2.5" fill="var(--series-1)" /></svg>full run</span>
-      <span :class="['inline-flex items-center gap-1']"><svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="2.5" fill="none" stroke="var(--series-1)" stroke-width="1.25" stroke-dasharray="1.5 1.2" /></svg>partial run</span>
+      <span :class="['inline-flex items-center gap-1']"><svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="2.5" fill="none" stroke="var(--series-1)" stroke-width="1.25" stroke-dasharray="1.5 1.2" /></svg>partial run or other cases</span>
       <span :class="['inline-flex items-center gap-1']"><svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="2.5" fill="none" stroke="var(--mark-errored)" stroke-width="1.25" /></svg>no result</span>
+      <button v-if="supersededLabels.size > 0" type="button" :class="['btn text-xs px-1.5! py-0.5! ml-auto']" :title="[...supersededLabels].join('\n')" data-testid="matrix-toggle-superseded" @click="showSuperseded = !showSuperseded">
+        <span :class="[showSuperseded ? 'i-mingcute-eye-close-line' : 'i-mingcute-history-line']" aria-hidden="true" />
+        {{ showSuperseded ? 'Hide' : 'Show' }} {{ countOf(supersededLabels.size, 'older configuration') }}
+      </button>
     </p>
-    <section v-for="grid in grids" :key="grid.entryId" :class="['card mb-4 overflow-x-auto']" :data-testid="`matrix-${grid.entryId}`">
+    <section v-for="grid in visibleGrids" :key="grid.entryId" :class="['card mb-4 overflow-x-auto']" :data-testid="`matrix-${grid.entryId}`">
       <h2 :class="['card-title']" :title="shortTaskId(grid.entryId)">
         <span class="i-mingcute-layout-grid-line" aria-hidden="true" />{{ grid.name }}
+        <span v-if="grid.shared" :class="['text-xs font-normal muted']">{{ grid.shared }}</span>
       </h2>
       <table :class="['border-separate border-spacing-2']">
         <thead>
@@ -148,7 +200,7 @@ function pointTitle(point: MatrixCell['history'][number]): string {
             <th :class="['th']">
               {{ grid.rowAxis ?? '' }}
             </th>
-            <th v-for="column in grid.columns" :key="column.key" :class="['th text-center']">
+            <th v-for="column in grid.columns" :key="column.key" :class="['th text-center', column.superseded && 'opacity-60']" :title="column.superseded ? 'An older configuration: newer runs measured this entry with other eval values' : undefined">
               {{ column.label }}
             </th>
           </tr>
@@ -161,11 +213,12 @@ function pointTitle(point: MatrixCell['history'][number]): string {
             <td v-for="(cell, index) in row.cells" :key="grid.columns[index]!.key" :class="['align-top']">
               <ScoreCard
                 v-if="cell"
-                :class="['w-44 md:w-56 p-3! md:p-3.5!']"
+                :class="['w-44 md:w-56', cell.superseded && 'opacity-60']"
+                compact
                 :href="href({ name: 'task', runKey: cell.latest.runKey, taskId: cell.latest.taskId })"
                 :score="cell.latest.exact"
-                :state="cell.latest.state"
-                :counts="{ ...cell.latest.counts, total: Math.max(cell.latest.counts.total, cell.latest.caseTotal ?? 0) }"
+                :state="isScored(cell) && cell.latest.state === 'passed' ? undefined : cell.latest.state"
+                :counts="isScored(cell) ? undefined : { ...cell.latest.counts, total: Math.max(cell.latest.counts.total, cell.latest.caseTotal ?? 0) }"
                 :run="runOf(cell)"
                 data-testid="matrix-cell"
               >
@@ -179,15 +232,18 @@ function pointTitle(point: MatrixCell['history'][number]): string {
                     <span :class="[scoreDelta(cell)! > 0 ? 'i-mingcute-arrow-up-line' : 'i-mingcute-arrow-down-line']" aria-hidden="true" />{{ Math.abs(scoreDelta(cell)!).toFixed(1) }}
                   </span>
                 </template>
+                <template v-if="isScored(cell)" #bar>
+                  <ScoreBar :class="['w-full']" :scores="cell.latest.caseScores" />
+                </template>
                 <span :class="['flex items-center gap-1.5 min-w-0']" :title="`${attemptLabel(cell.latest.attemptId)} · ${cell.latest.runKey}`">
-                  <span :class="['truncate']">{{ cell.latest.startedAt ? formatShortDateTime(new Date(cell.latest.startedAt)) : attemptLabel(cell.latest.attemptId) }} · {{ countOf(cell.history.length, 'run') }}</span>
+                  <span :class="['truncate']">{{ cell.latest.startedAt ? formatShortDateTime(new Date(cell.latest.startedAt)) : attemptLabel(cell.latest.attemptId) }} · {{ countOf(cell.latest.counts.total, 'case') }} · {{ countOf(cell.history.length, 'run') }}</span>
                   <Sparkline
-                    :class="['ml-auto']" :values="cell.history.map(point => point.exact)" :coverage="cell.history.map(point => point.coverage)" :titles="cell.history.map(pointTitle)"
+                    :class="['ml-auto']" :values="cell.history.map(point => point.exact)" :coverage="cell.history.map(point => point.coverage)" :titles="cell.history.map(point => pointTitle(cell, point))"
                     :label="`exact score of ${cell.history.length} runs`" :width="48" :height="16"
                   />
                 </span>
                 <span v-if="cell.latest.coverage !== 'full' && cell.latest.state !== 'running' && cell.latest.state !== 'queued'" :class="['flex items-center gap-1.5 [color:var(--ink-errored)]']" data-testid="matrix-cell-partial">
-                  <span class="i-mingcute-alert-octagon-line" aria-hidden="true" />{{ cell.latest.counts.passed + cell.latest.counts.failed }} of {{ Math.max(cell.latest.counts.total, cell.latest.caseTotal ?? 0) }} cases with a result · no full run yet
+                  <span class="i-mingcute-alert-octagon-line" aria-hidden="true" />{{ cell.latest.counts.passed + cell.latest.counts.failed }} of {{ cell.caseCount }} cases with a result · no full run yet
                 </span>
               </ScoreCard>
               <span v-else :class="['flex items-center justify-center w-44 md:w-56 h-24 rounded-xl text-xs muted border border-dashed border-neutral-300/60 dark:border-neutral-700/40']">not run</span>

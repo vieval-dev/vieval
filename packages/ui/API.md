@@ -158,11 +158,15 @@ All return `ComparisonResponse`: `columns` (each with the runs it covers), `rows
 | `GET /api/matrix?workspace=&project=&experiment=` | `MatrixResponse` | Every run in scope (filters as in `/api/runs`; none = all runs; an unknown value is an empty matrix). |
 
 A cell is one eval entry × run-matrix row × eval-matrix row (from the task id). Every run of a cell has a `coverage`:
-`full` (every expected case settled and at least one has a result; errored cases count as settled), `partial` (some
-expected cases never ran or never settled), or `none` (no case has a result). `latest` is the task of the newest run
-(by start time) that covered the cell fully or is still running it, else of the newest run: run, experiment, attempt,
-task state, coverage, expected case total (`caseTotal`), case counts, exact and judge score. A partial re-run of a few
-cases therefore never replaces a full run as the cell's score. `history` lists every run with that cell, oldest first
+`full` (every expected case settled and at least one has a result; errored cases count as settled, over the same cases
+as the headline run), `other` (every expected case settled, but over other cases than the headline run, told apart by
+`identity`: a smoke or limited run, or another case set under the same entry), `partial` (some expected cases never ran or never settled), or `none` (no case has a result). `latest` is the task
+of the newest run (by start time) that covered the cell fully or is still running it, else of the newest run: run,
+experiment, attempt, task state, coverage, expected case total (`caseTotal`), case counts, the exact score of every case
+(`caseScores`), exact and judge score. The headline run is the newest one that settled every case it planned over cases no other run covers a strict
+superset of; `caseCount` is its number of cases. A partial re-run or a run over other cases therefore never replaces a full run as the
+cell's score. `superseded` is `true` when a newer run ran the same entry and run row with other eval values (the eval
+axes changed since). `history` lists every run with that cell, oldest first
 (one point per run: attempt, coverage, case counts, exact, state, start time). Two tasks of one
 run in the same cell (several inference executors) keep the last one in queue order. `axes` lists the run-matrix axes,
 then the eval-matrix axes, each with its values in natural order. Cells are ordered by entry, then run row and eval

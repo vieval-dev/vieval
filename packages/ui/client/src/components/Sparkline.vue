@@ -2,16 +2,17 @@
 import { computed } from 'vue'
 
 /**
- * Coverage of one point of the line (see `cellCoverageSchema`): `full` points are joined by the line; a `partial` point
- * is a dashed ring off the line, and a point `none` (no result) is an amber ring on the floor.
+ * Coverage of one point of the line (see `cellCoverageSchema`): `full` points are joined by the line; a `partial` or
+ * `other` point (a score over other cases) is a dashed ring off the line, and a point `none` (no result) is an amber
+ * ring on the floor.
  */
-export type SparklineCoverage = 'full' | 'none' | 'partial'
+export type SparklineCoverage = 'full' | 'none' | 'other' | 'partial'
 
 /**
  * Tiny line of scores (0–1) in run order, for cards and matrix cells: the trend, not the exact values.
  *
  * Missing scores (`null`) break the line. Fewer than two scores draw nothing. With `coverage`, only fully covered
- * points are joined, so a partial re-run or a run without a result never bends the trend; they are drawn as rings.
+ * points are joined, so a partial re-run, a run over other cases, or a run without a result never bends the trend; they are drawn as rings.
  */
 const props = withDefaults(defineProps<{
   /** Coverage of each value, in the same order; every value counts as `full` without it. */
@@ -68,7 +69,7 @@ const marks = computed<Mark[]>(() => {
       return [{ kind: 'none', title, x, y: props.height - 1 }]
     if (value == null || !Number.isFinite(value))
       return []
-    if (coverage === 'partial')
+    if (coverage === 'partial' || coverage === 'other')
       return [{ kind: 'partial', title, x, y: yOf(value) }]
     return index === lastFull || title != null ? [{ kind: index === lastFull ? 'last' : 'full', title, x, y: yOf(value) }] : []
   })

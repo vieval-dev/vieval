@@ -175,6 +175,11 @@ export const caseNodeSchema = v.object({
   /** `name` of the error that ended the last round, for grouping failures. */
   errorName: v.optional(v.string()),
   evidenceLinkCount: v.number(),
+  /**
+   * Identity of the case across runs, as `vieval report compare` aligns cases: the `benchmark.case.id` metric, else the
+   * `vieval.case.id` metric, else the case name (`caseId` carries the index, which differs when a run lists other cases).
+   */
+  identity: v.string(),
   index: v.number(),
   /** `taskId + '\u0000' + caseId`, the same key `cases.jsonl` tooling uses. */
   key: v.string(),
@@ -583,20 +588,27 @@ export const imagePreviewSchema = v.object({
 })
 
 /**
- * How much of a matrix cell one run measured.
+ * How much of a matrix cell one run measured. Cases are told apart by `CaseNode.identity`.
  *
  * - `full`: every expected case of the task settled and at least one has a result (cases without a result are counted
- *   in `counts.errored`, they do not make the run partial)
+ *   in `counts.errored`, they do not make the run partial), over the same cases as the cell's headline run
+ * - `other`: every case the run planned settled, but over other cases than the headline run: a smoke or limited run
+ *   of some of its cases, or another case set (a second dataset under the same entry); its score is not comparable
  * - `partial`: some expected cases never ran or never settled (an interrupted run, a re-run of a few cases, a running
  *   task)
  * - `none`: no case has a result (every case errored, or none ran)
  */
-export const cellCoverageSchema = v.picklist(['full', 'partial', 'none'])
+export const cellCoverageSchema = v.picklist(['full', 'other', 'partial', 'none'])
 
 /**
  * One cell of the matrix overview: one eval entry × run-matrix row × eval-matrix row, across the runs in scope.
  */
 export const matrixCellSchema = v.object({
+  /**
+   * Cases of the cell's headline run: the newest run that settled every case it planned, over cases that no other run
+   * of the cell covers a strict superset of. Expected cases of the newest run when no run settled every case.
+   */
+  caseCount: v.number(),
   /** Eval entry id parsed from the task id (`evals%2Fosworld%2F…`); one entry is one table in the UI. */
   entryId: v.string(),
   eval: v.record(v.string(), v.string()),
@@ -613,10 +625,12 @@ export const matrixCellSchema = v.object({
   })),
   /**
    * Result of the run the cell shows: the newest run that covered the cell fully or is still running it; the newest
-   * run when none did. A partial re-run of a few cases therefore never replaces a full run as the headline.
+   * run when none did. A partial re-run or a run over other cases therefore never replaces a full run as the headline.
    */
   latest: v.object({
     attemptId: v.string(),
+    /** Exact score of every case of the run (`null`: no score), for the spread of the score under the mean. */
+    caseScores: v.array(nullableNumber),
     /** Expected cases of the task (`case.started.total`); `undefined` until its first case started. */
     caseTotal: v.optional(v.number()),
     counts: caseCountsSchema,
@@ -632,6 +646,11 @@ export const matrixCellSchema = v.object({
   }),
   run: v.record(v.string(), v.string()),
   runRowId: v.string(),
+  /**
+   * Whether a newer run ran the same entry and run row with other eval values only (an eval axis added, removed, or
+   * changed since): the cell is a configuration the project moved away from.
+   */
+  superseded: v.boolean(),
 })
 
 /**

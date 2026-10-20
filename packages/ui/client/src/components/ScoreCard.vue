@@ -16,16 +16,18 @@ import { formatScore } from '../format'
  * meta (run counts, times)
  * Ends at 06:04      started 1h 12m ago   ← only while the run is running
  * ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ progress
- * ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ cases (counts on hover)
- * ╭──────────────────╮
- * │ tags (matrix)    │                       ← `footer` slot, an inset with the card's inner radius
+ * ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ cases (counts on hover), or the `bar` slot
  * ╰──────────────────╯
+ *  tags (matrix)                             ← `footer` slot, on the tray below the panel
  * ```
  *
- * The surface is a faint fill with a hairline edge (the look of the matrix cells), not a bordered panel, so the
- * numbers stay the strongest thing on it. With `href` the whole card is the link; put no other links inside it.
+ * A white panel raised on a gray tray (the anatomy of airi's `IconStatusItem`: a 2 px tray edge, the panel's corners
+ * one step inside the tray's), so the numbers sit on the brightest surface and what describes the item (its matrix
+ * values) sits on the tray below. With `href` the whole card is the link; put no other links inside it.
  */
 const props = defineProps<{
+  /** Tighter panel padding, for cards in a grid of many (matrix cells). */
+  compact?: boolean
   counts?: CaseCounts
   href?: string
   /** Run whose progress shows while `state` is `running`. */
@@ -49,34 +51,38 @@ const props = defineProps<{
     :is="props.href ? 'a' : 'div'"
     :href="props.href"
     :class="[
-      'relative flex flex-col gap-2 p-4 min-w-0 rounded-xl transition-colors',
-      'bg-neutral-500/5 border border-neutral-500/8',
-      props.href && 'hover:(bg-primary-500/6 border-primary-500/15)',
+      'flex flex-col min-w-0 rounded-xl overflow-hidden transition-colors',
+      'bg-neutral-100/70 dark:bg-neutral-800/60 border-2 border-neutral-200/50 dark:border-neutral-800/40',
+      props.href && 'hover:border-primary-500/30 dark:hover:border-primary-400/30',
     ]"
     data-testid="score-card"
   >
-    <span :class="['flex items-start gap-2']">
-      <span :class="['flex items-baseline flex-wrap gap-x-1.5 min-w-0']">
-        <span :class="['text-2xl font-semibold tabular-nums leading-none']" :title="props.scoreLabel ?? 'exact score'" data-testid="score-card-score">
-          {{ formatScore(props.score) }}<span :class="['sr-only']"> {{ props.scoreLabel ?? 'exact score' }}</span>
+    <span :class="['relative flex flex-col gap-2 flex-1 min-w-0 rounded-lg bg-white dark:bg-neutral-900', props.compact ? 'p-3 md:p-3.5' : 'p-4']">
+      <span :class="['flex items-start gap-2']">
+        <span :class="['flex items-baseline flex-wrap gap-x-1.5 min-w-0']">
+          <span :class="['text-2xl font-semibold tabular-nums leading-none']" :title="props.scoreLabel ?? 'exact score'" data-testid="score-card-score">
+            {{ formatScore(props.score) }}<span :class="['sr-only']"> {{ props.scoreLabel ?? 'exact score' }}</span>
+          </span>
+          <!-- Change from the previous run, a trend line, …: facts about the score itself. -->
+          <slot name="score" />
         </span>
-        <!-- Change from the previous run, a trend line, …: facts about the score itself. -->
-        <slot name="score" />
+        <StateBadge v-if="props.state" :class="['ml-auto shrink-0']" :state="props.state" />
       </span>
-      <StateBadge v-if="props.state" :class="['ml-auto shrink-0']" :state="props.state" />
+      <span v-if="props.title || $slots.title" :class="['font-semibold min-w-0 truncate']">
+        <slot name="title">{{ props.title }}</slot>
+      </span>
+      <span v-if="$slots.default" :class="['flex flex-col gap-1 text-xs muted min-w-0']">
+        <slot />
+      </span>
+      <span v-if="(props.run && props.state === 'running') || props.counts || $slots.bar" :class="['flex flex-col gap-2.5 mt-auto pt-1']">
+        <RunEta v-if="props.run && props.state === 'running'" :run-key="props.run.runKey" :seq="props.run.lastSeq" :started-at="props.run.startedAt" />
+        <!-- Another bar in place of the case counts, for example how the scores spread in a scored eval. -->
+        <slot name="bar">
+          <CountsBar v-if="props.counts" :counts="props.counts" labels="hover" />
+        </slot>
+      </span>
     </span>
-    <span v-if="props.title || $slots.title" :class="['font-semibold min-w-0 truncate']">
-      <slot name="title">{{ props.title }}</slot>
-    </span>
-    <span v-if="$slots.default" :class="['flex flex-col gap-1 text-xs muted min-w-0']">
-      <slot />
-    </span>
-    <span v-if="(props.run && props.state === 'running') || props.counts" :class="['flex flex-col gap-2.5 mt-auto pt-1']">
-      <RunEta v-if="props.run && props.state === 'running'" :run-key="props.run.runKey" :seq="props.run.lastSeq" :started-at="props.run.startedAt" />
-      <CountsBar v-if="props.counts" :counts="props.counts" labels="hover" />
-    </span>
-    <!-- Concentric corners: the inset sits 8 px inside the card's 12 px corners (`rounded-xl`), so its radius is 4 px. -->
-    <span v-if="$slots.footer" :class="['flex flex-wrap gap-1 -mx-2 -mb-2 mt-1 p-2 rounded bg-neutral-500/6']">
+    <span v-if="$slots.footer" :class="['flex flex-wrap gap-1 px-2 py-1.5']">
       <slot name="footer" />
     </span>
   </component>
