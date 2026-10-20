@@ -137,6 +137,32 @@ export interface ScoreSummary {
 const INPUT_UNSCORED = 'input_unscored'
 
 /**
+ * Counts the values of one case outcome with the scoring rule of vieval.
+ *
+ * Use when:
+ * - one case's values must agree with the summaries of its task, for example a line of `cases.jsonl`, the spread
+ *   under a matrix cell, or a point of a metric panel
+ *
+ * Expects:
+ * - `definitions` to list every score of the case's task, so a failed case counts 0 even in a score only other cases
+ *   recorded; a score without `score.defined` is a bare `{ name }`
+ *
+ * Returns:
+ * - by score name: the recorded value of a `passed` outcome, 0 for a `failed` outcome, 0 for an `errored` or
+ *   `timeout` outcome in a score with `errors: 'zero'`; a score the outcome does not count in (unscored, missing,
+ *   left out, skipped) is absent
+ */
+export function countCase(outcome: ScoredCaseOutcome, definitions: readonly Pick<ScoreDefinedData, 'errors' | 'name'>[]): Record<string, number> {
+  if (outcome.state === 'passed') {
+    return Object.fromEntries(definitions.flatMap(({ name }) => outcome.unscored[name] == null && outcome.scores[name] != null ? [[name, outcome.scores[name]]] : []))
+  }
+  if (outcome.state === 'skipped') {
+    return {}
+  }
+  return Object.fromEntries(definitions.flatMap(({ errors, name }) => outcome.state === 'failed' || errors === 'zero' ? [[name, 0]] : []))
+}
+
+/**
  * Computes the derived scores of one case try from the values it recorded.
  *
  * Use when:
@@ -304,41 +330,34 @@ export function resolveHeadline(tasks: readonly HeadlineInput[]): HeadlineResult
  * - `primary`: the score declared primary, or the only score of the group
  */
 export function scoreCases(outcomes: readonly ScoredCaseOutcome[], definitions: readonly ScoreDefinedData[] = []): CaseScoring {
-  const definitionsByName = new Map(definitions.map(definition => [definition.name, definition]))
+  const declared = new Set(definitions.map(definition => definition.name))
   const recordedNames = new Set<string>()
   for (const outcome of outcomes) {
     Object.keys(outcome.scores).forEach(name => recordedNames.add(name))
     Object.keys(outcome.unscored).forEach(name => recordedNames.add(name))
   }
-  const names = [
-    ...definitions.map(definition => definition.name),
-    ...[...recordedNames].filter(name => !definitionsByName.has(name)).sort(),
+  // Every score of the group: a name recorded without a definition counts with the defaults.
+  const scoreDefinitions = [
+    ...definitions,
+    ...[...recordedNames].filter(name => !declared.has(name)).sort().map(name => ({ name })),
   ]
 
   const settled = outcomes.filter(outcome => outcome.state !== 'skipped')
-  const scores = names.map((name) => {
-    const summary = emptySummary(name, settled.length)
-    const countsErrors = definitionsByName.get(name)?.errors === 'zero'
-    for (const outcome of settled) {
-      if (outcome.state === 'failed' || (outcome.state !== 'passed' && countsErrors)) {
-        addValue(summary, 0)
-        continue
-      }
-      if (outcome.state !== 'passed') {
-        continue
-      }
-      const reason = outcome.unscored[name]
-      if (reason != null) {
-        summary.unscored[reason] = (summary.unscored[reason] ?? 0) + 1
-        continue
-      }
-      const value = outcome.scores[name]
+  const summaries = new Map(scoreDefinitions.map(definition => [definition.name, emptySummary(definition.name, settled.length)]))
+  for (const outcome of settled) {
+    const counted = countCase(outcome, scoreDefinitions)
+    for (const [name, summary] of summaries) {
+      const value = counted[name]
+      const reason = outcome.state === 'passed' ? outcome.unscored[name] : undefined
       if (value != null) {
         addValue(summary, value)
       }
+      else if (reason != null) {
+        summary.unscored[reason] = (summary.unscored[reason] ?? 0) + 1
+      }
     }
-    return finalize(summary)
-  })
+  }
+  const scores = [...summaries.values()].map(finalize)
 
   // The last outcome of each case is its final state; outcomes arrive in settle order.
   const finals = new Map<object | string, ScoredCaseOutcome>()
@@ -355,7 +374,7 @@ export function scoreCases(outcomes: readonly ScoredCaseOutcome[], definitions: 
     }
   }
 
-  const primary = definitions.find(definition => definition.primary === true)?.name ?? (names.length === 1 ? names[0] : undefined)
+  const primary = definitions.find(definition => definition.primary === true)?.name ?? (scores.length === 1 ? scores[0]!.name : undefined)
   return {
     completion: finalize(completion),
     passed: finalize(passed),

@@ -23,7 +23,7 @@ import type {
   TryNode,
 } from './contract'
 
-import { resolveHeadline, scoreCases } from 'vieval/core/scoring'
+import { countCase, resolveHeadline, scoreCases } from 'vieval/core/scoring'
 import { scoreDefinedDataSchema, scoreRecordedDataSchema } from 'vieval/events'
 
 import * as v from 'valibot'
@@ -370,8 +370,13 @@ export function countCases(nodes: readonly Pick<CaseNode, 'state'>[]): CaseCount
  *   `errors: 'zero'`); a name the round does not count in (unscored, missing, excluded, still running) is absent
  */
 export function countedScores(round: Pick<CaseRound, 'scores' | 'state'>, definitions: readonly ScoreDefinition[] = []): Record<string, number> {
-  // Scoring a group of one round reuses the one rule instead of restating the state table here.
-  return Object.fromEntries(scoreRounds([round], definitions).scores.flatMap(summary => summary.mean == null ? [] : [[summary.name, summary.mean]]))
+  // A running or requeued round has not ended, so it counts in no score.
+  if (round.state === 'running' || round.state === 'requeued')
+    return {}
+  // The round's own names count too, as `scoreCases` counts a name recorded without a definition.
+  const names = new Set(definitions.map(definition => definition.name))
+  const recorded = [...Object.keys(round.scores.values), ...Object.keys(round.scores.unscored)].filter(name => !names.has(name)).map(name => ({ name }))
+  return countCase({ scores: round.scores.values, state: toOutcomeState(round.state), unscored: round.scores.unscored }, [...definitions, ...recorded])
 }
 
 /**

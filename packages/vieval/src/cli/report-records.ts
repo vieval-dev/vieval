@@ -7,6 +7,7 @@ import { errorMessageFrom } from '@moeru/std'
 
 import * as v from 'valibot'
 
+import { countCase } from '../core/scoring'
 import { caseEnded, caseEndedDataSchema, caseStarted, caseStartedDataSchema, metricRecorded, metricRecordedDataSchema, scoreDefined, scoreDefinedDataSchema, scoreRecorded, scoreRecordedDataSchema } from '../events'
 import { OLDER_REPORT_MESSAGE } from './report-log'
 
@@ -267,10 +268,7 @@ export function buildCaseRecords(args: BuildCaseRecordsArgs): CaseRecord[] {
     taskScoreNames.set(draft.taskId, names)
   }
 
-  return completed.map(draft => toCaseRecord(draft, {
-    definitions: definitionsByTask.get(draft.taskId) ?? new Map(),
-    names: taskScoreNames.get(draft.taskId) ?? new Set(),
-  }))
+  return completed.map(draft => toCaseRecord(draft, [...taskScoreNames.get(draft.taskId) ?? []].sort().map(name => definitionsByTask.get(draft.taskId)?.get(name) ?? { name })))
 }
 
 /**
@@ -514,33 +512,6 @@ function calculateDurationMs(startedAt: string, endedAt: string): number {
   return Math.max(0, ended - started)
 }
 
-/**
- * Counts the recorded values of one case outcome with the state rule of `scoreCases`.
- *
- * NOTICE:
- * `scoreCases` (`core/scoring/index.ts`) returns summaries, not per-case values, so this repeats its per-case rule.
- * Both must change together; `report-records.test.ts` checks that pooled records equal `scoreCases` summaries.
- */
-function countScores(
-  outcome: { scores: Record<string, number>, state: CaseRecordState },
-  task: { definitions: ReadonlyMap<string, ScoreDefinedData>, names: ReadonlySet<string> },
-): Record<string, number> {
-  if (outcome.state === 'passed') {
-    return { ...outcome.scores }
-  }
-  if (outcome.state === 'skipped') {
-    return {}
-  }
-
-  const counted: Record<string, number> = {}
-  for (const name of [...task.names].sort()) {
-    if (outcome.state === 'failed' || task.definitions.get(name)?.errors === 'zero') {
-      counted[name] = 0
-    }
-  }
-  return counted
-}
-
 function createCaseKey(taskId: string, caseId: string): string {
   return `${taskId}\u0000${caseId}`
 }
@@ -615,10 +586,13 @@ function parseData<TSchema extends v.GenericSchema>(schema: TSchema, event: RunE
   return result.success ? result.output : undefined
 }
 
-function toCaseRecord(
-  draft: CaseDraft,
-  task: { definitions: ReadonlyMap<string, ScoreDefinedData>, names: ReadonlySet<string> },
-): CaseRecord {
+/**
+ * Builds the final record of one case, counting its values with `countCase`.
+ *
+ * Expects:
+ * - `taskScores` to list every score of the case's task, so a failed case counts 0 in each
+ */
+function toCaseRecord(draft: CaseDraft, taskScores: readonly ScoreDefinedData[]): CaseRecord {
   const startedAt = draft.startedAt ?? draft.endedAt ?? ''
   const endedAt = draft.endedAt ?? startedAt
   const state = draft.state ?? 'failed'
@@ -631,7 +605,7 @@ function toCaseRecord(
       : {
           attempts: draft.attempts.map(({ recorded, ...attempt }) => ({
             ...attempt,
-            scores: countScores({ scores: recorded, state: attempt.state }, task),
+            scores: countCase({ scores: recorded, state: attempt.state, unscored: attempt.unscored }, taskScores),
           })),
         }),
     ...(draft.autoAttempt == null ? {} : { autoAttempt: draft.autoAttempt }),
@@ -649,7 +623,7 @@ function toCaseRecord(
     runId: draft.runId,
     schemaVersion: CASE_RECORD_SCHEMA_VERSION,
     scoreDetails: draft.scoreDetails,
-    scores: countScores({ scores: draft.scores, state }, task),
+    scores: countCase({ scores: draft.scores, state, unscored: draft.unscored }, taskScores),
     startedAt,
     state,
     taskId: draft.taskId,
