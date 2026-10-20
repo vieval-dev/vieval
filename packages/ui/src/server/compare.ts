@@ -1,7 +1,7 @@
-import type { CellCoverage, ComparedRun, ComparisonCell, ComparisonResponse, MatrixCell, MatrixResponse, RunListItem, TaskNode } from '../shared/contract'
+import type { CellCoverage, ComparedRun, ComparisonCell, ComparisonResponse, MatrixCell, MatrixResponse, RunListItem, ScoreDefinition, ScoreGraders, TaskNode } from '../shared/contract'
 import type { RunHandle } from './store'
 
-import { axisValues, buildTaskNodes, compareNatural } from '../shared/reduce'
+import { addScoreGrader, axisValues, buildTaskNodes, compareNatural, countedScores, countingDefinitions, pickScoreDefinitions } from '../shared/reduce'
 import { toRunListItem } from './store'
 
 /** One run of a matrix cell: its result, and the cases it ran (by `CaseNode.identity`). */
@@ -23,7 +23,7 @@ interface Column {
  * - `GET /api/matrix` shows how every matrix combination did, across experiments and attempts
  *
  * Expects:
- * - each run with the task nodes it was listed with (built once per run by the caller)
+ * - each run with the task nodes it was listed with (built once per run by the caller), and its score definitions
  *
  * Returns:
  * - cells ordered by entry, then run row and eval row in natural order; `history` is every run with a task in the
@@ -32,31 +32,42 @@ interface Column {
  *   smoke or limited run, another case set) is `other`, not `full`: its score is not comparable. Tasks without a
  *   parsable matrix are skipped.
  *   Tasks of one run that share a cell (several inference executors) keep the last one in queue order.
+ *   Each run is scored by its task's primary score (`score`, and `caseScores` per case by the rule of `scoreCases`),
+ *   with its completion rate next to it.
  */
-export function buildMatrix(runs: readonly { item: RunListItem, tasks: readonly TaskNode[] }[]): MatrixResponse {
+export function buildMatrix(runs: readonly { item: RunListItem, scoreDefinitions: ReadonlyMap<string, ScoreDefinition>, tasks: readonly TaskNode[] }[]): MatrixResponse {
   const oldestFirst = [...runs].sort((left, right) => (left.item.startedAt ?? '').localeCompare(right.item.startedAt ?? ''))
   // Runs of each cell, oldest first, with the cases each one ran; whether a run is `full` depends on the cases of the
   // cell's other runs, so it is settled after every run was read.
   const cells = new Map<string, { entryId: string, eval: Record<string, string>, evalRowId: string, run: Record<string, string>, runRowId: string, runs: CellRun[] }>()
   const runRows: Record<string, string>[] = []
   const evalRows: Record<string, string>[] = []
-  for (const { item, tasks } of oldestFirst) {
+  // Newest definition of each score, since runs are read oldest first.
+  const definitions = new Map<string, ScoreDefinition>()
+  for (const { item, scoreDefinitions, tasks } of oldestFirst) {
+    for (const [name, definition] of scoreDefinitions) {
+      definitions.set(name, definition)
+    }
     for (const task of tasks) {
       if (task.matrix == null || task.entryId == null) {
         continue
       }
       runRows.push(task.matrix.run)
       evalRows.push(task.matrix.eval)
+      const primary = task.scoring.primary
+      const taskDefinitions = countingDefinitions(task.scoring, scoreDefinitions)
       const result: MatrixCell['latest'] = {
         attemptId: item.attemptId,
-        caseScores: task.cases.map(node => node.scores.exact ?? null),
+        caseScores: task.cases.map((node) => {
+          const round = node.rounds.at(-1)
+          return primary == null || round == null ? null : countedScores(round, taskDefinitions)[primary] ?? null
+        }),
         caseTotal: task.caseTotal,
         counts: task.caseCounts,
         coverage: coverageOf(task),
-        exact: task.scores.exact,
         experimentId: item.experimentId,
-        judge: task.scores.judge,
         runKey: item.runKey,
+        scoring: task.scoring,
         startedAt: item.startedAt,
         state: task.state,
         taskId: task.id,
@@ -105,7 +116,16 @@ export function buildMatrix(runs: readonly { item: RunListItem, tasks: readonly 
     return {
       ...cell,
       caseCount: reference?.cases.size ?? Math.max(latest.counts.total, latest.caseTotal ?? 0),
-      history: settled.map(run => ({ attemptId: run.attemptId, counts: run.counts, coverage: run.coverage, exact: run.exact, runKey: run.runKey, startedAt: run.startedAt, state: run.state })),
+      history: settled.map(run => ({
+        attemptId: run.attemptId,
+        completion: run.scoring.completion.mean,
+        counts: run.counts,
+        coverage: run.coverage,
+        runKey: run.runKey,
+        score: primaryMean(run.scoring),
+        startedAt: run.startedAt,
+        state: run.state,
+      })),
       latest,
       superseded: newestOf(cellRuns) < (rowNewest.get(rowKey(cell)) ?? ''),
     }
@@ -120,6 +140,7 @@ export function buildMatrix(runs: readonly { item: RunListItem, tasks: readonly 
       || compareNatural(left.runRowId, right.runRowId)
       || compareNatural(left.evalRowId, right.evalRowId)),
     runCount: runs.length,
+    scoreDefinitions: pickScoreDefinitions(definitions, output.flatMap(cell => cell.latest.scoring.scores.map(score => score.name))),
   }
 }
 
@@ -160,9 +181,16 @@ export function compareRuns(handles: readonly RunHandle[], now: number): Compari
   }), now)
 }
 
+/**
+ * Case rows of the columns; a row is `changed` when its state differs between columns, or, when every scored task
+ * shares one primary score, the value the case counts with in it (a failed case counts 0).
+ */
 function buildComparison(view: ComparisonResponse['view'], columns: readonly Column[], now: number): ComparisonResponse {
-  const rows = new Map<string, Record<string, ComparisonCell>>()
+  // Per case name: the cell of each column, and the primary value the cell counts with.
+  const rows = new Map<string, { cells: Record<string, ComparisonCell>, counted: Record<string, Record<string, number>> }>()
   const outputColumns: ComparisonResponse['columns'] = []
+  const definitions = new Map<string, ScoreDefinition>()
+  const primaries = new Set<string>()
   for (const column of columns) {
     const runs: ComparedRun[] = column.handles.map((handle) => {
       const item = toRunListItem(handle, now)
@@ -170,36 +198,51 @@ function buildComparison(view: ComparisonResponse['view'], columns: readonly Col
         attemptId: item.attemptId,
         counts: item.counts,
         durationMs: item.startedAt != null && item.endedAt != null ? Date.parse(item.endedAt) - Date.parse(item.startedAt) : undefined,
-        exactAverage: item.exactAverage,
         experimentId: item.experimentId,
-        hybridAverage: item.hybridAverage,
-        judgeAverage: item.judgeAverage,
+        headline: item.headline,
         runKey: item.runKey,
         startedAt: item.startedAt,
         state: item.state,
       }
     })
-    outputColumns.push({ id: column.id, label: column.label, runs })
+    const scoreGraders: ScoreGraders = {}
+    outputColumns.push({ id: column.id, label: column.label, runs, scoreGraders })
     // Older runs first, so a newer run overwrites the cells of the same case.
     for (const handle of column.handles) {
-      for (const task of buildTaskNodes(handle.reducer(), () => 0)) {
+      const reducer = handle.reducer()
+      for (const [name, definition] of reducer.scoreDefinitions) {
+        definitions.set(name, definition)
+      }
+      for (const task of buildTaskNodes(reducer, () => 0)) {
+        for (const [name, graders] of Object.entries(task.scoreGraders)) {
+          graders.forEach(grader => addScoreGrader(scoreGraders, name, grader))
+        }
+        if (task.scoring.primary != null) {
+          primaries.add(task.scoring.primary)
+        }
+        const taskDefinitions = countingDefinitions(task.scoring, reducer.tasks.get(task.id)?.scoreDefinitions ?? new Map())
         for (const node of task.cases) {
-          const cells = rows.get(node.name) ?? {}
-          cells[column.id] = { exact: node.scores.exact, judge: node.scores.judge, roundCount: node.rounds.length, state: node.state }
-          rows.set(node.name, cells)
+          const row = rows.get(node.name) ?? { cells: {}, counted: {} }
+          const round = node.rounds.at(-1)
+          row.cells[column.id] = { roundCount: node.rounds.length, scores: node.scores, state: node.state }
+          row.counted[column.id] = round == null ? {} : countedScores(round, taskDefinitions)
+          rows.set(node.name, row)
         }
       }
     }
   }
-  const outputRows = [...rows].sort((left, right) => left[0].localeCompare(right[0])).map(([caseName, cells]) => {
+  const primary = primaries.size === 1 ? [...primaries][0] : undefined
+  const outputRows = [...rows].sort((left, right) => left[0].localeCompare(right[0])).map(([caseName, { cells, counted }]) => {
     const values = Object.values(cells)
     const states = new Set(values.map(cell => cell.state))
-    const scores = new Set(values.map(cell => cell.exact ?? (cell.state === 'passed' ? 1 : 0)))
+    const scores = new Set(Object.values(counted).map(value => primary == null ? null : value[primary] ?? null))
     return { caseName, cells, changed: values.length > 1 && (states.size > 1 || scores.size > 1) }
   })
   return {
     columns: outputColumns,
+    ...(primary == null ? {} : { primary }),
     rows: outputRows,
+    scoreDefinitions: [...definitions.values()],
     summary: { changed: outputRows.filter(row => row.changed).length, rows: outputRows.length },
     view,
   }
@@ -228,8 +271,16 @@ function isStrictSubset(inner: ReadonlySet<string>, outer: ReadonlySet<string>):
 }
 
 function matches(handle: RunHandle, filter: { project: string, workspace: string }, now: number): boolean {
+  // A run written by an older vieval cannot be read, so it is no column.
+  if (handle.unsupportedVersion() != null) {
+    return false
+  }
   const item = toRunListItem(handle, now)
   return item.workspaceId === filter.workspace && (item.projectSegment === filter.project || item.projectIds.includes(filter.project))
+}
+
+function primaryMean(scoring: TaskNode['scoring']): null | number {
+  return scoring.scores.find(score => score.name === scoring.primary)?.mean ?? null
 }
 
 function sortByStart(list: readonly RunHandle[], now: number): RunHandle[] {

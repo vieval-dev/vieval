@@ -17,7 +17,7 @@ import { ViewerError } from './errors'
 import { contentTypeFromName, listTree, readJsonlPage, resolveInsideRoot, serveFile } from './files'
 import { buildOtelLogs, buildOtelMetrics, buildOtelTraces } from './otel'
 import { createImagePreviews } from './preview'
-import { toRunListItem } from './store'
+import { toRunListItem, UNSUPPORTED_RUN_MESSAGE } from './store'
 import { buildCaseDetail, buildLogs, buildMetrics, buildProgress, buildScores, buildSnapshot, buildTask, buildTimeline, findCase, listArtifacts, MAX_LOG_LIMIT } from './views'
 
 /** Most events one `/events` page returns. */
@@ -82,11 +82,18 @@ export function createViewerApp(options: CreateViewerAppOptions): H3 {
     }
   })
 
-  async function runFrom(event: H3Event): Promise<RunHandle> {
+  /**
+   * The run a route reads, or 404. A run written by an older vieval is listed (`/api/runs/:runKey`) but not opened:
+   * every route that reads its contents answers 422.
+   */
+  async function runFrom(event: H3Event, options: { listOnly?: boolean } = {}): Promise<RunHandle> {
     const runKey = param(event, 'runKey')
     const handle = await store.get(runKey)
     if (handle == null) {
       throw new ViewerError(404, `Run "${runKey}" not found.`)
+    }
+    if (options.listOnly !== true) {
+      assertSupported(handle)
     }
     return handle
   }
@@ -155,7 +162,7 @@ export function createViewerApp(options: CreateViewerAppOptions): H3 {
       .sort((left, right) => (right.startedAt ?? '').localeCompare(left.startedAt ?? ''))
   })
 
-  app.get('/api/runs/:runKey', async event => toRunListItem(await runFrom(event), now()))
+  app.get('/api/runs/:runKey', async event => toRunListItem(await runFrom(event, { listOnly: true }), now()))
   app.get('/api/runs/:runKey/snapshot', async event => buildSnapshot(await runFrom(event), evidence, now()))
   app.get('/api/runs/:runKey/progress', async event => buildProgress(await runFrom(event), now()))
 
@@ -333,10 +340,10 @@ export function createViewerApp(options: CreateViewerAppOptions): H3 {
   app.get('/api/matrix', async (event) => {
     const query = getQuery(event) as Record<string, string | undefined>
     const at = now()
-    const runs = (await store.list()).map((handle) => {
+    const runs = (await store.list()).filter(handle => handle.unsupportedVersion() == null).map((handle) => {
       // Built once and shared by the list item and the matrix: building task nodes walks every case.
       const tasks = buildTaskNodes(handle.reducer(), () => 0)
-      return { item: toRunListItem(handle, at, tasks), tasks }
+      return { item: toRunListItem(handle, at, tasks), scoreDefinitions: handle.reducer().scoreDefinitions, tasks }
     })
     return buildMatrix(runs.filter(run => inScope(run.item, query)))
   })
@@ -364,6 +371,7 @@ export function createViewerApp(options: CreateViewerAppOptions): H3 {
       if (handle == null) {
         throw new ViewerError(404, `Run "${key}" not found.`)
       }
+      assertSupported(handle)
       return handle
     }))
     return compareRuns(handles, now())
@@ -402,6 +410,13 @@ function artifactsRootOf(handle: RunHandle): string {
     throw new ViewerError(404, 'Run has no artifacts directory.')
   }
   return root
+}
+
+function assertSupported(handle: RunHandle): void {
+  const version = handle.unsupportedVersion()
+  if (version != null) {
+    throw new ViewerError(422, `${UNSUPPORTED_RUN_MESSAGE} (Run "${handle.runKey}" has event schema version ${version}.)`)
+  }
 }
 
 function getOrCreate<K, V>(map: Map<K, V>, key: K, create: () => V): V {

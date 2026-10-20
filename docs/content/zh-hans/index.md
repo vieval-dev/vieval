@@ -20,9 +20,9 @@ home:
       ✓ |desktop-agent| (412 cases)
         cases 407 passed | 5 failed | 0 timeout
       $ pnpm vieval report cases .vieval/reports/candidate --where state=failed
-        ✗ chrome/open-settings  exact 0  wrong tab
+        ✗ chrome/open-settings  pass 0  wrong tab
         ✗ gimp/resize-image  timeout  60m
-        ✗ vscode/rename-symbol  exact 0  old name kept
+        ✗ vscode/rename-symbol  pass 0  old name kept
         ✗ calc/sum-column  rubric 0.42  partial
         ✗ chat/refund-policy  rubric 0.31  hallucinated
   blocks:

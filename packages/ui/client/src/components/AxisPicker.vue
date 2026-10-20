@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { MetricDefinition } from '../../../src/shared/contract'
 import type { CaseTable, MetricSeparation } from '../caseMetrics'
+import type { ColumnDefinition } from '../scores'
 
 import { useMediaQuery } from '@vueuse/core'
 import { PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
@@ -16,7 +16,7 @@ import AxisPickerList from './AxisPickerList.vue'
  */
 const props = defineProps<{
   /** Definition of a metric (label, description, unit) for its details. */
-  definitionOf: (name: string) => MetricDefinition | undefined
+  definitionOf: (name: string) => ColumnDefinition | undefined
   labelOf: (name: string) => string
   separation: ReadonlyMap<string, MetricSeparation>
   table: CaseTable

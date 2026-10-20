@@ -20,6 +20,8 @@ const props = defineProps<{
   /** Axis under the pointer (or where the case was pinned); its row is emphasized and its value leads the card. */
   activeAxis?: string
   axes: readonly ParallelAxis[]
+  /** Formats a numeric value of an axis: a score as a percentage, a metric with its unit (`formatColumnValue`). */
+  formatOf: (name: string, value: number) => string
   /** Link to the case page. */
   href: string
   labelOf: (name: string) => string
@@ -35,7 +37,6 @@ const props = defineProps<{
   /** Every case of the charts, the population the value is placed in. */
   rows: readonly CaseRow[]
   scales: Readonly<Record<string, ScaleContinuousNumeric<number, number>>>
-  unitOf: (name: string) => string | undefined
   /** Cases per value of each category axis (`CaseTable.valueCounts`), for "46 / 361 cases". */
   valueCounts: Readonly<Record<string, ReadonlyMap<string, number>>>
 }>()
@@ -79,13 +80,11 @@ const lines = computed(() => props.axes.map((axis) => {
   const below = values.filter(item => item < value).length
   const tied = values.filter(item => item === value).length
   const percentile = Math.round(((below + tied / 2) / values.length) * 100)
-  const unit = props.unitOf(axis.name)
-  const number = Math.abs(value) >= 1000 ? Intl.NumberFormat(undefined, { maximumFractionDigits: 1, notation: 'compact' }).format(value) : String(Math.round(value * 100) / 100)
   const position = distribution?.position?.(value)
   const bin = position == null ? undefined : Math.min(BINS - 1, Math.max(0, Math.floor(position * BINS)))
   // How far the value sits from the middle of all cases: 0 at the median, 1 at either end.
   const notability = Math.abs(percentile - 50) / 50
-  return { bin, detail: `p${percentile}`, heights, kind: 'numeric' as const, name: axis.name, notability, position, text: unit == null ? number : `${number} ${unit}` }
+  return { bin, detail: `p${percentile}`, heights, kind: 'numeric' as const, name: axis.name, notability, position, text: props.formatOf(axis.name, value) }
 }))
 /** Small round icon action beside the case name; finger-sized on phones (the card opens in a drawer there). */
 const action = 'grid place-items-center size-9 md:size-6 shrink-0 rounded-full border border-neutral-200 dark:border-neutral-700/60 text-neutral-600 dark:text-neutral-300 transition-colors hover:(text-primary-700 dark:text-primary-200 border-primary-500/50 bg-primary-500/8) focus-visible:(outline-2 outline-offset-1 outline-primary-500)'

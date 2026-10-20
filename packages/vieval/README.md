@@ -141,6 +141,33 @@ describeTask('arithmetic-quality', ({ casesFromInputs }) => {
 })
 ```
 
+Declare the scores a task measures with `defineScore`. Each score is a named value in `0..1` where higher is better; one score per task is `primary` and becomes the headline, shown next to the completion rate. A derived score (`combine: { all | mean | weighted }`) is computed by the runtime when the case try settles:
+
+```ts
+import { caseOf, defineScore, describeTask } from 'vieval'
+
+const correct = defineScore('formula.correct', { label: { 'en': 'Correct', 'zh-Hans': '正确' } })
+const natural = defineScore('formula.natural', { grader: { id: 'judge', kind: 'model' } })
+const pass = defineScore('formula.pass', {
+  combine: { all: [correct, { atLeast: 0.5, score: natural }] },
+  label: 'Pass',
+  primary: true,
+})
+
+describeTask('read-formula', () => {
+  caseOf('fraction', async (context) => {
+    const { listenerScore, verdict } = await readAloud('1/2')
+    context.recordScore(correct, listenerScore)
+    if (verdict == null)
+      context.recordUnscored(natural, 'invalid_response')
+    else
+      context.recordScore(natural, verdict.score, { rationale: verdict.reason })
+  })
+}, { scores: [correct, natural, pass] })
+```
+
+A failed case counts `0` in every score. An errored or timed-out case is left out (`errors: 'exclude'`, the default) or counts `0` (`errors: 'zero'`), and lowers the completion rate either way. An unscored value never counts. Latency and cost are metrics (`defineMetric` with `better: 'lower'`), not scores.
+
 `describeEval` remains exported as an alias of `describeTask`, but new examples should prefer `describeTask` because task/case semantics are the primary runtime model.
 
 Every `describeTask` call in an eval file is its own task:
@@ -215,7 +242,8 @@ Each scheduled task receives stable matrix metadata:
 - `project`: the complete unit of work: discovery rules (`include`, `exclude`, `root`), `runMatrix` / `evalMatrix`, `models`, `inferenceExecutors`, optional `executor`, `plugins`, `reporters`, and `scheduler`.
 - `experiment`: run metadata derived from explicit `--experiment` or, when omitted, stable matrix row metadata. It does not create an extra scheduler layer.
 - `task`: one eval definition discovered from files and expanded across inference executors plus run/eval matrix rows.
-- `case`: the scoring and evidence source inside a task. `context.recordScore(...)` contributes normalized score evidence; `context.recordMetric(...)` emits benchmark metadata for reports.
+- `case`: the scoring and evidence source inside a task. `context.recordScore(score, value)` records a named score declared with `defineScore` (a value in `0..1`, higher is better; one score per task is the primary score); `context.recordUnscored(score, reason)` records that the grader could not produce one; `context.recordMetric(...)` emits benchmark data such as latency or cost for reports.
+- `completion rate`: the share of cases that produced a result (`passed` or `failed`, not `errored` or `timeout`). It is shown next to the primary score everywhere.
 - `attempt`: a full task rerun used to estimate reliability. With `autoAttempt`, each full attempt contributes evidence, so a fail-then-pass pair scores as a success rate rather than replacing the earlier failure.
 - `retry`: an in-case retry. With `autoRetry`, a case can recover inside one attempt; a retry pass still counts as that attempt passing.
 
@@ -293,6 +321,7 @@ If a project provides no `executor`, `vieval run` still discovers eval files, sc
 
 ```ts
 import { defineConfig } from 'vieval'
+import { scoreCases } from 'vieval/core/scoring'
 
 export default defineConfig({
   projects: [
@@ -315,7 +344,8 @@ export default defineConfig({
           id: task.id,
           inferenceExecutorId: task.inferenceExecutor.id,
           matrix: task.matrix,
-          scores: [{ kind: 'exact', score: success ? 1 : 0 }],
+          // One measurement as one passed outcome; `scoreCases` builds `scores`, `primary`, `completion`, and `passed`.
+          ...scoreCases([{ scores: { 'motion.success': success ? 1 : 0 }, state: 'passed', unscored: {} }]),
         }
       },
       include: ['evals/*.eval.ts'],
@@ -396,7 +426,7 @@ export default defineConfig({
 
 - One live terminal window shows `Workspaces`, `Projects`, `Tasks`, `Cases`, `Concurrency`, and `Time` rows for all workspaces.
 - A failing workspace does not stop the others.
-- At the end, a leaderboard prints one row per workspace and project, sorted by hybrid score, then the failed workspaces with the last lines of their stderr.
+- At the end, a leaderboard prints one row per workspace and project, ranked by the primary score with the completion rate in its own column, then the failed workspaces with the last lines of their stderr. If the workspaces have different primary scores, the leaderboard says so and ranks by passed cases.
 - The exit code is `1` when any workspace failed or had failing cases.
 - `--json` prints the comparison output.
 - Reports go to `.vieval/reports` next to the comparison config. The experiment defaults to the comparison id, and all workspaces share one attempt.
@@ -426,7 +456,7 @@ vieval viewer [reportRoot...] [--port <port>] [--host <host>] [--open] [--eviden
 vieval report analyze <report-directory>
 vieval report index <report-directory> [--output <path>] [--format table|json|jsonl]
 vieval report cases <report-directory> [--where <key=value>] [--group-by <key>] [--format table|json|jsonl]
-vieval report compare <left-report-directory> <right-report-directory> [--case-key <key>] [--score-kind <kind>] [--format table|json]
+vieval report compare <left-report-directory> <right-report-directory> [--case-key <key>] [--score <name>] [--format table|json]
 ```
 
 `vieval run --config <comparison config>` runs a comparison (see [Workspaces and Comparisons](#workspaces-and-comparisons)); there is no separate `vieval compare` command. `vieval report compare` diffs two existing reports.
@@ -437,9 +467,10 @@ vieval report compare <left-report-directory> <right-report-directory> [--case-k
 - Runs of one invocation share `experimentId`, `attemptId`, and `invocationId`. Runs started by a comparison also carry `comparisonId`; there, the experiment defaults to the comparison id and all workspaces share one attempt.
 - `events.jsonl` is appended while the run is in progress, so a crashed run keeps the events already flushed to disk. Each line has a `seq` that orders it within the run.
 - `run-summary.json`, `cases.jsonl`, `metrics-summary.json`, and `otlp/*.json` are derived from `events.jsonl` when the run ends.
-- `run-summary.json` has `schemaVersion: 1`, `runId`, `reportDirectory`, and exactly one project. `vieval report` commands reject other versions.
+- `run-summary.json` has `schemaVersion: 2`, `runId`, `reportDirectory`, and exactly one project. It holds the score summaries (`{ name, mean, n, total, sum, unscored }`) of every task run, the announced `scoreDefinitions`, and the resolved headline (`{ headline, completion }`) per project and for the run. `vieval report` commands reject other versions.
 - The same `workspaceId`, `experimentId`, `attemptId`, and `runId` identify the run in every file: the top-level fields of `run-summary.json`, every event envelope, every `cases.jsonl` record, and the `vieval.workspace.id` / `vieval.experiment.id` / `vieval.attempt.id` / `vieval.run.id` attributes of the OTLP resources and the `vieval.run` span.
-- For a task with auto attempts, a `cases.jsonl` record describes the last attempt and adds `attemptIndex`, `autoAttempt`, and `attempts` (state, scores, retries, and timing of each attempt). `retryCount` counts only the retries within the last attempt. `CaseRecord.schemaVersion` stays `1`, because the new fields are optional.
+- For a task with auto attempts, a `cases.jsonl` record describes the last attempt and adds `attemptIndex`, `autoAttempt`, and `attempts` (state, scores, retries, and timing of each attempt). `retryCount` counts only the retries within the last attempt.
+- `cases.jsonl` records have `schemaVersion: 2`. `scores` maps score names to the counted value (a failed case counts `0`), `unscored` maps score names to the reason the grader gave none, and `scoreDetails` keeps the `rationale`, `grader`, and `metadata` of each record.
 - `artifacts/<task>/<case>/` holds case files (see [Case ids and artifacts](#case-ids-and-artifacts)).
 
 `vieval run --json` prints `invocationId` and a `projects` list; each project has its own `runId` and `reportDirectory`. With a comparison config, `--json` prints the comparison output.
@@ -518,11 +549,12 @@ await runVievalCli({
 
 ## Public Entrypoints
 
-- `vieval`: `defineConfig`, `loadEnv`, `requiredEnvFrom`, `describeTask`, `describeEval`, `caseOf`, `casesFromInputs`, and `expect`.
+- `vieval`: `defineConfig`, `loadEnv`, `requiredEnvFrom`, `describeTask`, `describeEval`, `caseOf`, `casesFromInputs`, `defineScore`, `defineMetric`, and `expect`.
 - `vieval/config`: lower-level `defineEval`, `defineTask`, matrix types, task context types, model definitions, and plugin contracts.
 - `vieval/plugins/chat-models`: `ChatModels`, `ChatProviders`, `chatModelFrom`, `chatProviderFrom`, `chatModelMatrix`, runtime config helpers, and chat telemetry helpers.
 - `vieval/core/runner`: collection, scheduling, task context, cache runtime, scheduler, execution, and aggregation utilities.
-- `vieval/core/assertions`: assertion primitives and pipeline helpers.
+- `vieval/core/assertions`: assertion primitives and pipeline helpers. Outcomes carry a `score`; record it with `context.recordScore(definition, outcome.score)`.
+- `vieval/core/scoring`: the one scoring rule (`scoreCases`), derived scores (`deriveScores`), pooling (`poolScoreSummaries`), and headline resolution (`resolveHeadline`). Side-effect free.
 - `vieval/events`: run event definitions, payload types, and `events.jsonl` schemas.
 - `vieval/core/inference-executors`: env helpers and remote provider executors.
 - `vieval/testing/expect-extensions`: Vitest expect extensions for testing eval behavior.
@@ -620,10 +652,10 @@ See [`examples/case-output`](../../examples/case-output) for a runnable demo.
 
 Every activity of a run is one typed event on an in-process bus (`@moeru/eventa`). The terminal reporter, the report writer (`events.jsonl`), and the Vitest compat bridge are subscribers of that bus.
 
-- Event names are `<entity>.<past-tense verb>`: `run.started`, `project.started`, `task.queued`, `task.started`, `case.started`, `case.output`, `metric.defined`, `metric.recorded`, `score.recorded`, `case.ended`, `task.ended`, `project.ended`, `run.ended`, plus `inference.*` and `tool-call.*` from `vieval/plugins/chat-models`.
-- Definitions, payload types, and Valibot schemas are exported from `vieval/events`. Every line of `events.jsonl` is an envelope with `schemaVersion: 2`, a per-run `seq`, run identity, and `projectId` / `taskId` / `caseId` when they apply.
+- Event names are `<entity>.<past-tense verb>`: `run.started`, `project.started`, `task.queued`, `task.started`, `case.started`, `case.output`, `metric.defined`, `metric.recorded`, `score.defined`, `score.recorded`, `case.ended`, `task.ended`, `project.ended`, `run.ended`, plus `inference.*` and `tool-call.*` from `vieval/plugins/chat-models`.
+- Definitions, payload types, and Valibot schemas are exported from `vieval/events`. Every line of `events.jsonl` is an envelope with `schemaVersion: 3`, a per-run `seq`, run identity, and `projectId` / `taskId` / `caseId` when they apply.
 - When a task runs auto attempts (a case has `autoAttempt > 0`), `case.started` and `case.ended` of every case of the task have `attemptIndex` (0 for the first attempt) and `autoAttempt` (the attempts that the case allows). Events of other tasks do not have these fields. `retryIndex` stays the retry within one attempt.
-- Schema version policy: a new optional payload field or a new event name does not change `schemaVersion`. Readers of version 2 ignore unknown payload fields and skip unknown events, so they can read newer logs. A renamed, removed, or retyped field increments the version. `attemptIndex` and `autoAttempt` are optional fields of version 2.
+- Schema version policy: a new optional payload field or a new event name does not change `schemaVersion`. Readers of version 3 ignore unknown payload fields and skip unknown events, so they can read newer logs. A renamed, removed, or retyped field increments the version. Version 3 replaced the `exact` / `judge` score kinds with named scores (`score.defined`, and `score.recorded` with `name` and `value` or `unscored`); readers reject older envelopes with "This report was written by an older vieval. Run it again."
 - Task and case code receives `context.events`, scoped to its task and case. Emits never reject and never affect scoring.
 - A custom project `executor` forwards `context.events` into `task.entry.task.run(...)`, so case progress and output reach the terminal and the report.
 - Plugins define their own events with `defineEventa` from `vieval/events`:
@@ -638,7 +670,7 @@ Every activity of a run is one typed event on an in-process bus (`@moeru/eventa`
   })
   ```
 
-When not to use it: events are observations. Do not use them to change task results; use `recordScore` / `recordMetric` for that.
+When not to use it: events are observations. Do not use them to change task results; use `recordScore` / `recordUnscored` / `recordMetric` for that.
 
 ## Examples In This Repository
 

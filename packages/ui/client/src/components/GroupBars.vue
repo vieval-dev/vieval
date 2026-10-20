@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import type { ComponentPublicInstance } from 'vue'
 
-import type { MetricDefinition } from '../../../src/shared/contract'
 import type { CaseFilters, CaseRow } from '../caseMetrics'
+import type { ColumnDefinition } from '../scores'
 import type { BesideTarget } from './MetricBesideCard.vue'
 
 import { DropdownMenuContent, DropdownMenuItemIndicator, DropdownMenuPortal, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuRoot, DropdownMenuTrigger } from 'reka-ui'
@@ -15,7 +15,7 @@ import { formatScore } from '../format'
 
 /**
  * Cases grouped by one category (a stratum, a grading rule, a matrix axis): one row per value with a horizontal bar of
- * its cases in the chart's colors, the group's mean exact score (or pass rate without scores), and its case count.
+ * its cases in the chart's colors, the group's mean primary score (or pass rate without one), and its case count.
  * Rows are sorted by that score, lowest first, so the groups that pull the score down lead. Clicking a row picks its
  * value, like clicking it on a chart axis.
  *
@@ -27,12 +27,14 @@ const props = defineProps<{
   categories: readonly string[]
   colorOf: (row: CaseRow) => string
   /** Definition of a category (label, description) for the details beside the menu. */
-  definitionOf: (name: string) => MetricDefinition | undefined
+  definitionOf: (name: string) => ColumnDefinition | undefined
   filters: CaseFilters
   labelOf: (name: string) => string
   /** Colors of the legend in its order, so the segments of every bar stack the same way. */
   legendColors: readonly string[]
   rows: readonly CaseRow[]
+  /** Score the groups are ranked by (`CaseTable.primary`); without it, the pass rate. */
+  score?: string
   /** Every case's value of a category, for the distribution beside the menu. */
   valuesOf: (name: string) => readonly unknown[]
 }>()
@@ -41,7 +43,7 @@ const emit = defineEmits<{ pick: [name: string, value: string] }>()
 /** Group by the first category that is not the outcome itself; `state` only when nothing else exists. */
 const picked = shallowRef<string>()
 const groupBy = computed<string>({
-  get: () => (picked.value != null && props.categories.includes(picked.value) ? picked.value : props.categories.find(name => name !== 'state' && name !== 'exact') ?? props.categories[0] ?? 'state'),
+  get: () => (picked.value != null && props.categories.includes(picked.value) ? picked.value : props.categories.find(name => name !== 'state' && name !== props.score) ?? props.categories[0] ?? 'state'),
   set: (name) => {
     picked.value = name
   },
@@ -56,7 +58,7 @@ const highlighted = shallowRef<BesideTarget>()
 const menu = useTemplateRef<ComponentPublicInstance>('menu')
 const menuElement = computed(() => (menu.value?.$el instanceof HTMLElement ? menu.value.$el : undefined))
 
-const scored = computed(() => props.rows.some(row => row.numbers.exact != null))
+const scored = computed(() => props.score != null && props.rows.some(row => row.numbers[props.score!] != null))
 const groups = computed(() => {
   const name = groupBy.value
   const byValue = new Map<string, CaseRow[]>()
@@ -72,7 +74,7 @@ const groups = computed(() => {
   }
   const colorRank = new Map(props.legendColors.map((color, index) => [color, index]))
   return [...byValue].map(([value, rows]) => {
-    const scores = rows.map(row => row.numbers.exact).filter((score): score is number => score != null)
+    const scores = props.score == null ? [] : rows.map(row => row.numbers[props.score!]).filter((score): score is number => score != null)
     const finished = rows.filter(row => row.state === 'passed' || row.state === 'failed' || row.state === 'errored' || row.state === 'timeout')
     const score = scored.value
       ? (scores.length === 0 ? null : scores.reduce((sum, item) => sum + item, 0) / scores.length)
@@ -110,7 +112,7 @@ const groups = computed(() => {
         </DropdownMenuPortal>
       </DropdownMenuRoot>
       <MetricBesideCard :anchor="menuElement" :target="highlighted" :definition-of="props.definitionOf" :values-of="props.valuesOf" />
-      <span class="muted">{{ scored ? 'mean exact score' : 'pass rate' }} per group, lowest first · bars colored like the chart · click a group to select it</span>
+      <span class="muted">{{ scored ? `mean ${props.labelOf(props.score!)}` : 'pass rate' }} per group, lowest first · bars colored like the chart · click a group to select it</span>
     </div>
     <ul :class="['m-0 p-0 list-none grid']">
       <li v-for="group in groups" :key="group.value">

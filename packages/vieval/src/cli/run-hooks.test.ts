@@ -191,7 +191,7 @@ describe('runVievalCli auto attempt reports', () => {
       ['case.ended', '0:chrome%20%231', 1, 1],
       ['case.ended', '1:chrome%20%232', 1, 1],
     ])
-    expect(events.every(event => event.schemaVersion === 2)).toBe(true)
+    expect(events.every(event => event.schemaVersion === 3)).toBe(true)
 
     const flaky = cases.find(record => record.caseName === 'chrome #2')
     expect(flaky).toMatchObject({ attemptIndex: 1, autoAttempt: 1, retryCount: 0, state: 'passed' })

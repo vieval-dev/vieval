@@ -13,7 +13,7 @@
  * - `retryIndex` is an immediate retry of one case inside one round (`autoRetry`).
  */
 
-import { localizedTextSchema, metricDefinedDataSchema } from 'vieval/events'
+import { graderSchema, localizedTextSchema, metricDefinedDataSchema, scoreDefinedDataSchema, scoreRecordedDataSchema } from 'vieval/events'
 
 import * as v from 'valibot'
 
@@ -21,6 +21,57 @@ import * as v from 'valibot'
 export const VIEWER_API_VERSION = 1
 
 const nullableNumber = v.nullable(v.number())
+
+// ---------------------------------------------------------------------------------------------------------------
+// Scores (the shapes of `vieval/core/scoring`)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** One named value over a group of cases (`ScoreSummary` of `vieval/core/scoring`). */
+export const scoreSummarySchema = v.object({
+  /** `sum / n`, or `null` when no case counted. */
+  mean: nullableNumber,
+  /** Cases that counted toward `mean`. */
+  n: v.number(),
+  /** Score name; `completion` and `passed` for the built-in summaries. */
+  name: v.string(),
+  sum: v.number(),
+  /** Settled cases that were not skipped. */
+  total: v.number(),
+  /** Cases that did not count, per reason (unscored reasons; `errored` / `timeout` for `completion`). */
+  unscored: v.record(v.string(), v.number()),
+})
+
+/** Scores of one group of cases, for example one task (`CaseScoring` of `vieval/core/scoring`). */
+export const caseScoringSchema = v.object({
+  completion: scoreSummarySchema,
+  passed: scoreSummarySchema,
+  /** Name of the headline score of the group, when it has one. */
+  primary: v.optional(v.string()),
+  scores: v.array(scoreSummarySchema),
+})
+
+/** Resolved headline and completion rate (`HeadlineResult` of `vieval/core/scoring`). */
+export const headlineResultSchema = v.object({
+  completion: scoreSummarySchema,
+  headline: v.variant('kind', [
+    v.object({ kind: v.literal('score'), score: scoreSummarySchema }),
+    v.object({ kind: v.literal('passed-cases'), score: scoreSummarySchema }),
+    v.object({ kind: v.literal('per-task'), tasks: v.array(v.object({ score: scoreSummarySchema, taskId: v.string() })) }),
+  ]),
+})
+
+/**
+ * Graders that produced each score of a group of cases, by score name: every distinct kind, model, and version seen in
+ * the score records (a record's own grader, else the definition's). Two groups whose graders of one score differ do
+ * not measure the same thing.
+ */
+export const scoreGradersSchema = v.record(v.string(), v.array(graderSchema))
+
+/** Score values of one case round: recorded or derived values, and unscored records with their reason. */
+export const caseScoresSchema = v.object({
+  unscored: v.record(v.string(), v.string()),
+  values: v.record(v.string(), v.number()),
+})
 
 // ---------------------------------------------------------------------------------------------------------------
 // Runs and the report hierarchy
@@ -32,17 +83,18 @@ const nullableNumber = v.nullable(v.number())
  * - `live-bus`: a run of this process (`vieval run --with-viewer`), fed by its in-process event bus.
  * - `live-tail`: a run written by another process; its `events.jsonl` is tailed incrementally.
  * - `offline`: a finished run read from its report directory.
- * - `legacy`: a report written with event schema version 1; only `run-summary.json` / `cases.jsonl` are read.
+ * - `unsupported`: a report written by an older vieval (event schema version below 3). It is listed, but its events are not
+ *   read and every route that opens it answers 422 ("This report was written by an older vieval. Run it again.").
  */
-export const runSourceSchema = v.picklist(['live-bus', 'live-tail', 'offline', 'legacy'])
+export const runSourceSchema = v.picklist(['live-bus', 'live-tail', 'offline', 'unsupported'])
 
 /**
  * Run state.
  *
  * `stale` means: no terminal event, and the last event is older than the stale threshold (the writer probably
- * died). It is shown, not guessed as failed.
+ * died). It is shown, not guessed as failed. `unsupported` is the state of an `unsupported` source: a run that cannot be read.
  */
-export const runStateSchema = v.picklist(['running', 'stale', 'ended', 'interrupted', 'legacy'])
+export const runStateSchema = v.picklist(['running', 'stale', 'ended', 'interrupted', 'unsupported'])
 
 export const runIdentitySchema = v.object({
   attemptId: v.string(),
@@ -77,9 +129,10 @@ export const runListItemSchema = v.object({
   endedAt: v.optional(v.string()),
   /** Eval-matrix axes of the run's tasks and their distinct values, sorted, like `matrix` for the run matrix. */
   evalMatrix: v.record(v.string(), v.array(v.string())),
-  exactAverage: nullableNumber,
-  hybridAverage: nullableNumber,
-  judgeAverage: nullableNumber,
+  /** Headline of the run: from `run-summary.json` when written, else from its events. `null` before any case settled. */
+  headline: v.nullable(headlineResultSchema),
+  /** Latest `score.defined` of each score in `headline`, for its label and description. */
+  headlineDefinitions: v.array(scoreDefinedDataSchema),
   lastEventAt: v.optional(v.string()),
   lastSeq: v.number(),
   /**
@@ -141,11 +194,6 @@ export const tryNodeSchema = v.object({
   state: v.union([caseStateSchema, v.literal('retried')]),
 })
 
-export const scoreValuesSchema = v.object({
-  exact: v.optional(v.number()),
-  judge: v.optional(v.number()),
-})
-
 export const caseRoundSchema = v.object({
   endedAt: v.optional(v.string()),
   errorMessage: v.optional(v.string()),
@@ -159,8 +207,8 @@ export const caseRoundSchema = v.object({
   requeueDelayMs: v.optional(v.number()),
   roundIndex: v.number(),
   roundIndexInferred: v.boolean(),
-  /** Scores recorded with `recordScore` during this round. */
-  scores: scoreValuesSchema,
+  /** Scores of the round's last try: recorded with `recordScore` / `recordUnscored`, or derived. */
+  scores: caseScoresSchema,
   startedAt: v.string(),
   state: caseStateSchema,
   tries: v.array(tryNodeSchema),
@@ -189,7 +237,7 @@ export const caseNodeSchema = v.object({
   projectId: v.optional(v.string()),
   rounds: v.array(caseRoundSchema),
   /** Scores of the last round. */
-  scores: scoreValuesSchema,
+  scores: caseScoresSchema,
   startedAt: v.string(),
   /** State of the last round (the final state). */
   state: caseStateSchema,
@@ -221,12 +269,10 @@ export const taskNodeSchema = v.object({
   matrix: v.optional(taskMatrixSchema),
   projectId: v.string(),
   roundCount: v.number(),
-  /** Score of the task: every round's case outcome, averaged (the rule of `describeTask`). */
-  scores: v.object({
-    exact: nullableNumber,
-    hybrid: nullableNumber,
-    judge: nullableNumber,
-  }),
+  /** Graders that produced each score of the task. */
+  scoreGraders: scoreGradersSchema,
+  /** Scores of the task over every round's case outcome (`scoreCases`, the rule of `describeTask`). */
+  scoring: caseScoringSchema,
   startedAt: v.optional(v.string()),
   state: taskStateSchema,
 })
@@ -310,6 +356,8 @@ export const runSnapshotSchema = v.object({
   current: currentPositionSchema,
   endedAt: v.optional(v.string()),
   eventCounts: v.record(v.string(), v.number()),
+  /** Headline of the run from its events (`resolveHeadline` over the tasks), `null` before any case settled. */
+  headline: v.nullable(headlineResultSchema),
   identity: runIdentitySchema,
   interruptSignal: v.optional(v.string()),
   /** Lines of `events.jsonl` that were not valid envelopes (live tail only). */
@@ -317,6 +365,8 @@ export const runSnapshotSchema = v.object({
   progress: runProgressSchema,
   projects: v.array(projectNodeSchema),
   runKey: v.string(),
+  /** Latest `score.defined` of each score of the run. */
+  scoreDefinitions: v.array(scoreDefinedDataSchema),
   /** Highest applied `seq`. Subscribe to the stream with `?after=<seq>` to continue from this snapshot. */
   seq: v.number(),
   /** Missing `seq` numbers seen while reading; duplicates are dropped silently. */
@@ -327,9 +377,7 @@ export const runSnapshotSchema = v.object({
   /** Official summary written after the run (`run-summary.json`), when present. */
   summary: v.optional(v.object({
     caseSummary: v.optional(caseCountsSchema),
-    exactAverage: nullableNumber,
-    hybridAverage: nullableNumber,
-    judgeAverage: nullableNumber,
+    headline: v.optional(headlineResultSchema),
   })),
   tasks: v.array(taskNodeSchema),
 })
@@ -432,6 +480,14 @@ export const caseDetailSchema = v.object({
   metricDefinitions: v.array(metricDefinedDataSchema),
   metrics: v.array(metricEntrySchema),
   output: v.optional(v.unknown()),
+  /** Latest `score.defined` of each score of the case's task (label, description, combination, grader). */
+  scoreDefinitions: v.array(scoreDefinedDataSchema),
+  /** Every `score.recorded` of the case, with its rationale, grader, and metadata, in event order. */
+  scoreRecords: v.array(v.object({
+    record: scoreRecordedDataSchema,
+    roundIndex: v.optional(v.number()),
+    seq: v.number(),
+  })),
   taskDisplayName: v.string(),
 })
 
@@ -509,37 +565,44 @@ export const metricsResponseSchema = v.object({
       sum: v.number(),
     }),
   })),
-})
-
-const scoreTripleSchema = v.object({
-  exact: nullableNumber,
-  hybrid: nullableNumber,
-  judge: nullableNumber,
+  /** Latest `score.defined` of each score in `scores`. */
+  scoreDefinitions: v.array(scoreDefinedDataSchema),
+  /** Scores beside the metrics: each case's counted value (the last round), with the summary of the selection. */
+  scores: v.array(v.object({
+    name: v.string(),
+    points: v.array(v.object({ caseId: v.string(), roundIndex: v.optional(v.number()), taskId: v.string(), value: v.number() })),
+    summary: scoreSummarySchema,
+  })),
 })
 
 export const scoresResponseSchema = v.object({
   byRound: v.array(v.object({
     roundIndex: v.number(),
-    ...scoreTripleSchema.entries,
+    scoring: caseScoringSchema,
     taskId: v.string(),
   })),
   byTask: v.array(v.object({
     displayName: v.string(),
     matrix: v.optional(taskMatrixSchema),
-    ...scoreTripleSchema.entries,
+    scoring: caseScoringSchema,
     taskId: v.string(),
   })),
   cases: v.array(v.object({
     caseId: v.string(),
     name: v.string(),
-    scores: scoreValuesSchema,
+    scores: caseScoresSchema,
     state: caseStateSchema,
     taskId: v.string(),
   })),
-  /** From the run's events (all rounds, `describeTask` rule). */
-  overall: scoreTripleSchema,
+  /** Latest `score.defined` of each score of the run. */
+  definitions: v.array(scoreDefinedDataSchema),
+  /** From the run's events (all rounds, `describeTask` rule): the headline, and each score pooled over the tasks. */
+  overall: v.object({
+    headline: v.nullable(headlineResultSchema),
+    scores: v.array(scoreSummarySchema),
+  }),
   /** From `run-summary.json`, once written. */
-  summary: v.optional(scoreTripleSchema),
+  summary: v.optional(headlineResultSchema),
 })
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -616,10 +679,13 @@ export const matrixCellSchema = v.object({
   /** Every run that executed this cell, oldest first (one point per run for the cell's sparkline). */
   history: v.array(v.object({
     attemptId: v.string(),
+    /** Completion rate of the run's task. */
+    completion: nullableNumber,
     counts: caseCountsSchema,
     coverage: cellCoverageSchema,
-    exact: nullableNumber,
     runKey: v.string(),
+    /** Mean of the cell's primary score in this run, or `null`. */
+    score: nullableNumber,
     startedAt: v.optional(v.string()),
     state: v.string(),
   })),
@@ -629,16 +695,16 @@ export const matrixCellSchema = v.object({
    */
   latest: v.object({
     attemptId: v.string(),
-    /** Exact score of every case of the run (`null`: no score), for the spread of the score under the mean. */
+    /** Primary score of every case of the run (`null`: no value), for the spread of the score under the mean. */
     caseScores: v.array(nullableNumber),
     /** Expected cases of the task (`case.started.total`); `undefined` until its first case started. */
     caseTotal: v.optional(v.number()),
     counts: caseCountsSchema,
     coverage: cellCoverageSchema,
-    exact: nullableNumber,
     experimentId: v.string(),
-    judge: nullableNumber,
     runKey: v.string(),
+    /** Scores of the task in this run. */
+    scoring: caseScoringSchema,
     startedAt: v.optional(v.string()),
     /** Task state (see `TaskNode.state`). */
     state: v.string(),
@@ -666,6 +732,8 @@ export const matrixResponseSchema = v.object({
   cells: v.array(matrixCellSchema),
   /** Runs that were read to build the cells. */
   runCount: v.number(),
+  /** Latest `score.defined` of each score in the cells. */
+  scoreDefinitions: v.array(scoreDefinedDataSchema),
 })
 
 export const screenshotTimelineSchema = v.object({
@@ -751,19 +819,16 @@ export const comparedRunSchema = v.object({
   attemptId: v.string(),
   counts: caseCountsSchema,
   durationMs: v.optional(v.number()),
-  exactAverage: nullableNumber,
   experimentId: v.string(),
-  hybridAverage: nullableNumber,
-  judgeAverage: nullableNumber,
+  headline: v.nullable(headlineResultSchema),
   runKey: v.string(),
   startedAt: v.optional(v.string()),
   state: runStateSchema,
 })
 
 export const comparisonCellSchema = v.object({
-  exact: v.optional(v.number()),
-  judge: v.optional(v.number()),
   roundCount: v.number(),
+  scores: caseScoresSchema,
   state: caseStateSchema,
 })
 
@@ -773,14 +838,20 @@ export const comparisonResponseSchema = v.object({
     id: v.string(),
     label: v.string(),
     runs: v.array(comparedRunSchema),
+    /** Graders that produced each score in the column's runs. */
+    scoreGraders: scoreGradersSchema,
   })),
+  /** Primary score the rows compare, when the columns share one. */
+  primary: v.optional(v.string()),
   /** Rows: one per case name; `cells[columnId]` is the case result in that column (latest run of the column). */
   rows: v.array(v.object({
     caseName: v.string(),
     cells: v.record(v.string(), comparisonCellSchema),
-    /** `true` when the case state or exact score differs between columns. */
+    /** `true` when the case state or the primary score differs between columns. */
     changed: v.boolean(),
   })),
+  /** Latest `score.defined` of each score in the cells. */
+  scoreDefinitions: v.array(scoreDefinedDataSchema),
   summary: v.object({
     changed: v.number(),
     rows: v.number(),
@@ -798,6 +869,8 @@ export type CaseCounts = v.InferOutput<typeof caseCountsSchema>
 export type CaseDetail = v.InferOutput<typeof caseDetailSchema>
 export type CaseNode = v.InferOutput<typeof caseNodeSchema>
 export type CaseRound = v.InferOutput<typeof caseRoundSchema>
+export type CaseScores = v.InferOutput<typeof caseScoresSchema>
+export type CaseScoring = v.InferOutput<typeof caseScoringSchema>
 export type CaseState = v.InferOutput<typeof caseStateSchema>
 export type CellCoverage = v.InferOutput<typeof cellCoverageSchema>
 export type ComparedRun = v.InferOutput<typeof comparedRunSchema>
@@ -809,6 +882,7 @@ export type EvidenceLink = v.InferOutput<typeof evidenceLinkSchema>
 export type ExternalLogsResponse = v.InferOutput<typeof externalLogsResponseSchema>
 export type FileEntry = v.InferOutput<typeof fileEntrySchema>
 export type FileTreeResponse = v.InferOutput<typeof fileTreeResponseSchema>
+export type HeadlineResult = v.InferOutput<typeof headlineResultSchema>
 export type ImagePreview = v.InferOutput<typeof imagePreviewSchema>
 export type JsonlPage = v.InferOutput<typeof jsonlPageSchema>
 export type LogLine = v.InferOutput<typeof logLineSchema>
@@ -832,7 +906,10 @@ export type RunProgress = v.InferOutput<typeof runProgressSchema>
 export type RunSnapshot = v.InferOutput<typeof runSnapshotSchema>
 export type RunSource = v.InferOutput<typeof runSourceSchema>
 export type RunState = v.InferOutput<typeof runStateSchema>
+export type ScoreDefinition = v.InferOutput<typeof scoreDefinedDataSchema>
+export type ScoreGraders = v.InferOutput<typeof scoreGradersSchema>
 export type ScoresResponse = v.InferOutput<typeof scoresResponseSchema>
+export type ScoreSummary = v.InferOutput<typeof scoreSummarySchema>
 export type ScreenshotTimeline = v.InferOutput<typeof screenshotTimelineSchema>
 export type TaskMatrix = v.InferOutput<typeof taskMatrixSchema>
 export type TaskNode = v.InferOutput<typeof taskNodeSchema>

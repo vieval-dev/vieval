@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { MetricDefinition, RunListItem } from '../../../src/shared/contract'
+import type { RunListItem } from '../../../src/shared/contract'
 import type { ViewTab } from '../components/ViewTabs.vue'
 import type { Route } from '../router'
 
@@ -14,16 +14,19 @@ import LogView from '../components/LogView.vue'
 import MetricInfo from '../components/MetricInfo.vue'
 import ObjectTree from '../components/ObjectTree.vue'
 import PageHeader from '../components/PageHeader.vue'
+import ScoreBadge from '../components/ScoreBadge.vue'
 import StateBadge from '../components/StateBadge.vue'
 import StateView from '../components/StateView.vue'
 import ViewTabs from '../components/ViewTabs.vue'
 
+import { groupInferenceCalls } from '../../../src/shared/inference'
 import { api } from '../api'
-import { metricLabel } from '../caseMetrics'
+import { columnDefinitions, metricLabel } from '../caseMetrics'
 import { useRunLive } from '../composables/useRunLive'
 import { useStatusFavicon } from '../composables/useStatusFavicon'
-import { formatDateTime, formatDuration, formatScore, formatTime, previewValue } from '../format'
+import { formatDateTime, formatDuration, formatTime, previewValue } from '../format'
 import { href, navigate } from '../router'
+import { caseScoreText, isGraderCall, primaryScoreName, scoreDefinition } from '../scores'
 import { runSwitcherOptions } from '../switcher'
 
 /**
@@ -43,12 +46,41 @@ const taskMetrics = useQuery({
   key: () => ['runs', props.route.runKey, 'task', props.route.taskId, 'metrics'],
   query: () => api.metrics(props.route.runKey, { taskId: props.route.taskId }),
 })
-const definitions = computed(() => new Map<string, MetricDefinition>((detail.data.value?.metricDefinitions ?? []).map(definition => [definition.name, definition])))
+const definitions = computed(() => columnDefinitions(detail.data.value?.metricDefinitions ?? [], detail.data.value?.scoreDefinitions ?? []))
 const labelOf = (name: string) => metricLabel(name, definitions.value)
 function taskValuesOf(name: string): unknown[] {
   const data = taskMetrics.data.value
-  return [...(data?.numeric.find(series => series.name === name)?.points ?? []), ...(data?.nonNumeric.find(series => series.name === name)?.values ?? [])].map(entry => entry.value)
+  return [
+    ...(data?.numeric.find(series => series.name === name)?.points ?? []),
+    ...(data?.nonNumeric.find(series => series.name === name)?.values ?? []),
+    ...(data?.scores.find(series => series.name === name)?.points ?? []),
+  ].map(entry => entry.value)
 }
+
+/**
+ * Every score of the case, the primary first: the scores its task defined and the ones it recorded, each with the
+ * last record of the last round (rationale, grader, metadata) and the grader's model calls in this case.
+ */
+const caseScores = computed(() => {
+  const data = detail.data.value
+  if (data == null)
+    return []
+  const names = [...new Set([...data.scoreDefinitions.map(definition => definition.name), ...Object.keys(data.scores.values), ...Object.keys(data.scores.unscored)])]
+  const primary = primaryScoreName(data.scoreDefinitions, names)
+  const lastRound = data.rounds.at(-1)?.roundIndex ?? 0
+  const calls = groupInferenceCalls(data.inference)
+  return names.toSorted((a, b) => Number(b === primary) - Number(a === primary)).map((name) => {
+    const record = data.scoreRecords.findLast(entry => entry.record.name === name && (entry.roundIndex ?? 0) === lastRound)?.record
+    const graderId = record?.grader?.id ?? scoreDefinition(name, data.scoreDefinitions)?.grader?.id
+    return {
+      callCount: graderId == null ? 0 : calls.filter(call => isGraderCall(call, graderId)).length,
+      callsHref: graderId == null ? undefined : href({ ...props.route, grader: graderId, tab: 'inference' }),
+      name,
+      record,
+      text: caseScoreText(data.scores, name),
+    }
+  })
+})
 const timeline = useQuery({
   key: () => ['runs', props.route.runKey, 'case', props.route.taskId, props.route.caseId, 'timeline'],
   query: () => api.timeline(props.route.runKey, ref.value),
@@ -68,7 +100,8 @@ const tabs = computed<ViewTab<Tab>[]>(() => [
   // Calls, not events: every call writes a request, a response, and two events per tool call.
   { count: detail.data.value == null ? undefined : detail.data.value.inference.filter(entry => entry.event === 'inference.requested').length, icon: 'i-mingcute-robot-line', label: 'Inference', value: 'inference' },
 ])
-const tabRoute = (value: Tab): Route => ({ ...props.route, tab: value === 'overview' ? undefined : value })
+// Switching tabs drops the grader filter of the inference tab.
+const tabRoute = (value: Tab): Route => ({ ...props.route, grader: undefined, tab: value === 'overview' ? undefined : value })
 // An unknown `tab` in the address shows the overview.
 const tab = computed<Tab>({
   get: () => tabs.value.find(item => item.value === props.route.tab)?.value ?? 'overview',
@@ -106,8 +139,7 @@ const running = computed(() => detail.data.value?.state === 'running')
     <template #actions>
       <template v-if="detail.data.value">
         <StateBadge :state="detail.data.value.state" />
-        <span class="badge state-neutral">exact {{ formatScore(detail.data.value.scores.exact) }}</span>
-        <span v-if="detail.data.value.scores.judge != null" class="badge state-neutral">judge {{ formatScore(detail.data.value.scores.judge) }}</span>
+        <ScoreBadge v-for="score in caseScores" :key="score.name" :call-count="score.callCount" :calls-href="score.callsHref" :definitions="detail.data.value.scoreDefinitions" :name="score.name" :record="score.record" :text="score.text" />
         <span class="badge state-neutral">{{ formatDuration(detail.data.value.durationMs) }}</span>
         <span v-if="running" class="badge state-running"><span class="vv-pulse i-mingcute-airdrop-line" aria-hidden="true" />live</span>
       </template>
@@ -156,12 +188,29 @@ const running = computed(() => detail.data.value?.state === 'running')
           </div>
           <section class="card">
             <h2 class="card-title">
-              <span class="i-mingcute-dashboard-3-line" aria-hidden="true" />Metrics <span class="text-xs muted font-normal">{{ detail.data.value.metrics.length }}</span>
+              <span class="i-mingcute-dashboard-3-line" aria-hidden="true" />Scores and metrics <span class="text-xs muted font-normal">{{ caseScores.length + detail.data.value.metrics.length }}</span>
             </h2>
-            <StateView :empty="detail.data.value.metrics.length === 0" empty-text="No metrics recorded for this case">
+            <StateView :empty="detail.data.value.metrics.length === 0 && caseScores.length === 0" empty-text="No scores or metrics recorded for this case">
               <div :class="['overflow-auto max-h-96']">
                 <table class="w-full">
                   <tbody>
+                    <!-- Scores first, as percentages; the badges above open what graded them. -->
+                    <tr v-for="score in caseScores" :key="`score:${score.name}`" :class="['border-b border-neutral-100/70 dark:border-neutral-900', 'max-md:(flex flex-wrap items-baseline py-1)']" data-testid="case-score-row">
+                      <td :class="['td mono text-xs muted whitespace-nowrap max-md:hidden']">
+                        score
+                      </td>
+                      <td :class="['td text-xs whitespace-nowrap', definitions.get(score.name)?.label == null && 'mono', 'max-md:(flex-1 min-w-0 truncate py-0.5 font-medium)']">
+                        <MetricInfo :name="score.name" :definition="definitions.get(score.name)" :values="taskValuesOf(score.name)" :current="detail.data.value.scores.values[score.name]">
+                          <span :class="['cursor-help']">{{ labelOf(score.name) }}</span>
+                        </MetricInfo>
+                      </td>
+                      <td :class="['td mono text-xs break-all', 'max-md:(order-last basis-full py-0.5)']">
+                        {{ score.text }}
+                      </td>
+                      <td :class="['td mono muted text-xs whitespace-nowrap', 'max-md:py-0.5']">
+                        round {{ detail.data.value.rounds.at(-1)?.roundIndex ?? 0 }}
+                      </td>
+                    </tr>
                     <!-- Phones: name and round on one line, the value below it at full width. -->
                     <tr v-for="metric in detail.data.value.metrics" :key="metric.seq" :class="['border-b border-neutral-100/70 dark:border-neutral-900', 'max-md:(flex flex-wrap items-baseline py-1)']">
                       <td :class="['td mono text-xs muted whitespace-nowrap max-md:hidden']">
@@ -201,7 +250,7 @@ const running = computed(() => detail.data.value?.state === 'running')
         </template>
 
         <StateView v-else-if="tab === 'inference'" :empty="detail.data.value.inference.length === 0" empty-text="No inference events" empty-hint="Model calls made through vieval's inference executors appear here.">
-          <InferencePanel :events="detail.data.value.inference" />
+          <InferencePanel :events="detail.data.value.inference" :grader="props.route.grader" @clear-grader="navigate({ ...props.route, grader: undefined })" />
         </StateView>
       </ViewTabs>
     </template>

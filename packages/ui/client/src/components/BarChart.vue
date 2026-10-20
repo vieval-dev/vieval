@@ -36,7 +36,7 @@ const width = useElementWidth(root, 640)
 const labelWidth = computed(() => Math.min(260, Math.round(width.value * 0.3)))
 const plotWidth = computed(() => width.value - labelWidth.value - 70)
 
-/** Series with at least one value; an all-empty series (e.g. judge scores of an eval without a judge) is dropped. */
+/** Series with at least one value; an all-empty series (e.g. a score only the tasks of another eval record) is dropped. */
 const shown = computed(() => props.series.map((name, index) => ({ index, name })).filter(({ index }) => props.data.some(datum => datum.values[index] != null)))
 const rows = computed(() => {
   let y = 4

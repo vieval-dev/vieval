@@ -2,7 +2,7 @@
 import type { ScaleContinuousNumeric } from 'd3'
 import type { ComponentPublicInstance } from 'vue'
 
-import type { CaseNode, MetricDefinition } from '../../../src/shared/contract'
+import type { CaseNode } from '../../../src/shared/contract'
 import type { CaseFilters, CaseRow } from '../caseMetrics'
 import type { BesideTarget } from './MetricBesideCard.vue'
 import type { ParallelAxis } from './ParallelCoordinates.vue'
@@ -29,8 +29,8 @@ import SegmentedControl from './SegmentedControl.vue'
 import StateView from './StateView.vue'
 
 import { api } from '../api'
-import { buildCaseTable, matchesFilters, metricDefinition, metricLabel, metricScale, separationOf } from '../caseMetrics'
-import { formatTick } from '../format'
+import { buildCaseTable, columnDefinitions, formatColumnValue, matchesFilters, metricDefinition, metricLabel, metricScale, separationOf } from '../caseMetrics'
+import { formatScore, formatTick } from '../format'
 import { href, navigate } from '../router'
 
 /**
@@ -56,8 +56,8 @@ const metrics = useQuery({
 watch(() => props.refreshKey, () => void metrics.refetch())
 
 const table = computed(() => buildCaseTable(props.cases, metrics.data.value))
-// Labels, descriptions, and units the task announced with `metric.defined`.
-const definitions = computed(() => new Map<string, MetricDefinition>((metrics.data.value?.definitions ?? []).map(definition => [definition.name, definition])))
+// Labels, descriptions, and units the task announced with `metric.defined`, and its scores' `score.defined`.
+const definitions = computed(() => columnDefinitions(metrics.data.value?.definitions ?? [], metrics.data.value?.scoreDefinitions ?? []))
 const labelOf = (name: string) => metricLabel(name, definitions.value)
 /** Every case's value of one metric or category, for the distribution in its hover card. */
 const valuesOf = (name: string) => table.value.rows.map(row => row.numbers[name] ?? row.categories[name])
@@ -84,9 +84,10 @@ const separation = computed(() => separationOf(table.value))
 const pickedMetrics = shallowRef<string[]>()
 const pickedCategories = shallowRef<string[]>()
 const numericAxes = computed<string[]>({
-  // Ranked by separation; metrics without one (scores, one-outcome metrics) come after, in recording order.
+  // The primary score first (what the cases are read by), then ranked by separation; metrics without one (the other
+  // scores, one-outcome metrics) come after, in recording order.
   get: () => pickedMetrics.value ?? table.value.groups.map(group => group.representative)
-    .toSorted((a, b) => (separation.value.get(b)?.auc ?? 0) - (separation.value.get(a)?.auc ?? 0))
+    .toSorted((a, b) => Number(b === table.value.primary) - Number(a === table.value.primary) || (separation.value.get(b)?.auc ?? 0) - (separation.value.get(a)?.auc ?? 0))
     .slice(0, DEFAULT_METRIC_AXES),
   set: (names) => {
     pickedMetrics.value = names
@@ -299,31 +300,31 @@ watch(selection, (value) => {
 })
 
 const selectedRows = computed(() => table.value.rows.filter(row => selected.value.has(row.key)))
-/** Whether the cases carry an exact score: the selection is then summarized by its mean score, not its pass rate. */
-const scored = computed(() => table.value.rows.some(row => row.numbers.exact != null))
 /**
- * What the selection holds: the mean exact score of its scored cases in a scored eval (where a score of 0 is a result,
- * not a failure), else the share of finished cases that passed.
+ * What the selection holds: the mean primary score of its scored cases in a scored eval (where a score of 0 is a
+ * result, not a failure), else the share of finished cases that passed.
  */
 const selectionSummary = computed(() => {
   const rows = selectedRows.value
-  if (scored.value) {
-    const scores = rows.map(row => row.numbers.exact).filter((value): value is number => value != null)
-    return { label: 'exact', value: scores.length === 0 ? '—' : `${((scores.reduce((sum, value) => sum + value, 0) / scores.length) * 100).toFixed(1)}%` }
+  const primary = table.value.primary
+  if (primary != null) {
+    const scores = rows.map(row => row.numbers[primary]).filter((value): value is number => value != null)
+    return { label: labelOf(primary), value: formatScore(scores.length === 0 ? null : scores.reduce((sum, value) => sum + value, 0) / scores.length) }
   }
   const finished = rows.filter(row => row.state === 'passed' || row.state === 'failed' || row.state === 'errored' || row.state === 'timeout')
   return { label: 'pass', value: finished.length === 0 ? '—' : `${((finished.filter(row => row.state === 'passed').length / finished.length) * 100).toFixed(1)}%` }
 })
 
 /**
- * Color by the case state, a category, or a metric in steps. When every finished case ended the same way (a scored
- * eval: every case passed), the state paints one color, so the chart opens colored by the exact score instead.
+ * Color by the case state, a category, or a metric in steps. A task with a primary score opens colored by it (a
+ * failed case scores 0, so the score already tells wrong results apart, and it ranks the passed ones too); without
+ * one, by the state.
  */
 const pickedColor = shallowRef<string>()
 const colorOptions = computed(() => [...table.value.categories, ...numericAxes.value])
 const defaultColor = computed(() => {
-  const states = new Set(table.value.rows.filter(row => row.state !== 'running' && row.state !== 'skipped').map(row => row.state))
-  return states.size <= 1 && colorOptions.value.includes('exact') ? 'exact' : 'state'
+  const primary = table.value.primary
+  return primary != null && colorOptions.value.includes(primary) ? primary : 'state'
 })
 const colorBy = computed<string>({
   get: () => (pickedColor.value != null && colorOptions.value.includes(pickedColor.value) ? pickedColor.value : defaultColor.value),
@@ -345,8 +346,8 @@ function sequentialSlot(index: number, count: number, lowStandsOut = false) {
   const slot = count <= 1 ? SEQUENTIAL_STEPS : Math.round(1 + (index * (SEQUENTIAL_STEPS - 1)) / (count - 1))
   return lowStandsOut ? SEQUENTIAL_STEPS + 1 - slot : slot
 }
-/** Whether higher is better for a metric: the scores, and metrics defined with `better: 'higher'`. */
-const higherIsBetter = (name: string) => name === 'exact' || name === 'judge' || metricDefinition(name, definitions.value)?.better === 'higher'
+/** Whether higher is better for a metric: the scores (their columns say so), and metrics defined with `better: 'higher'`. */
+const higherIsBetter = (name: string) => metricDefinition(name, definitions.value)?.better === 'higher'
 
 /** One entry of the color legend; clicking it selects its cases (`select`), and `active` marks a selected one. */
 interface LegendItem { active?: boolean, color: string, count: number, label: string, select?: () => void }
@@ -367,11 +368,12 @@ const palette = computed<{ colorOf: (row: CaseRow) => string, legend: LegendItem
     return { colorOf: row => `var(--mark-${row.state})`, legend: (categoryValues.value.state ?? []).map(value => categoryItem(value, `var(--mark-${value})`)) }
   const values = categoryValues.value[name]
   if (values != null) {
-    // A two-valued score or count (`exact` 0 / 1) is ordered: low to high along the sequential ramp, not series hues.
+    // A two-valued score or count (a 0 / 1 score) is ordered: low to high along the sequential ramp, not series hues.
     if (values.every(value => value.trim() !== '' && Number.isFinite(Number(value)))) {
       const ordered = values.toSorted((a, b) => Number(a) - Number(b))
       const slots = new Map(ordered.map((value, index) => [value, `var(--seq-${sequentialSlot(index, ordered.length, higherIsBetter(name))})`]))
-      return { colorOf: row => slots.get(row.categories[name] ?? '') ?? 'var(--chart-grid)', legend: ordered.map(value => categoryItem(value, slots.get(value)!)) }
+      const definition = metricDefinition(name, definitions.value)
+      return { colorOf: row => slots.get(row.categories[name] ?? '') ?? 'var(--chart-grid)', legend: ordered.map(value => ({ ...categoryItem(value, slots.get(value)!), label: formatColumnValue(Number(value), definition) })) }
     }
     const slots = new Map(values.slice(0, SERIES_SLOTS).map((value, index) => [value, `var(--series-${index + 1})`]))
     const legend = [...slots].map(([label, color]) => categoryItem(label, color))
@@ -401,7 +403,7 @@ const palette = computed<{ colorOf: (row: CaseRow) => string, legend: LegendItem
         active: range != null && range[0] === band.from && range[1] === to,
         color: `var(--seq-${sequentialSlot(index, bands.length, higherIsBetter(name))})`,
         count: rows.filter(row => row.numbers[name] != null && bandOf(row.numbers[name]!) === index).length,
-        label: `${formatTick(band.from)}–${formatTick(band.to)}`,
+        label: metricDefinition(name, definitions.value)?.score == null ? `${formatTick(band.from)}–${formatTick(band.to)}` : `${formatScore(band.from)}–${formatScore(band.to)}`,
         select: () => onBrush(name, range != null && range[0] === band.from && range[1] === to ? null : [band.from, to]),
       }
     }),
@@ -509,7 +511,7 @@ onKeyStroke('Enter', (event) => {
   navigate({ caseId: row.caseId, name: 'case', runKey: props.runKey, taskId: row.taskId })
 })
 const caseHref = (row: CaseRow) => href({ caseId: row.caseId, name: 'case', runKey: props.runKey, taskId: row.taskId })
-const unitOf = (name: string) => definitions.value.get(name)?.unit
+const formatOf = (name: string, value: number) => formatColumnValue(value, metricDefinition(name, definitions.value))
 </script>
 
 <template>
@@ -596,14 +598,14 @@ const unitOf = (name: string) => definitions.value.get(name)?.unit
             </div>
             <ParallelSets
               v-else-if="view === 'sets'" key="sets"
-              :axes="setAxes" :color-of="colorOf" :filters="filters" :label-of="labelOf" :rows="table.rows" :selected="selected"
+              :axes="setAxes" :color-of="colorOf" :filters="filters" :label-of="labelOf" :rows="table.rows" :score="table.primary" :selected="selected"
               @pick="onPick"
               @reorder="names => axisOrder = [...names, ...axes.map(axis => axis.name).filter(name => !names.includes(name))]"
               @inspect="(name, box) => inspected = name == null || box == null ? undefined : { left: box.left, name, top: box.bottom + 6 }"
             />
             <GroupBars
               v-else-if="view === 'groups'" key="groups"
-              :categories="groupCategories" :color-of="colorOf" :definition-of="name => metricDefinition(name, definitions)" :filters="filters" :label-of="labelOf" :legend-colors="palette.legend.map(item => item.color)" :rows="table.rows" :values-of="valuesOf"
+              :categories="groupCategories" :color-of="colorOf" :definition-of="name => metricDefinition(name, definitions)" :filters="filters" :label-of="labelOf" :legend-colors="palette.legend.map(item => item.color)" :rows="table.rows" :score="table.primary" :values-of="valuesOf"
               @pick="onPick"
             />
             <div v-else-if="view === 'pairs'" key="pairs" :class="['grid gap-3']">
@@ -650,7 +652,7 @@ const unitOf = (name: string) => definitions.value.get(name)?.unit
         >
           <AnimatedContent>
             <div v-if="shownCard" :class="['w-80 max-w-[calc(100vw-2rem)]']">
-              <CaseCard :active-axis="shownCard.axis" :axes="axes" :href="caseHref(shownCard.row)" :label-of="labelOf" :pinned="shownCard.pinned" :row="shownCard.row" :rows="table.rows" :scales="scales" :unit-of="unitOf" :value-counts="table.valueCounts" @unpin="pinned = undefined" />
+              <CaseCard :active-axis="shownCard.axis" :axes="axes" :href="caseHref(shownCard.row)" :label-of="labelOf" :pinned="shownCard.pinned" :row="shownCard.row" :rows="table.rows" :scales="scales" :format-of="formatOf" :value-counts="table.valueCounts" @unpin="pinned = undefined" />
             </div>
             <PopoverArrow :class="['floating-arrow']" />
           </AnimatedContent>
@@ -673,7 +675,7 @@ const unitOf = (name: string) => definitions.value.get(name)?.unit
             The case's value on every axis and where it sits among all cases.
           </DrawerDescription>
           <div v-if="pinnedRow" :class="['overflow-y-auto min-h-0']">
-            <CaseCard :active-axis="pinned?.axis ?? undefined" :axes="axes" :href="caseHref(pinnedRow)" :label-of="labelOf" layout="drawer" pinned :row="pinnedRow" :rows="table.rows" :scales="scales" :unit-of="unitOf" :value-counts="table.valueCounts" @unpin="pinned = undefined" />
+            <CaseCard :active-axis="pinned?.axis ?? undefined" :axes="axes" :href="caseHref(pinnedRow)" :label-of="labelOf" layout="drawer" pinned :row="pinnedRow" :rows="table.rows" :scales="scales" :format-of="formatOf" :value-counts="table.valueCounts" @unpin="pinned = undefined" />
           </div>
         </DrawerContent>
       </DrawerPortal>

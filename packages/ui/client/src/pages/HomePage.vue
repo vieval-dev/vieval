@@ -30,9 +30,9 @@ const runCount = computed(() => workspaces.value.reduce((sum, workspace) => sum 
 /**
  * Card data of a project: its matrix axes, with the score of its newest run.
  *
- * The score is the newest run's own, like the state and the case bar beside it, and empty when that run scored no case.
- * It previously was the best exact score of any run, so a 3-case smoke run that got everything right showed 100% above
- * a newer full run's 94%.
+ * The score is the newest run's own headline, like the state and the case bar beside it, and empty when that run
+ * scored no case. It previously was the best score of any run, so a 3-case smoke run that got everything right showed
+ * 100% above a newer full run's 94%.
  */
 function toCard(project: ProjectEntry) {
   const matrix = mergeMatrices(project.runs.map(run => run.matrix))
@@ -61,8 +61,8 @@ const sections = computed(() => workspaces.value.map(workspace => ({ id: workspa
           v-for="project in section.projects"
           :key="project.id"
           :href="href({ name: 'scope', project: project.id, workspace: section.id })"
-          :score="project.latest.exactAverage"
-          score-label="exact score of the newest run"
+          :headline="project.latest.headline"
+          :definitions="project.latest.headlineDefinitions"
           :state="project.latest.state"
           :counts="project.latest.counts"
           :run="project.latest"

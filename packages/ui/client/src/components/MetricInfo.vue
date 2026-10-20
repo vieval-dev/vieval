@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import type { MetricDefinition } from '../../../src/shared/contract'
+import type { ScoreSummary } from '../../../src/shared/contract'
+import type { ColumnDefinition } from '../scores'
 
 import { HoverCardArrow, HoverCardContent, HoverCardPortal, HoverCardRoot, HoverCardTrigger } from 'reka-ui'
 
@@ -10,9 +11,11 @@ import MetricSummary from './MetricSummary.vue'
  * Hover card of one metric around any trigger (a chip, a chart caption, a list row): shows {@link MetricSummary}.
  */
 const props = defineProps<{
+  completion?: ScoreSummary
   current?: number | string
-  definition?: MetricDefinition
+  definition?: ColumnDefinition
   name: string
+  summary?: ScoreSummary
   values: readonly unknown[]
 }>()
 </script>
@@ -25,7 +28,7 @@ const props = defineProps<{
     <HoverCardPortal>
       <HoverCardContent as-child :side-offset="6" :class="['floating p-2.5 text-xs select-text']">
         <AnimatedContent>
-          <MetricSummary :name="props.name" :definition="props.definition" :values="props.values" :current="props.current" />
+          <MetricSummary :name="props.name" :definition="props.definition" :values="props.values" :current="props.current" :summary="props.summary" :completion="props.completion" />
           <HoverCardArrow :class="['floating-arrow']" />
         </AnimatedContent>
       </HoverCardContent>

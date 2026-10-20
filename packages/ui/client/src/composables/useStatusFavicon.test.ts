@@ -46,7 +46,7 @@ describe('useStatusFavicon', () => {
    * expect(iconHrefs()).toEqual(['./vieval-logo.svg', './favicon-96x96.png'])
    */
   it('keeps the plain logo for a state without a clear outcome', async () => {
-    const { App } = shell('legacy')
+    const { App } = shell('unsupported')
     await render(App)
 
     await expect.poll(iconHrefs).toEqual(['./vieval-logo.svg', './favicon-96x96.png'])

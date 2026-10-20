@@ -40,8 +40,13 @@ export default defineEval({
 
       const score = defaultModel.id.length > 0 && rubricModel.id.length > 0 ? 1 : 0
 
+      // A custom task returns `TaskRunOutput` itself. Here the summaries are written by hand to show the shape;
+      // `scoreCases` from `vieval/core/scoring` builds the same object from case outcomes.
       return {
-        scores: [{ kind: 'exact', score }],
+        completion: { mean: 1, n: 1, name: 'completion', sum: 1, total: 1, unscored: {} },
+        passed: { mean: 1, n: 1, name: 'passed', sum: 1, total: 1, unscored: {} },
+        primary: 'task_default.models_resolved',
+        scores: [{ mean: score, n: 1, name: 'task_default.models_resolved', sum: score, total: 1, unscored: {} }],
       }
     },
   }),

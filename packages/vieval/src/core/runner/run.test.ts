@@ -50,7 +50,7 @@ function createSuccessfulRunResult(task: ScheduledTask): RunResult {
     id: task.id,
     inferenceExecutorId: task.inferenceExecutor.id,
     matrix: task.matrix,
-    scores: [{ kind: 'exact', score: 1 }],
+    scores: [{ mean: 1, n: 1, name: 'correct', sum: 1, total: 1, unscored: {} }],
   }
 }
 
@@ -67,7 +67,7 @@ describe('runScheduledTasks', () => {
         inferenceExecutorId: task.inferenceExecutor.id,
         matrix: task.matrix,
         scores: [
-          { kind: 'exact', score: 1 },
+          { mean: 1, n: 1, name: 'correct', sum: 1, total: 1, unscored: {} },
         ],
       }
     }

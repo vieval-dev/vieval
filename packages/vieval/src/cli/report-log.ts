@@ -10,6 +10,13 @@ import * as v from 'valibot'
 import { RUN_EVENT_SCHEMA_VERSION, runEventEnvelopeSchema } from '../events'
 
 /**
+ * Error message of every report reader that meets a file written before the current report schema.
+ *
+ * Old reports are not migrated: a reader rejects them, and the eval runs again to write a current one.
+ */
+export const OLDER_REPORT_MESSAGE = 'This report was written by an older vieval. Run it again.'
+
+/**
  * Append-only `events.jsonl` writer for one run.
  */
 export interface ReportEventLog {
@@ -86,7 +93,8 @@ export function createReportEventLog(filePath: string): ReportEventLog {
  *
  * Returns:
  * - envelopes in file order, or an empty list when the file does not exist
- * - throws when a line belongs to another report schema version
+ * - throws {@link OLDER_REPORT_MESSAGE} with the line when an envelope has an older `schemaVersion`, and a malformed
+ *   record error for any other line that is not a current envelope
  */
 export function readReportEvents(filePath: string): RunEventEnvelope[] {
   if (!existsSync(filePath)) {
@@ -98,9 +106,14 @@ export function readReportEvents(filePath: string): RunEventEnvelope[] {
     .map((line, index) => ({ line, lineNumber: index + 1 }))
     .filter(({ line }) => line.trim().length > 0)
     .map(({ line, lineNumber }) => {
-      const result = v.safeParse(runEventEnvelopeSchema, JSON.parse(line))
+      const value: unknown = JSON.parse(line)
+      const schemaVersion = (value as null | { schemaVersion?: unknown })?.schemaVersion
+      if (typeof schemaVersion === 'number' && schemaVersion < RUN_EVENT_SCHEMA_VERSION) {
+        throw new Error(`${OLDER_REPORT_MESSAGE} (${filePath}:${lineNumber}, event schema version ${schemaVersion})`)
+      }
+      const result = v.safeParse(runEventEnvelopeSchema, value)
       if (!result.success) {
-        throw new Error(`Unsupported event record at ${filePath}:${lineNumber}: expected report schema version ${RUN_EVENT_SCHEMA_VERSION}. Reports written by older vieval versions cannot be read; re-run the eval to regenerate them.`)
+        throw new Error(`Unsupported event record at ${filePath}:${lineNumber}: expected an event envelope of report schema version ${RUN_EVENT_SCHEMA_VERSION}.`)
       }
       return result.output
     })

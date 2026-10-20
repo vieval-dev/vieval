@@ -114,6 +114,7 @@ Vieval 按以下顺序合并矩阵配置：
 
 ```ts [evals/layered.eval.ts]
 import { defineEval, defineTask } from 'vieval/config'
+import { scoreCases } from 'vieval/core/scoring'
 
 export default defineEval({
   description: 'Shows matrix layering.',
@@ -139,12 +140,12 @@ export default defineEval({
       },
     },
     run(context) {
-      return {
-        scores: [{
-          kind: 'exact',
-          score: context.task.matrix.eval.rubric === 'strict' ? 1 : 0,
-        }],
-      }
+      // 自定义任务需要返回分数汇总，`scoreCases` 可以根据用例结果生成它。
+      return scoreCases([{
+        scores: { 'layered.strict': context.task.matrix.eval.rubric === 'strict' ? 1 : 0 },
+        state: 'passed',
+        unscored: {},
+      }])
     },
   }),
 })

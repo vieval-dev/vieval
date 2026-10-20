@@ -1,23 +1,33 @@
 <script setup lang="ts">
-import type { MetricDefinition } from '../../../src/shared/contract'
+import type { ScoreSummary } from '../../../src/shared/contract'
+import type { ColumnDefinition } from '../scores'
 
 import { computed } from 'vue'
 
+import { formatColumnValue } from '../caseMetrics'
+import { formatScore } from '../format'
 import { localize } from '../localize'
+import { completionText, graderText, unscoredText } from '../scores'
 
 /**
- * What a metric is and how its values spread: label, name, description, unit and direction, and a small
- * distribution (a histogram for numbers, a stacked bar for categories), with the value of one case marked.
+ * What a metric or a score is and how its values spread: label, name, description, unit and direction, and a small
+ * distribution (a histogram for numbers, a stacked bar for categories), with the value of one case marked. A score
+ * (`definition.score`) adds its formula, its grader, and how errors count, and reads its values as percentages; with
+ * `summary`, the cases that counted toward its mean and the ones left unscored.
  *
  * Use as the body of a hover card ({@link MetricInfo}) or of a chart's floating tooltip.
  */
 const props = defineProps<{
+  /** Completion rate of the cases the summary covers, shown under it. */
+  completion?: ScoreSummary
   /** Value of the case being looked at, marked on the distribution. */
   // NOTICE: no `boolean` here: Vue casts an absent prop whose type includes Boolean to `false`, which would
   // mark a value on cards that have no current case. Callers pass flags as strings.
   current?: number | string
-  definition?: MetricDefinition
+  definition?: ColumnDefinition
   name: string
+  /** Summary of a score over a group of cases (a headline): mean, counted cases, unscored reasons. */
+  summary?: ScoreSummary
   /** Every recorded value of the metric in scope (one per case); `undefined` entries are cases without it. */
   values: readonly unknown[]
 }>()
@@ -25,6 +35,7 @@ const props = defineProps<{
 const label = computed(() => localize(props.definition?.label))
 const description = computed(() => localize(props.definition?.description))
 const unit = computed(() => props.definition?.unit)
+const score = computed(() => props.definition?.score)
 
 /** Histogram bins of numeric values; most metrics have a long tail, so a handful of bins reads best. */
 const BINS = 16
@@ -68,10 +79,7 @@ const categories = computed(() => {
   return { segments: rest > 0 ? [...shown, { color: 'var(--chart-text)', count: rest, value: `${ranked.length - TOP_CATEGORIES} more` }] : shown, total }
 })
 
-function format(value: number): string {
-  const text = Math.abs(value) >= 1000 ? Intl.NumberFormat(undefined, { maximumFractionDigits: 1, notation: 'compact' }).format(value) : String(Math.round(value * 100) / 100)
-  return unit.value == null ? text : `${text} ${unit.value}`
-}
+const format = (value: number) => formatColumnValue(value, props.definition)
 </script>
 
 <template>
@@ -87,11 +95,36 @@ function format(value: number): string {
     <p v-if="description" :class="['m-0 leading-snug opacity-90']">
       {{ description }}
     </p>
-    <div v-if="unit || props.definition?.better" :class="['flex flex-wrap gap-x-3 gap-y-0.5 opacity-80']">
+    <div v-if="unit || props.definition?.better || score" :class="['flex flex-wrap gap-x-3 gap-y-0.5 opacity-80']">
+      <span v-if="score?.primary" :class="['font-semibold']">primary score</span>
       <span v-if="unit">unit · {{ unit }}</span>
       <span v-if="props.definition?.better" :class="['inline-flex items-center gap-0.5']">
         <span :class="[props.definition.better === 'higher' ? 'i-mingcute-arrow-up-line' : 'i-mingcute-arrow-down-line']" aria-hidden="true" />{{ props.definition.better }} is better
       </span>
+      <span v-if="score?.errors === 'zero'">errored cases count as 0</span>
+    </div>
+    <dl v-if="props.definition?.formula || score?.grader" :class="['m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-0.5']">
+      <template v-if="props.definition?.formula">
+        <dt :class="['opacity-70']">
+          formula
+        </dt>
+        <dd :class="['m-0']" data-testid="metric-summary-formula">
+          {{ props.definition.formula }}
+        </dd>
+      </template>
+      <template v-if="score?.grader">
+        <dt :class="['opacity-70']">
+          grader
+        </dt>
+        <dd :class="['m-0']">
+          {{ graderText(score.grader) }}
+        </dd>
+      </template>
+    </dl>
+    <div v-if="props.summary" :class="['grid gap-0.5 tabular-nums']" data-testid="metric-summary-score">
+      <span><b>{{ formatScore(props.summary.mean) }}</b> over {{ props.summary.n }} of {{ props.summary.total }} cases</span>
+      <span v-if="unscoredText(props.summary.unscored)" :class="['opacity-80']">unscored: {{ unscoredText(props.summary.unscored) }}</span>
+      <span v-if="props.completion" :class="['opacity-80']">{{ completionText(props.completion) }}</span>
     </div>
 
     <figure v-if="numeric && histogram" :class="['m-0 grid gap-0.5']" :aria-label="`Distribution of ${props.values.length} values`">
@@ -123,7 +156,7 @@ function format(value: number): string {
         </li>
       </ul>
     </figure>
-    <div :class="['opacity-70']">
+    <div v-if="props.summary == null" :class="['opacity-70']">
       {{ props.values.filter(value => value != null).length }} value(s)
     </div>
   </div>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { MetricDefinition } from '../../../src/shared/contract'
+import type { ColumnDefinition } from '../scores'
 
 import { useMediaQuery } from '@vueuse/core'
 import { PopoverAnchor, PopoverContent, PopoverPortal, PopoverRoot } from 'reka-ui'
@@ -28,7 +28,7 @@ export interface BesideTarget {
 const props = defineProps<{
   /** The menu or list: the card sits right of its edge. */
   anchor: HTMLElement | null | undefined
-  definitionOf: (name: string) => MetricDefinition | undefined
+  definitionOf: (name: string) => ColumnDefinition | undefined
   /** The highlighted metric and its item: the card follows the item up and down. `undefined` while none is. */
   target: BesideTarget | undefined
   valuesOf: (name: string) => readonly unknown[]

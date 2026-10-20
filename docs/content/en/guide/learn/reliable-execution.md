@@ -138,7 +138,7 @@ const providerRetry = {
 
 A case retry replays the whole case. To retry only the failed provider call, wrap that call in `runWithRetry` from `vieval/core/inference-executors`. Its default delay waits for the provider's `Retry-After` or an exponential backoff with jitter, whichever is longer, and passing `{ signal }` stops the wait when the run is interrupted.
 
-`autoAttempt: 1` permits one additional full task attempt. It starts only when a case still fails after its retries and that case has remaining attempts. Because the full registered case set runs again, attempt evidence includes both the earlier and later outcomes. For example, one failed attempt followed by one passing attempt contributes `0.5`, not a replacement pass of `1`.
+`autoAttempt: 1` permits one additional full task attempt. It starts only when a case still fails after its retries and that case has remaining attempts. Because the full registered case set runs again, attempt evidence includes both the earlier and later outcomes. For example, one failed attempt followed by one passing attempt that records `1` gives that case a mean of `0.5` in the score, not a replacement pass of `1`.
 
 ::: tip Use repetition for the question it answers
 Attempts measure nondeterministic reliability because every completed attempt contributes evidence. Retries recover transient case failures inside one attempt; a retry that eventually passes makes that attempt pass. Retries therefore hide the earlier transient failure from task scoring, although lifecycle events still record the tries. Use retries only when recovery, rather than failure frequency, is the intended measurement.
@@ -166,7 +166,7 @@ its slot back while it waits, and each later run gets its own `autoRetry` retrie
 be next, and without a delay a requeue would be an immediate retry.
 
 Until its last run ends, the case has not ended. It emits `case.requeued` instead of `case.ended`, the viewer shows it
-as waiting to rerun (not done yet), and it does not count in scores or coverage. Only the final run is scored. A case
+as waiting to rerun (not done yet), and it does not count in scores or in the completion rate. Only the final run is scored. A case
 whose retries and requeues all ran out ends `errored`; resume it later with `--resume`.
 
 ### Resume an attempt
@@ -234,13 +234,13 @@ export default defineConfig({
 
 Task aggregation and report artifacts answer related but different questions:
 
-- A failed or timed-out case adds exact score evidence of `0`; a passing case without a custom score adds `1`.
-- A passing case contributes its custom `exact` and `judge` scores. A failed case's custom score is not used by task aggregation.
+- A failed case counts as `0` in every score of its task. An errored or timed-out case is left out of a score with `errors: 'exclude'` (the default) and counts as `0` with `errors: 'zero'`; either way it lowers the completion rate.
+- A passing case contributes the values it recorded. A passing case that did not record a score is missing from that score, not counted as `1`.
 - Every completed auto attempt contributes another set of case outcomes to the task's aggregated score.
 - Reporter lifecycle, score, and metric events are emitted as execution happens. Unless the run uses `--no-report`, `events.jsonl` retains those events.
-- `cases.jsonl` is a final normalized projection keyed by task and case, so repeated retries or automatic attempts do not become independent case rows. For a task with automatic attempts, the record lists every attempt in `attempts`. Read raw events when the exact sequence matters (`case.started` and `case.ended` carry `attemptIndex`), and read the task aggregate in `run-summary.json` when attempt-weighted scoring matters.
+- `cases.jsonl` is a final normalized projection keyed by task and case, so repeated retries or automatic attempts do not become independent case rows. Its `scores` hold the counted value of each score under the same rule as the task result, so a failed case shows `0`. For a task with automatic attempts, the record lists every attempt in `attempts`. Read raw events when the exact sequence matters (`case.started` and `case.ended` carry `attemptIndex`), and read the task aggregate in `run-summary.json` when attempt-weighted scoring matters.
 
-As described in [Assertions, Scores, and Metrics](/en/guide/learn/assertions-scores-and-metrics), a score event emitted before a later failure can remain in a persisted case record even though task aggregation counts that outcome as a failure. Diagnose state and score together.
+As described in [Assertions, Scores, and Metrics](/en/guide/learn/assertions-scores-and-metrics), a value recorded before a later failure stays in `events.jsonl` and in the case record's `scoreDetails`, but it is not counted: the case's `scores` show `0`. Diagnose state and score together.
 
 A common failure is using `autoRetry` to estimate reliability: the recovered case appears as one passing attempt. Use `autoAttempt` when earlier failures should remain in the aggregate, and remember that it reruns cases that already passed. Also avoid treating `--attempt` as a request for more automatic attempts: it only labels the run.
 

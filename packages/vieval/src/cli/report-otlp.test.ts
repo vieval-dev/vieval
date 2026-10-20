@@ -37,11 +37,33 @@ describe('local OTLP projection', () => {
           projectName: 'p',
           retryCount: 0,
           runId: 'run-1',
-          schemaVersion: 1,
-          scores: { exact: 0.5 },
+          schemaVersion: 2,
+          scoreDetails: {},
+          scores: { 'locomo.correct': 0.5 },
           startedAt: '2026-05-08T00:00:00.000Z',
           state: 'passed',
           taskId: 'task-1',
+          unscored: { 'locomo.natural': 'grader_failed' },
+          workspaceId: 'w',
+        },
+        {
+          attemptId: 'a',
+          caseId: 'case-2',
+          caseName: 'Case 2',
+          durationMs: 10,
+          endedAt: '2026-05-08T00:00:00.010Z',
+          experimentId: 'e',
+          metrics: {},
+          projectName: 'p',
+          retryCount: 0,
+          runId: 'run-1',
+          schemaVersion: 2,
+          scoreDetails: {},
+          scores: { 'locomo.correct': 1, 'locomo.natural': 1 },
+          startedAt: '2026-05-08T00:00:00.000Z',
+          state: 'passed',
+          taskId: 'task-1',
+          unscored: {},
           workspaceId: 'w',
         },
       ],
@@ -66,6 +88,7 @@ describe('local OTLP projection', () => {
       'vieval.run',
       'vieval.project',
       'vieval.task',
+      'vieval.case',
       'vieval.case',
     ])
     expect(spans?.[1]?.attributes).toContainEqual({
@@ -100,13 +123,19 @@ describe('local OTLP projection', () => {
     })
     expect(logRecords?.[0]?.eventName).toBe('vieval.case')
     expect(logRecords?.[0]?.body).toEqual({
-      stringValue: JSON.stringify({ caseId: 'case-1', scores: { exact: 0.5 }, state: 'passed' }),
+      stringValue: JSON.stringify({ caseId: 'case-1', scores: { 'locomo.correct': 0.5 }, state: 'passed', unscored: { 'locomo.natural': 'grader_failed' } }),
     })
     expect(logRecords?.[0]?.attributes).toContainEqual({
       key: 'benchmark.id',
       value: { stringValue: 'locomo' },
     })
-    expect(metrics?.[0]?.name).toBe('vieval.score.exact')
+    /**
+     * @example
+     * expect(metrics?.map(metric => metric.name)).toEqual(['vieval.score.locomo.correct', 'vieval.score.locomo.natural'])
+     */
+    expect(metrics?.map(metric => metric.name)).toEqual(['vieval.score.locomo.correct', 'vieval.score.locomo.natural'])
+    // An unscored value is not a data point: it says nothing about the case.
+    expect(metrics?.[1]?.gauge.dataPoints.map(point => point.asDouble)).toEqual([1])
     expect(metrics?.[0]?.gauge.dataPoints[0]).toEqual({
       asDouble: 0.5,
       attributes: expect.arrayContaining([
@@ -144,11 +173,13 @@ describe('local OTLP projection', () => {
           projectName: 'p',
           retryCount: 0,
           runId: 'run-1',
-          schemaVersion: 1,
-          scores: { exact: 1 },
+          schemaVersion: 2,
+          scoreDetails: {},
+          scores: { 'suite.correct': 1 },
           startedAt: '2026-05-08T00:00:00.000Z',
           state: 'passed',
           taskId: 'task-1',
+          unscored: {},
           workspaceId: 'w',
         },
       ],
@@ -181,11 +212,13 @@ describe('local OTLP projection', () => {
           projectName: 'p',
           retryCount: 0,
           runId: 'run-1',
-          schemaVersion: 1,
-          scores: { exact: 1 },
+          schemaVersion: 2,
+          scoreDetails: {},
+          scores: { 'suite.correct': 1 },
           startedAt: '2026-05-08T00:00:00.123456Z',
           state: 'passed',
           taskId: 'task-1',
+          unscored: {},
           workspaceId: 'w',
         },
       ],
@@ -220,11 +253,13 @@ describe('local OTLP projection', () => {
           projectName: 'p',
           retryCount: 0,
           runId: 'run-1',
-          schemaVersion: 1,
-          scores: { exact: 1 },
+          schemaVersion: 2,
+          scoreDetails: {},
+          scores: { 'suite.correct': 1 },
           startedAt: '2026-05-08T00:00:00.000Z',
           state: 'passed',
           taskId: 'task-1',
+          unscored: {},
           workspaceId: 'w',
         },
       ],

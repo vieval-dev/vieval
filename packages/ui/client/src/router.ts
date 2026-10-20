@@ -3,11 +3,12 @@ import { computed, shallowRef } from 'vue'
 /**
  * One screen of the viewer, decoded from the location hash.
  *
- * Ids travel as query parameters because task and case ids contain `/` and `%` themselves.
+ * Ids travel as query parameters because task and case ids contain `/` and `%` themselves. `grader` on a case narrows
+ * its inference tab to one grader's model calls (a score's grader `id`).
  */
 export type Route
   = | { attempt?: string, experiment?: string, name: 'scope', project?: string, tab?: string, workspace?: string }
-    | { caseId: string, name: 'case', runKey: string, tab?: string, taskId: string }
+    | { caseId: string, grader?: string, name: 'case', runKey: string, tab?: string, taskId: string }
     | { name: 'compare', query: Record<string, string> }
     | { name: 'run', runKey: string, tab?: string }
     | { name: 'task', runKey: string, taskId: string }
@@ -27,7 +28,7 @@ export function href(route: Route): string {
   }
   switch (route.name) {
     case 'case':
-      return `#/runs/${encodeURIComponent(route.runKey)}/case${query({ caseId: route.caseId, tab: route.tab, taskId: route.taskId })}`
+      return `#/runs/${encodeURIComponent(route.runKey)}/case${query({ caseId: route.caseId, grader: route.grader, tab: route.tab, taskId: route.taskId })}`
     case 'compare':
       return `#/compare${query(route.query)}`
     case 'run':
@@ -58,7 +59,7 @@ export function parseRoute(hash: string): Route {
   if (segments[0] === 'runs' && segments[1] != null) {
     const runKey = segments[1]
     if (segments[2] === 'case' && query.taskId != null && query.caseId != null)
-      return { caseId: query.caseId, name: 'case', runKey, tab: query.tab, taskId: query.taskId }
+      return { caseId: query.caseId, grader: query.grader, name: 'case', runKey, tab: query.tab, taskId: query.taskId }
     if (segments[2] === 'task' && query.taskId != null)
       return { name: 'task', runKey, taskId: query.taskId }
     return { name: 'run', runKey, tab: query.tab }

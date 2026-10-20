@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { MetricDefinition, RunSnapshot } from '../../../src/shared/contract'
+import type { CaseScoring, RunSnapshot, ScoreSummary } from '../../../src/shared/contract'
 import type { CaseFilters, CaseRow } from '../caseMetrics'
 import type { BarDatum } from './BarChart.vue'
 import type { LinePoint } from './LineChart.vue'
@@ -11,6 +11,7 @@ import BarChart from './BarChart.vue'
 import CaseCartesian from './CaseCartesian.vue'
 import CaseMetricsPanel from './CaseMetricsPanel.vue'
 import CountsBar from './CountsBar.vue'
+import HeadlineScore from './HeadlineScore.vue'
 import LineChart from './LineChart.vue'
 import MetricInfo from './MetricInfo.vue'
 import PairsHeatmap from './PairsHeatmap.vue'
@@ -19,14 +20,16 @@ import SegmentedControl from './SegmentedControl.vue'
 import StateView from './StateView.vue'
 
 import { api } from '../api'
-import { buildCaseTable, metricLabel, metricScale, separationOf } from '../caseMetrics'
+import { buildCaseTable, columnDefinitions, metricLabel, metricScale, separationOf } from '../caseMetrics'
 import { formatScore, previewValue } from '../format'
 import { levelIcons } from '../hierarchy'
 import { href, navigate } from '../router'
+import { graderText, headlineOf, scoreColumn, scoreDefinition, scoreLabel, unscoredText } from '../scores'
 
 /**
- * Scores and metrics of a run: overall scores, scores per matrix row (task) and per auto-attempt round, numeric
- * metrics as small multiples, and the other recorded values.
+ * Scores and metrics of a run: the completion rate and every score over the whole run (label, mean, counted cases,
+ * unscored reasons, formula, grader; the primary score marked), scores per matrix row (task) and per auto-attempt
+ * round, numeric metrics as small multiples, and the other recorded values.
  */
 const props = defineProps<{
   /** Changes when the run advanced, at most once per refetch interval (`useRunLive().refreshKey`). */
@@ -45,8 +48,46 @@ watch(() => props.refreshKey, () => {
 })
 
 const matrixKeys = computed(() => [...new Set(props.snapshot.tasks.flatMap(task => Object.keys({ ...task.matrix?.run, ...task.matrix?.eval })))])
-const byTask = computed<BarDatum[]>(() => (scores.data.value?.byTask ?? []).map(task => ({ href: href({ name: 'task', runKey: runKey.value, taskId: task.taskId }), label: task.displayName, values: [task.exact, task.judge] })))
-const byRound = computed<BarDatum[]>(() => (scores.data.value?.byRound ?? []).map(round => ({ label: `${props.snapshot.tasks.find(task => task.id === round.taskId)?.displayName ?? round.taskId} · round ${round.roundIndex}`, values: [round.exact, round.judge] })))
+const scoreDefinitions = computed(() => scores.data.value?.definitions ?? props.snapshot.scoreDefinitions)
+/** Every score of the run in the order the summary lists them; the series of the bar charts and the table columns. */
+const scoreNames = computed(() => (scores.data.value?.overall.scores ?? []).map(summary => summary.name))
+/** Primary scores of the run: the one of the headline, or each task's under a `per-task` headline. */
+const primaries = computed(() => {
+  const headline = scores.data.value?.overall.headline?.headline
+  if (headline == null || headline.kind === 'passed-cases')
+    return new Set<string>()
+  return new Set(headline.kind === 'score' ? [headline.score.name] : headline.tasks.map(task => task.score.name))
+})
+/**
+ * Rows of the scores table: the completion rate first (how many cases produced a result, so a score is never read
+ * without it), then every score with its definition, formula, and grader.
+ */
+const scoreRows = computed(() => {
+  const overall = scores.data.value?.overall
+  if (overall == null)
+    return []
+  const completion: ScoreSummary | undefined = overall.headline?.completion
+  const rows = overall.scores.map((summary) => {
+    const definition = scoreDefinition(summary.name, scoreDefinitions.value)
+    return {
+      column: definition == null ? undefined : scoreColumn(definition, scoreDefinitions.value),
+      // Cases that counted toward the mean.
+      counted: summary.n,
+      grader: definition?.grader == null ? undefined : graderText(definition.grader),
+      label: scoreLabel(summary.name, scoreDefinitions.value),
+      primary: primaries.value.has(summary.name),
+      summary,
+    }
+  }).toSorted((a, b) => Number(b.primary) - Number(a.primary))
+  if (completion == null)
+    return rows
+  // Every settled case counts toward the completion rate as 1 or 0, so its count is the cases that produced a result.
+  return [{ column: undefined, counted: completion.sum, grader: undefined, label: 'Completion rate', primary: false, summary: completion }, ...rows]
+})
+const meanOf = (scoring: CaseScoring, name: string) => scoring.scores.find(summary => summary.name === name)?.mean ?? null
+const byTask = computed<BarDatum[]>(() => (scores.data.value?.byTask ?? []).map(task => ({ href: href({ name: 'task', runKey: runKey.value, taskId: task.taskId }), label: task.displayName, values: scoreNames.value.map(name => meanOf(task.scoring, name)) })))
+const byRound = computed<BarDatum[]>(() => (scores.data.value?.byRound ?? []).map(round => ({ label: `${props.snapshot.tasks.find(task => task.id === round.taskId)?.displayName ?? round.taskId} · round ${round.roundIndex}`, values: scoreNames.value.map(name => meanOf(round.scoring, name)) })))
+const taskLabel = (taskId: string) => props.snapshot.tasks.find(task => task.id === taskId)?.displayName ?? taskId
 /** Names of the "Other metrics" rows that are expanded; every row starts collapsed to one line. */
 const expanded = reactive(new Set<string>())
 /** One line for a collapsed row: the distinct values, each cut short. */
@@ -61,7 +102,7 @@ function toggleMetric(name: string): void {
   if (!expanded.delete(name))
     expanded.add(name)
 }
-const definitions = computed(() => new Map<string, MetricDefinition>((metrics.data.value?.definitions ?? []).map(definition => [definition.name, definition])))
+const definitions = computed(() => columnDefinitions(metrics.data.value?.definitions ?? [], metrics.data.value?.scoreDefinitions ?? []))
 const labelOf = (name: string) => metricLabel(name, definitions.value)
 
 /**
@@ -109,24 +150,64 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
         <h2 class="card-title">
           <span class="i-mingcute-target-line" aria-hidden="true" />Scores
         </h2>
-        <dl :class="['flex flex-wrap gap-x-8 gap-y-2 px-3 py-2 text-sm']">
-          <div v-for="kind in (['exact', 'judge', 'hybrid'] as const)" :key="kind">
-            <dt class="text-xs muted">
-              {{ kind }} (events)
-            </dt>
-            <dd class="text-xl font-semibold tabular-nums">
-              {{ formatScore(scores.data.value?.overall[kind]) }}
-            </dd>
-          </div>
-          <div v-if="scores.data.value?.summary">
-            <dt class="text-xs muted">
-              exact (run-summary.json)
-            </dt>
-            <dd class="text-xl font-semibold tabular-nums">
-              {{ formatScore(scores.data.value.summary.exact) }}
-            </dd>
-          </div>
-        </dl>
+        <div :class="['overflow-x-auto']">
+          <table :class="['w-full']" data-testid="score-rows">
+            <thead>
+              <tr :class="['border-b border-neutral-200/50 dark:border-neutral-800/50']">
+                <th class="th">
+                  Score
+                </th>
+                <th class="th text-right">
+                  Mean
+                </th>
+                <th class="th text-right">
+                  Counted
+                </th>
+                <th class="th">
+                  Not counted
+                </th>
+                <th class="th">
+                  Formula
+                </th>
+                <th class="th">
+                  Grader
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in scoreRows" :key="row.summary.name" :class="['border-b border-neutral-100/70 dark:border-neutral-900']" data-testid="score-row">
+                <td :class="['td text-sm whitespace-nowrap']">
+                  <MetricInfo :name="row.summary.name" :definition="row.column" :values="[]" :summary="row.summary">
+                    <span :class="['cursor-help', row.column?.label == null && row.column != null && 'mono']">{{ row.label }}</span>
+                  </MetricInfo>
+                  <span v-if="row.primary" :class="['badge state-neutral ml-1.5']" data-testid="score-row-primary">primary</span>
+                </td>
+                <td :class="['td text-right tabular-nums font-semibold']">
+                  {{ formatScore(row.summary.mean) }}
+                </td>
+                <td :class="['td text-right mono text-xs whitespace-nowrap']">
+                  {{ row.counted }} / {{ row.summary.total }}
+                </td>
+                <td :class="['td text-xs muted']">
+                  {{ unscoredText(row.summary.unscored) || '—' }}
+                </td>
+                <td :class="['td text-xs']">
+                  {{ row.column?.formula ?? '—' }}
+                </td>
+                <td :class="['td text-xs mono']">
+                  {{ row.grader ?? '—' }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-if="scoreRows.length <= 1" :class="['px-3 py-2 text-xs muted']">
+          No score recorded. Cases record one with context.recordScore(score, value); the headline is the share of passed cases.
+        </p>
+        <div v-if="scores.data.value?.summary" :class="['flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2 text-xs']">
+          <span class="muted">Official summary (run-summary.json)</span>
+          <HeadlineScore :result="scores.data.value.summary" :definitions="scoreDefinitions" size="sm" :task-label="taskLabel" />
+        </div>
       </section>
 
       <!-- Every case of the run against the matrix axes and its metrics: where the score is lost across tasks. -->
@@ -151,10 +232,10 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
                   Cases
                 </th>
                 <th class="th text-right">
-                  Exact
+                  Headline
                 </th>
-                <th class="th text-right">
-                  Judge
+                <th v-for="name in scoreNames" :key="name" class="th text-right">
+                  {{ scoreLabel(name, scoreDefinitions) }}
                 </th>
                 <th class="th text-right">
                   Rounds
@@ -172,11 +253,11 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
                 <td :class="['td min-w-48']">
                   <CountsBar :counts="task.caseCounts" />
                 </td>
-                <td :class="['td text-right mono text-xs']">
-                  {{ formatScore(task.scores.exact) }}
+                <td :class="['td text-right']">
+                  <HeadlineScore :result="headlineOf(task.scoring)" :definitions="scoreDefinitions" size="sm" align="end" />
                 </td>
-                <td :class="['td text-right mono text-xs']">
-                  {{ formatScore(task.scores.judge) }}
+                <td v-for="name in scoreNames" :key="name" :class="['td text-right mono text-xs']">
+                  {{ formatScore(meanOf(task.scoring, name)) }}
                 </td>
                 <td :class="['td text-right mono text-xs']">
                   {{ task.roundCount }}
@@ -185,17 +266,17 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
             </tbody>
           </table>
         </div>
-        <div v-if="byTask.length > 0" class="p-3">
-          <BarChart :data="byTask" :series="['exact', 'judge']" />
+        <div v-if="byTask.length > 0 && scoreNames.length > 0" class="p-3">
+          <BarChart :data="byTask" :series="scoreNames.map(name => scoreLabel(name, scoreDefinitions))" />
         </div>
       </section>
 
-      <section v-if="byRound.length > 1" :class="['card']">
+      <section v-if="byRound.length > 1 && scoreNames.length > 0" :class="['card']">
         <h2 class="card-title">
           <span :class="levelIcons.round" aria-hidden="true" />Scores per auto-attempt round
         </h2>
         <div class="p-3">
-          <BarChart :data="byRound" :series="['exact', 'judge']" />
+          <BarChart :data="byRound" :series="scoreNames.map(name => scoreLabel(name, scoreDefinitions))" />
         </div>
       </section>
     </StateView>

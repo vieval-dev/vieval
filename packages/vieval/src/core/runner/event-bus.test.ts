@@ -30,8 +30,8 @@ describe('createRunEventBus', () => {
      * expect(envelopes.map(({ time: _time, ...envelope }) => envelope)).toEqual([...])
      */
     expect(envelopes.map(({ time: _time, ...envelope }) => envelope)).toEqual([
-      { ...identity, caseId: undefined, data: { totalTasks: 1 }, event: 'run.started', projectId: undefined, schemaVersion: 2, seq: 1, taskId: undefined },
-      { ...identity, caseId: '0:case', data: { index: 0, name: 'case', total: 1 }, event: 'case.started', projectId: 'project-1', schemaVersion: 2, seq: 2, taskId: 'task-1' },
+      { ...identity, caseId: undefined, data: { totalTasks: 1 }, event: 'run.started', projectId: undefined, schemaVersion: 3, seq: 1, taskId: undefined },
+      { ...identity, caseId: '0:case', data: { index: 0, name: 'case', total: 1 }, event: 'case.started', projectId: 'project-1', schemaVersion: 3, seq: 2, taskId: 'task-1' },
     ])
   })
 

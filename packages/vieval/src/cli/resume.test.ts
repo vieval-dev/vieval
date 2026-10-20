@@ -16,7 +16,7 @@ afterEach(async () => {
 async function writeRun(root: string, path: { attempt: string, run: string }, records: Array<{ attemptIndex?: number, caseName: string, state: string, taskId: string }>): Promise<string> {
   const runDirectory = join(root, 'workspace-a', 'project-a', 'experiment-a', path.attempt, path.run)
   await mkdir(runDirectory, { recursive: true })
-  await writeFile(join(runDirectory, 'cases.jsonl'), `${records.map(record => JSON.stringify({ caseId: `0:${record.caseName}`, ...record })).join('\n')}\n`)
+  await writeFile(join(runDirectory, 'cases.jsonl'), `${records.map(record => JSON.stringify({ caseId: `0:${record.caseName}`, schemaVersion: 2, ...record })).join('\n')}\n`)
   return join(root, 'workspace-a', 'project-a', 'experiment-a', path.attempt)
 }
 

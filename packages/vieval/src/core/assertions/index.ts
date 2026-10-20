@@ -1,5 +1,3 @@
-import type { RunScore, RunScoreKind } from '../runner/aggregate'
-
 /**
  * Async assertion function used by eval scenarios.
  */
@@ -44,13 +42,9 @@ export interface AssertionOutcome {
    */
   reason: string
   /**
-   * Normalized score in the `0..1` range.
+   * Normalized score in the `0..1` range. Record it with `context.recordScore(definition, outcome.score)`.
    */
   score: number
-  /**
-   * Assertion family emitted as run score kind.
-   */
-  scoreKind: RunScoreKind
 }
 
 /**
@@ -74,10 +68,6 @@ export interface CustomAssertionOptions {
    * Stable assertion id.
    */
   id: string
-  /**
-   * Score family emitted by this custom assertion.
-   */
-  scoreKind: RunScoreKind
 }
 
 /**
@@ -269,13 +259,13 @@ export async function evaluateAssertions(
  * Creates a custom assertion with fully user-defined logic.
  *
  * Example:
- * `expectCustom({ id: 'stateful-window', scoreKind: 'exact', evaluate: (ctx) => ... })`
+ * `expectCustom({ id: 'stateful-window', evaluate: (ctx) => ... })`
  */
 export function expectCustom(options: CustomAssertionOptions): Assertion {
   return async (context) => {
     const result = await options.evaluate(context)
 
-    return createOutcome(options.id, options.scoreKind, result.pass, result.score, result.reason)
+    return createOutcome(options.id, result.pass, result.score, result.reason)
   }
 }
 
@@ -288,7 +278,7 @@ export function expectCustom(options: CustomAssertionOptions): Assertion {
 export function expectMustExclude(options: MustExcludeAssertionOptions): Assertion {
   return async (context) => {
     if (options.keywords.length === 0) {
-      return createOutcome(options.id, 'exact', true, 1, 'No excluded keywords configured.')
+      return createOutcome(options.id, true, 1, 'No excluded keywords configured.')
     }
 
     const caseSensitive = options.caseSensitive ?? false
@@ -303,7 +293,6 @@ export function expectMustExclude(options: MustExcludeAssertionOptions): Asserti
 
     return createOutcome(
       options.id,
-      'exact',
       pass,
       score,
       pass
@@ -322,7 +311,7 @@ export function expectMustExclude(options: MustExcludeAssertionOptions): Asserti
 export function expectMustInclude(options: MustIncludeAssertionOptions): Assertion {
   return async (context) => {
     if (options.keywords.length === 0) {
-      return createOutcome(options.id, 'exact', true, 1, 'No required keywords configured.')
+      return createOutcome(options.id, true, 1, 'No required keywords configured.')
     }
 
     const caseSensitive = options.caseSensitive ?? false
@@ -341,7 +330,6 @@ export function expectMustInclude(options: MustIncludeAssertionOptions): Asserti
 
     return createOutcome(
       options.id,
-      'exact',
       pass,
       score,
       pass
@@ -363,7 +351,6 @@ export function expectNot(assertion: Assertion, options: { id: string }): Assert
 
     return createOutcome(
       options.id,
-      baseOutcome.scoreKind,
       !baseOutcome.pass,
       1 - baseOutcome.score,
       `NOT(${baseOutcome.id}): ${baseOutcome.reason}`,
@@ -383,7 +370,6 @@ export function expectRegex(options: RegexAssertionOptions): Assertion {
 
     return createOutcome(
       options.id,
-      'exact',
       pass,
       pass ? 1 : 0,
       pass ? 'Regex matched response text.' : `Regex did not match: ${options.pattern}`,
@@ -406,7 +392,6 @@ export function expectRubric(options: RubricAssertionOptions): Assertion {
 
     return createOutcome(
       options.id,
-      'judge',
       pass,
       normalizedScore,
       `${result.reason}${result.judgeModel ? ` (judge: ${result.judgeModel})` : ''}`,
@@ -426,7 +411,6 @@ export function expectStructuredOutput<TValue>(options: StructuredOutputAssertio
 
     return createOutcome(
       options.id,
-      'exact',
       pass,
       pass ? 1 : 0,
       pass ? 'Structured output matched validator.' : (options.failureReason ?? 'Structured output validation failed.'),
@@ -445,14 +429,13 @@ export function expectToolCallArgs(options: ToolCallArgsAssertionOptions): Asser
     const targetCall = (context.toolCalls ?? []).find(call => call.name === options.toolName)
 
     if (targetCall == null) {
-      return createOutcome(options.id, 'exact', false, 0, `Missing tool call: ${options.toolName}`)
+      return createOutcome(options.id, false, 0, `Missing tool call: ${options.toolName}`)
     }
 
     const pass = options.validate(targetCall.args)
 
     return createOutcome(
       options.id,
-      'exact',
       pass,
       pass ? 1 : 0,
       pass ? `Tool call args validated for ${options.toolName}.` : `Tool call args validation failed for ${options.toolName}.`,
@@ -476,16 +459,6 @@ export function normalizeMatchText(value: string, caseSensitive: boolean): strin
   return compactedWhitespace.toLowerCase()
 }
 
-/**
- * Converts assertion outcomes to run-score tuples consumed by aggregation.
- */
-export function toRunScores(outcomes: readonly AssertionOutcome[]): RunScore[] {
-  return outcomes.map(outcome => ({
-    kind: outcome.scoreKind,
-    score: outcome.score,
-  }))
-}
-
 function clampScore(score: number): number {
   if (Number.isNaN(score)) {
     return 0
@@ -504,7 +477,6 @@ function clampScore(score: number): number {
 
 function createOutcome(
   id: string,
-  scoreKind: RunScoreKind,
   pass: boolean,
   score: number,
   reason: string,
@@ -514,6 +486,5 @@ function createOutcome(
     pass,
     reason,
     score: clampScore(score),
-    scoreKind,
   }
 }

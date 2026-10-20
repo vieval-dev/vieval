@@ -9,6 +9,7 @@ import StateBadge from './StateBadge.vue'
 
 import { groupInferenceCalls, modelKeyOf, summarizeByModel, tokenUsage } from '../../../src/shared/inference'
 import { formatCount, formatDuration, formatTime, previewValue } from '../format'
+import { isGraderCall } from '../scores'
 
 /**
  * Model calls of one case: what they cost in total (calls, tokens, model time, tool calls), then one row per call
@@ -16,10 +17,19 @@ import { formatCount, formatDuration, formatTime, previewValue } from '../format
  *
  * With more than one model, every model gets its own row, and the summary adds up the token counts each model
  * reported. That sum says how many tokens the case processed, but not what it cost: tokenizers and prices differ.
+ *
+ * With `grader`, only the calls of that grader (a score's judge) are shown and summed, with a chip to show them all.
  */
-const props = defineProps<{ events: CaseDetail['inference'] }>()
+const props = defineProps<{
+  events: CaseDetail['inference']
+  /** Grader `id` of a score; narrows the panel to its calls ({@link isGraderCall}). */
+  grader?: string
+}>()
+const emit = defineEmits<{ clearGrader: [] }>()
 
-const calls = computed(() => groupInferenceCalls(props.events).map(call => ({ ...call, tokens: tokenUsage(call.usage) })))
+const calls = computed(() => groupInferenceCalls(props.events)
+  .filter(call => props.grader == null || isGraderCall(call, props.grader))
+  .map(call => ({ ...call, tokens: tokenUsage(call.usage) })))
 const models = computed(() => summarizeByModel(calls.value).map(model => ({
   ...model,
   tokens: tokenUsage(model.usage),
@@ -60,6 +70,11 @@ function toggle(seq: number): void {
 
 <template>
   <div :class="['flex flex-col gap-4']" data-testid="inference-panel">
+    <div v-if="props.grader" :class="['flex items-center gap-2 text-xs']">
+      <button type="button" :class="['btn btn-active text-xs py-0.5!']" data-testid="inference-grader" @click="emit('clearGrader')">
+        <span class="i-mingcute-filter-line" aria-hidden="true" />calls of grader <span class="mono">{{ props.grader }}</span><span class="i-mingcute-close-line" aria-label="Show every call" />
+      </button>
+    </div>
     <section class="card">
       <h2 class="card-title">
         <span class="i-mingcute-coin-line" aria-hidden="true" />Usage

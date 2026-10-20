@@ -10,7 +10,7 @@ import { formatScore } from '../format'
  * Parallel sets of cases over category axes (matrix axes such as `tts` and `language`, string metrics such as a
  * stratum): every axis stacks one block per value, as tall as its share of the cases, and ribbons as wide as the cases
  * they carry join neighbor axes. Ribbons take the chart's case colors; cases outside the selection fade to gray.
- * Beside each value, its cases' mean exact score (of the selection, when one is made), so brushing `tts=official`
+ * Beside each value, its cases' mean primary score (of the selection, when one is made), so brushing `tts=official`
  * reads as "within official, ko is worst". Blocks are sorted by that score, best on top.
  *
  * Use when:
@@ -27,6 +27,8 @@ const props = defineProps<{
   filters: CaseFilters
   labelOf: (name: string) => string
   rows: readonly CaseRow[]
+  /** Score beside each value (`CaseTable.primary`); without it, the blocks show their case counts only. */
+  score?: string
   /** Keys of the selected cases. */
   selected: ReadonlySet<string>
 }>()
@@ -55,7 +57,9 @@ const filtering = computed(() => props.selected.size < props.rows.length)
 interface Block { count: number, from: number, height: number, mean: null | number, picked: boolean, value: string }
 
 function meanOf(rows: readonly CaseRow[]) {
-  const scores = rows.map(row => row.numbers.exact).filter((value): value is number => value != null)
+  if (props.score == null)
+    return null
+  const scores = rows.map(row => row.numbers[props.score!]).filter((value): value is number => value != null)
   return scores.length === 0 ? null : scores.reduce((sum, value) => sum + value, 0) / scores.length
 }
 
@@ -201,7 +205,7 @@ function startDrag(name: string, event: PointerEvent): void {
         >{{ props.labelOf(axis.name) }}</text>
         <text :x="axis.x" y="27" text-anchor="middle" font-size="10" fill="var(--chart-text)">click to pick · drag title</text>
         <g v-for="block in axis.blocks" :key="block.value" :class="['cursor-pointer']" @click="emit('pick', axis.name, block.value)">
-          <title>{{ block.value }} · {{ block.count }} case(s) · exact {{ formatScore(block.mean) }}</title>
+          <title>{{ block.value }} · {{ block.count }} case(s)<template v-if="props.score"> · {{ props.labelOf(props.score) }} {{ formatScore(block.mean) }}</template></title>
           <rect
             :x="axis.x - BLOCK_PX / 2" :y="block.from" :width="BLOCK_PX" :height="Math.max(1, block.height)" rx="2"
             :fill="block.picked ? 'var(--series-1)' : 'var(--chart-grid)'" :stroke="block.picked ? 'var(--series-1)' : 'none'"

@@ -1,3 +1,5 @@
+import type { HeadlineResult, ScoreSummary } from '../core/scoring'
+import type { ComparisonOutput } from './comparison'
 import type { RunSummaryFile } from './report-artifacts'
 
 import { existsSync } from 'node:fs'
@@ -6,6 +8,7 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { stripVTControlCharacters } from 'node:util'
 
 import { glob } from 'tinyglobby'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -182,5 +185,104 @@ describe('runComparison', () => {
     const directory = await createComparisonFixture({ workspaces: [{ name: 'raw' }] })
 
     await expect(runComparison({ configFilePath: join(directory, 'vieval.config.ts'), reporter: quietReporter, resolveCommand: sourceCommand, workspace: ['llm'] })).rejects.toThrow('No workspace matches "llm". Workspaces: raw.')
+  })
+})
+
+/**
+ * Creates a finished comparison whose workspaces each have one project with `headline` and a passed share of
+ * `passed` over 4 cases.
+ */
+function comparisonOutputOf(workspaces: Array<{ headline: HeadlineResult, id: string, passed: number }>): ComparisonOutput {
+  return {
+    attemptId: 'attempt-1',
+    comparisonId: 'comparison-1',
+    configFilePath: '/tmp/vieval.config.ts',
+    experimentId: 'experiment-1',
+    invocationId: 'invocation-1',
+    reportRoot: null,
+    workspaces: workspaces.map(workspace => ({
+      exitCode: 0,
+      id: workspace.id,
+      output: {
+        configFilePath: '/tmp/vieval.config.ts',
+        projects: [{
+          caseSummary: { errored: 0, failed: 4 - workspace.passed, passed: workspace.passed, skipped: 0, timeout: 0, total: 4 },
+          discoveredEvalFileCount: 1,
+          entryCount: 1,
+          errorMessage: null,
+          executed: true,
+          matrixSummary: null,
+          name: 'speech',
+          result: {
+            inferenceExecutors: [],
+            overall: { completion: workspace.headline.completion, headline: workspace.headline, runCount: 1, scores: [] },
+            runs: [{
+              completion: workspace.headline.completion,
+              entryId: 'speech',
+              id: 'speech',
+              inferenceExecutorId: 'default',
+              matrix: { eval: {}, meta: { evalRowId: 'default', runRowId: 'default' }, run: {} },
+              passed: summaryOf('passed', workspace.passed, 4),
+              scores: [],
+            }],
+          },
+          scoreDefinitions: [{ label: 'Pass', name: 'tts.pass', primary: true }],
+          taskCount: 1,
+        }],
+      },
+      signal: null,
+      stderrTail: [],
+    })),
+  }
+}
+
+/** Creates one score summary over `n` counted cases of `total`. */
+function summaryOf(name: string, sum: number, n: number, total = n, unscored: Record<string, number> = {}): ScoreSummary {
+  return { mean: n === 0 ? null : sum / n, n, name, sum, total, unscored }
+}
+
+/**
+ * @example
+ * describe('formatComparisonOutput', () => {})
+ */
+describe('formatComparisonOutput', () => {
+  /**
+   * @example
+   * it('ranks by the shared primary score with the completion rate in its own column', () => {})
+   */
+  it('ranks by the shared primary score with the completion rate in its own column', () => {
+    const completion = summaryOf('completion', 3, 4, 4, { errored: 1 })
+    const table = stripVTControlCharacters(formatComparisonOutput(comparisonOutputOf([
+      { headline: { completion, headline: { kind: 'score', score: summaryOf('tts.pass', 1, 4) } }, id: 'raw', passed: 4 },
+      { headline: { completion, headline: { kind: 'score', score: summaryOf('tts.pass', 3, 4) } }, id: 'rule', passed: 1 },
+    ])))
+
+    /**
+     * @example
+     * expect(table).toContain(' 1. rule/speech  Pass 75%  completed 75% (1 errored)')
+     */
+    expect(table).toContain(' 1. rule/speech  Pass 75%  completed 75% (1 errored)')
+    expect(table).toContain(' 2. raw/speech  Pass 25%  completed 75% (1 errored)')
+    expect(table).not.toContain('Primary scores differ')
+  })
+
+  /**
+   * @example
+   * it('says when primary scores differ and ranks by passed cases', () => {})
+   */
+  it('says when primary scores differ and ranks by passed cases', () => {
+    const completion = summaryOf('completion', 4, 4)
+    const table = stripVTControlCharacters(formatComparisonOutput(comparisonOutputOf([
+      { headline: { completion, headline: { kind: 'score', score: summaryOf('tts.pass', 4, 4) } }, id: 'raw', passed: 1 },
+      { headline: { completion, headline: { kind: 'score', score: summaryOf('tts.correct', 1, 4) } }, id: 'rule', passed: 3 },
+    ])))
+
+    /**
+     * @example
+     * expect(table).toContain('Primary scores differ (tts.pass, tts.correct), so the rows rank by passed cases.')
+     */
+    expect(table).toContain('Primary scores differ (tts.pass, tts.correct), so the rows rank by passed cases.')
+    expect(table).toContain(' 1. rule/speech  passed 75% (tts.correct 25%)  completed 100%')
+    expect(table).toContain(' 2. raw/speech  passed 25% (Pass 100%)  completed 100%')
   })
 })

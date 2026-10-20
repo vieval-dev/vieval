@@ -35,11 +35,11 @@ vieval run \
 
 | 文件 | 内容 |
 | --- | --- |
-| `run-summary.json` | 恰好一个项目的运行结果，包括 `schemaVersion: 1`、`runId`、`reportDirectory`、各类 ID、项目状态、用例计数与失败信息、矩阵摘要和汇总分数。`vieval report` 命令遇到其他版本时会报错。 |
-| `events.jsonl` | 按发生顺序记录运行、任务、用例、分数、指标和自定义事件。 |
-| `cases.jsonl` | 每个「任务 ID + 用例 ID」组合的最终记录，包括状态、耗时、根据事件推算的重试次数、分数、指标以及可选的输入和输出。 |
-| `metrics-summary.json` | 从 `cases.jsonl` 计算出的分数数量、总和与平均值。 |
-| `otlp/traces.json`、`otlp/logs.json`、`otlp/metrics.json` | 从用例记录转换得到的本地 OTLP 数据。 |
+| `run-summary.json` | 恰好一个项目的运行结果，包括 `schemaVersion: 2`、`runId`、`reportDirectory`、各类 ID、项目状态、用例计数与失败信息、矩阵摘要、每次任务运行的分数汇总、任务声明的 `scoreDefinitions`，以及解析好的标题数值（见下文）。`vieval report` 命令遇到其他版本时会报错。 |
+| `events.jsonl` | 按发生顺序记录运行、任务、用例、分数（`score.defined`、`score.recorded`）、指标和自定义事件。 |
+| `cases.jsonl` | 每个「任务 ID + 用例 ID」组合的最终记录（`schemaVersion: 2`），包括状态、耗时、根据事件推算的重试次数、分数、指标以及可选的输入和输出。`scores` 按分数名保存计入的值，`unscored` 按分数名保存无法评分的原因，`scoreDetails` 保存每条记录附带的 `rationale`、`grader` 和 `metadata`。 |
+| `metrics-summary.json` | 从 `cases.jsonl` 按分数名计算出的数量、总和与平均值。 |
+| `otlp/traces.json`、`otlp/logs.json`、`otlp/metrics.json` | 从用例记录转换得到的本地 OTLP 数据。分数指标名为 `vieval.score.<name>`。 |
 
 `vieval report index` 默认会创建 `index/runs.jsonl`，也可以通过 `--output` 指定其他位置；`vieval run` 本身不会写入这个索引文件。
 
@@ -49,11 +49,29 @@ vieval run \
 
 `cases.jsonl` 中的 `retryCount` 只统计最后一次尝试内的重试。对于启用自动尝试的任务，它根据 `attemptIndex` 计算，后续尝试不会被算作重试。在 `attemptIndex` 出现之前写入的报告没有这个字段，其中后续尝试的重复开始事件仍可能让 `retryCount` 增加。
 
-事件行仍为 `schemaVersion: 2`，用例记录仍为 `schemaVersion: 1`：新增可选字段或新事件名不改变版本号，读取方会忽略不认识的字段；重命名、删除字段或改变字段类型时才会增加版本号。
+事件行为 `schemaVersion: 3`，用例记录为 `schemaVersion: 2`。事件的第 3 版用具名分数取代了固定的 `exact` 和 `judge` 两类分数。新增可选字段或新事件名不改变版本号，读取方会忽略不认识的字段；重命名、删除字段或改变字段类型时才会增加版本号。读取方会拒绝旧版本写入的报告（“This report was written by an older vieval. Run it again.”），viewer 会把这类运行标记为不支持；没有迁移命令，请重新运行。
 
 ::: warning 报告文件可能包含敏感信息
 报告可能包含用例输入和输出、错误信息、自定义指标、模型或评测基准标识符，以及其他事件数据。请设置合适的保留期限和访问权限，并删除或脱敏不应离开评测环境的字段。
 :::
+
+## 读取标题数值
+
+每个项目和整个运行的标题数值只在运行结束时解析一次，以 `{ headline, completion }` 的形式写入 `run-summary.json`。CLI、viewer 和 `vieval report` 都直接读取它，不会各自重新计算：
+
+| `headline.kind` | 条件 | 显示方式 |
+| --- | --- | --- |
+| `score` | 所有带分数的任务使用同一个主分数名。 | 合并后的主分数及其名称，例如 `通过 87.5%`。 |
+| `per-task` | 各任务的主分数不同。 | 不显示运行级别的分数，按任务名分别列出各自的主分数。 |
+| `passed-cases` | 没有任何任务有主分数。 | 通过用例的比例，标注为“通过用例”。 |
+
+`completion` 是执行成功率，即 `(passed + failed) / (passed + failed + errored + timeout)`，总是显示在标题数值旁边。运行结束时的汇总行会同时输出两者，例如：
+
+```text
+Pass 87.5% · completed 96.8% (4 errored)
+```
+
+每个分数汇总都包含 `name`、`mean`（没有用例计入时为 `null`）、`n`（计入的用例数）、`total`（已结束且未跳过的用例数）、`sum` 和 `unscored`（按原因统计的次数）。项目和运行的汇总会把各任务的用例合并后再计算，而不是对各任务的平均值再求平均。
 
 ## 索引、检查与分析报告
 
@@ -97,7 +115,7 @@ vieval report attempts --config vieval.config.ts
 
 :::
 
-`attempts` 按时间从新到旧列出报告目录中的尝试：每个实验和尝试一行，显示涉及的工作区、通过、失败和没有结果的用例数，以及覆盖率。"←" 标记 `vieval run --resume` 不指定标识时会继续的那次尝试；备注列显示该尝试继续自哪次尝试、是否被中断，以及没来得及写入摘要就被终止的运行。可以传入报告目录，或用 `--config` 列出配置文件旁边的报告；用 `--experiment` 和 `--workspace` 筛选，用 `--format table|json` 选择输出格式。
+`attempts` 按时间从新到旧列出报告目录中的尝试：每个实验和尝试一行，显示涉及的工作区、通过、失败和没有结果的用例数，以及执行成功率。"←" 标记 `vieval run --resume` 不指定标识时会继续的那次尝试；备注列显示该尝试继续自哪次尝试、是否被中断，以及没来得及写入摘要就被终止的运行。可以传入报告目录，或用 `--config` 列出配置文件旁边的报告；用 `--experiment` 和 `--workspace` 筛选，用 `--format table|json` 选择输出格式。
 
 ## 比较两组已有报告
 
@@ -115,7 +133,7 @@ vieval report compare <基线报告目录> <候选方案报告目录>
 
 1. **先对齐用例。** 命令从基线和候选方案中读取 `cases.jsonl`，根据用例键找到同一个用例。候选方案独有的记录记为新增，基线独有的记录记为移除。
 2. **再计算匹配项。** 单个用例和分组的差值都按「候选方案减基线」计算，并且只使用已经对齐的记录。使用 `--group-by` 时，分组值取自候选方案。
-3. **处理缺失分数。** 已对齐的用例如果在某份报告中缺少 `--score-kind` 指定的分数，对应分数按 `0` 计算。`--score-kind` 默认为 `exact`。
+3. **处理缺失分数。** 已对齐的用例如果在某份报告中缺少 `--score <name>` 指定的分数，对应分数按 `0` 计算。`--score` 默认取 `run-summary.json` 中的主分数。
 4. **单独计算总体差值。** 命令分别对基线和候选方案中所有包含该分数的记录求平均值，再用候选平均值减去基线平均值。新增和移除的用例会影响总体差值；缺少所选分数的记录不会进入这一步。因此，总体差值不一定等于匹配用例差值的平均值。
 
 输出格式支持 `table` 和 `json`。
@@ -158,7 +176,7 @@ vieval run --config evals/agent-memory/vieval.config.ts
 - 比较配置的 `env`（以及单个条目的 `env`）优先于各工作区配置的 `env`，并在工作区插件运行之前生效。
 - `cache: { namespace }` 让所有工作区共用比较配置旁边的 `.vieval/cache/<比较 ID>/<namespace>/`。
 - 终端中只有一个实时窗口，显示所有工作区的 `Workspaces`、`Projects`、`Tasks`、`Cases`、`Concurrency` 和 `Time` 行。某个工作区失败不会中止其他工作区。
-- 运行结束后会输出排行榜：每个工作区的每个项目占一行，按混合分数（hybrid）排序；随后列出失败的工作区及其 stderr 的最后几行。
+- 运行结束后会输出排行榜：每个工作区的每个项目占一行，按主分数排序，执行成功率单独占一列；随后列出失败的工作区及其 stderr 的最后几行。如果各工作区的主分数不同，排行榜会提示这一点，并改为按通过用例排序。
 - 只要有工作区失败或存在失败的用例，退出码就是 `1`。`--json` 会输出比较结果。
 - 报告写入比较配置旁边的 `.vieval/reports`。实验 ID 默认为比较 ID，所有工作区共用同一个尝试，因此比较中的每次运行都位于 `<工作区>/<项目>/<比较 ID>/<尝试>/` 下。
 - 使用 `--with-viewer` 时，只启动一个查看器，展示比较的报告根目录。
@@ -237,7 +255,7 @@ vieval report compare \
   .vieval/reports/baseline \
   .vieval/reports/candidate \
   --case-key benchmark.case.id \
-  --score-kind exact \
+  --score retrieval.recall \
   --format table
 ```
 

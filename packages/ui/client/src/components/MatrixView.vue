@@ -14,6 +14,7 @@ import { useCatalog } from '../composables/useCatalog'
 import { countOf, formatScore, shortTaskId } from '../format'
 import { attemptLabel, formatShortDateTime } from '../labels'
 import { href } from '../router'
+import { headlineOf, headlineView } from '../scores'
 
 /**
  * Matrix of a project or experiment (`GET /api/matrix`): one grid per eval entry, rows along the run axis with the
@@ -144,13 +145,22 @@ const visibleGrids = computed(() => grids.value.map((grid) => {
   return { ...grid, columns: kept.map(index => grid.columns[index]!), rows: grid.rows.map(row => ({ ...row, cells: kept.map(index => row.cells[index]) })) }
 }))
 
+/** Label of a cell's headline (its primary score, or the passed cases), for the trend and the tooltips. */
+function headlineLabel(cell: MatrixCell): string {
+  return headlineView(headlineOf(cell.latest.scoring), matrix.data.value?.scoreDefinitions ?? []).label
+}
 /**
  * Whether a cell is read by its score: every case of its run got a result and none failed an assertion, so the case
  * counts are all green and say nothing; how the scores spread does.
  */
 function isScored(cell: MatrixCell): boolean {
-  const { counts, exact, state } = cell.latest
-  return exact != null && counts.failed === 0 && state !== 'running' && state !== 'queued'
+  const { counts, scoring, state } = cell.latest
+  return scoring.primary != null && counts.failed === 0 && state !== 'running' && state !== 'queued'
+}
+/** Mean of the primary score of the cell's run, `null` without one. */
+function latestScore(cell: MatrixCell): null | number {
+  const { primary, scores } = cell.latest.scoring
+  return scores.find(summary => summary.name === primary)?.mean ?? null
 }
 /** When a point of a cell's history started: its run's start time, else the attempt label. */
 function pointTime(point: MatrixCell['history'][number]): string {
@@ -158,22 +168,23 @@ function pointTime(point: MatrixCell['history'][number]): string {
 }
 
 /**
- * Change of the exact score from the previous full run, in percentage points; `undefined` unless the cell's run and an
- * earlier run both covered the cell fully (a partial run or one without a result is no baseline).
+ * Change of the primary score from the previous full run, in percentage points; `undefined` unless the cell's run and
+ * an earlier run both covered the cell fully (a partial run or one without a result is no baseline).
  */
 function scoreDelta(cell: MatrixCell): number | undefined {
-  if (cell.latest.coverage !== 'full' || cell.latest.exact == null)
+  const latest = latestScore(cell)
+  if (cell.latest.coverage !== 'full' || latest == null)
     return undefined
   const index = cell.history.findIndex(point => point.runKey === cell.latest.runKey)
-  const previous = cell.history.slice(0, Math.max(0, index)).findLast(point => point.coverage === 'full' && point.exact != null)
-  return previous == null ? undefined : (cell.latest.exact - previous.exact!) * 100
+  const previous = cell.history.slice(0, Math.max(0, index)).findLast(point => point.coverage === 'full' && point.score != null)
+  return previous == null ? undefined : (latest - previous.score!) * 100
 }
 
 const COVERAGE_TEXT = { full: 'every case', none: 'no result', other: 'other cases', partial: 'some cases' } as const
-/** Tooltip of one history point: when, how much it measured, and its score. */
+/** Tooltip of one history point: when, how much it measured, its score, and its completion rate. */
 function pointTitle(cell: MatrixCell, point: MatrixCell['history'][number]): string {
   const measured = point.counts.passed + point.counts.failed
-  return `${pointTime(point)} · ${COVERAGE_TEXT[point.coverage]} (${measured} of ${cell.caseCount} cases with a result) · exact ${formatScore(point.exact)}`
+  return `${pointTime(point)} · ${COVERAGE_TEXT[point.coverage]} (${measured} of ${cell.caseCount} cases with a result) · ${headlineLabel(cell)} ${formatScore(point.score)} · completed ${formatScore(point.completion)}`
 }
 </script>
 
@@ -216,7 +227,8 @@ function pointTitle(cell: MatrixCell, point: MatrixCell['history'][number]): str
                 :class="['w-44 md:w-56', cell.superseded && 'opacity-60']"
                 compact
                 :href="href({ name: 'task', runKey: cell.latest.runKey, taskId: cell.latest.taskId })"
-                :score="cell.latest.exact"
+                :headline="headlineOf(cell.latest.scoring)"
+                :definitions="matrix.data.value?.scoreDefinitions ?? []"
                 :state="isScored(cell) && cell.latest.state === 'passed' ? undefined : cell.latest.state"
                 :counts="isScored(cell) ? undefined : { ...cell.latest.counts, total: Math.max(cell.latest.counts.total, cell.latest.caseTotal ?? 0) }"
                 :run="runOf(cell)"
@@ -238,8 +250,8 @@ function pointTitle(cell: MatrixCell, point: MatrixCell['history'][number]): str
                 <span :class="['flex items-center gap-1.5 min-w-0']" :title="`${attemptLabel(cell.latest.attemptId)} · ${cell.latest.runKey}`">
                   <span :class="['truncate']">{{ cell.latest.startedAt ? formatShortDateTime(new Date(cell.latest.startedAt)) : attemptLabel(cell.latest.attemptId) }} · {{ countOf(cell.latest.counts.total, 'case') }} · {{ countOf(cell.history.length, 'run') }}</span>
                   <Sparkline
-                    :class="['ml-auto']" :values="cell.history.map(point => point.exact)" :coverage="cell.history.map(point => point.coverage)" :titles="cell.history.map(point => pointTitle(cell, point))"
-                    :label="`exact score of ${cell.history.length} runs`" :width="48" :height="16"
+                    :class="['ml-auto']" :values="cell.history.map(point => point.score)" :coverage="cell.history.map(point => point.coverage)" :titles="cell.history.map(point => pointTitle(cell, point))"
+                    :label="`${headlineLabel(cell)} of ${cell.history.length} runs`" :width="48" :height="16"
                   />
                 </span>
                 <span v-if="cell.latest.coverage !== 'full' && cell.latest.state !== 'running' && cell.latest.state !== 'queued'" :class="['flex items-center gap-1.5 [color:var(--ink-errored)]']" data-testid="matrix-cell-partial">

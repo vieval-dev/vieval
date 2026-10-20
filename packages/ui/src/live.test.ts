@@ -47,10 +47,12 @@ export default defineConfig({
 import process from 'node:process'
 import { existsSync } from 'node:fs'
 import { setTimeout as delay } from 'node:timers/promises'
-import { caseOf, describeTask } from '${vievalEntry}'
+import { caseOf, defineScore, describeTask } from '${vievalEntry}'
 
 // The test creates this file once it has seen the run in progress; the slow case waits for it.
 const gate = ${JSON.stringify(join(projectDirectory, 'release-slow-case'))}
+
+const quality = defineScore('demo.quality', { grader: { id: 'judge', kind: 'model' }, label: 'Quality' })
 
 const runs = new Map<string, number>()
 const count = (name: string) => {
@@ -71,7 +73,7 @@ describeTask('demo', () => {
     await context.recordArtifact('page.html', { body: '<h1>report</h1><script>alert(1)</script>', contentType: 'text/html' })
     await context.recordArtifact('config.yaml', { body: 'model: a\\n', contentType: 'application/yaml' })
     context.recordMetric('latency_ms', 42)
-    context.recordScore(0.75)
+    context.recordScore(quality, 0.75, { rationale: 'clear enough' })
     process.stderr.write('slow case done\\n')
   }, { autoAttempt: 1 })
 
@@ -158,7 +160,10 @@ describe('--with-viewer: in-process run on the event bus', () => {
       const byName = Object.fromEntries(task.cases.map(node => [node.name, node]))
       expect(byName['flaky/attempt'].rounds.map(round => [round.roundIndex, round.state, round.roundIndexInferred])).toEqual([[0, 'errored', false], [1, 'passed', false]])
       expect(byName['flaky/retry'].rounds.map(round => round.tries.map(entry => `${entry.retryIndex}:${entry.state}`))).toEqual([['0:retried', '1:passed'], ['0:retried', '1:passed']])
-      expect(byName['slow/artifacts'].scores).toEqual({ exact: 0.75 })
+      expect(byName['slow/artifacts'].scores).toEqual({ unscored: {}, values: { 'demo.quality': 0.75 } })
+      expect(task.scoring.primary).toBe('demo.quality')
+      expect(snapshot.scoreDefinitions).toEqual([expect.objectContaining({ grader: { id: 'judge', kind: 'model' }, label: 'Quality', name: 'demo.quality' })])
+      expect(snapshot.headline?.headline).toMatchObject({ kind: 'score', score: { name: 'demo.quality' } })
 
       // The run is listed once, from the bus, even though its report directory exists too.
       const runs = await api<RunListItem[]>('/api/runs')
@@ -173,6 +178,7 @@ describe('--with-viewer: in-process run on the event bus', () => {
 
       const slow = byName['slow/artifacts']
       const detail = v.parse(caseDetailSchema, await api<CaseDetail>(`/api/runs/${runKey}/case?taskId=${encodeURIComponent(task.id)}&caseId=${encodeURIComponent(slow.caseId)}`))
+      expect(detail.scoreRecords.map(entry => entry.record)).toEqual([{ name: 'demo.quality', rationale: 'clear enough', value: 0.75 }, { name: 'demo.quality', rationale: 'clear enough', value: 0.75 }])
       expect(detail.artifacts.map(artifact => [artifact.name, artifact.previewKind]).sort()).toEqual(
         [['config.yaml', 'yaml'], ['config.yaml', 'yaml'], ['page.html', 'html'], ['page.html', 'html'], ['rows.jsonl', 'jsonl'], ['rows.jsonl', 'jsonl']],
       )

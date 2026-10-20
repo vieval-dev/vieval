@@ -8,6 +8,7 @@ import meow from 'meow'
 
 import { errorMessageFrom } from '@moeru/std'
 
+import { readRunSummary, resolveRunSummaryPaths } from './report-artifacts'
 import { readCaseRecordsFromReport } from './report-cases'
 import { getCaseSelectorValue, stableStringify } from './report-selectors'
 
@@ -16,6 +17,8 @@ export interface BuildCaseComparisonArgs extends CaseComparisonOptions {
   left: readonly CaseRecord[]
   /** Right/candidate run case records. */
   right: readonly CaseRecord[]
+  /** Score name used for averages and deltas; see {@link resolveComparedScore} for the CLI default. */
+  score: string
 }
 
 export interface CaseComparisonOptions {
@@ -23,8 +26,6 @@ export interface CaseComparisonOptions {
   caseKey?: string
   /** Optional key used to group matched case deltas. */
   groupBy?: string
-  /** Score kind used for averages and deltas. */
-  scoreKind?: string
 }
 
 /** Full case comparison output for local report artifacts. */
@@ -39,6 +40,8 @@ export interface CaseComparisonOutput {
   overall: CaseComparisonSummary
   /** Cases present only in the left/base report. */
   removed: CaseRecord[]
+  /** Score name the averages and deltas use. */
+  score: string
   /** Matched cases sorted from largest improvement to largest regression. */
   topImprovements: CaseComparisonRow[]
   /** Matched cases sorted from largest regression to largest improvement. */
@@ -49,11 +52,14 @@ export interface CaseComparisonOutput {
 export interface CaseComparisonRow {
   /** Stable comparison key used to match the case. */
   caseKey: string
-  /** Direct left and right scores plus right-minus-left delta. */
+  /**
+   * Counted left and right values of the score plus the right-minus-left delta. A side whose case did not count the
+   * score (unscored, missing, or an excluded error) is `null`, and so is the delta.
+   */
   delta: {
-    left: number
-    right: number
-    score: number
+    left: null | number
+    right: null | number
+    score: null | number
   }
   /** Left/base case record. */
   left: CaseRecord
@@ -65,18 +71,19 @@ export interface CaseComparisonRow {
 
 /** Score summary for all compared cases or one group of compared cases. */
 export interface CaseComparisonSummary {
-  /** Difference between right and left average. */
-  delta: number
-  /** Average score in the left/base records. */
-  leftAverage: number
-  /** Average score in the right/candidate records. */
-  rightAverage: number
+  /** Difference between right and left average, or `null` when a side has no counted value. */
+  delta: null | number
+  /** Average counted score in the left/base records, or `null` when none counted. */
+  leftAverage: null | number
+  /** Average counted score in the right/candidate records, or `null` when none counted. */
+  rightAverage: null | number
 }
 
 interface ParsedReportCompareCliArguments extends CaseComparisonOptions {
   format: 'json' | 'table'
   leftReportPath: string
   rightReportPath: string
+  score?: string
 }
 
 const reportCompareHelpText = `
@@ -88,7 +95,7 @@ const reportCompareHelpText = `
   Options
     --format       Output format: table | json (default: table)
     --case-key     Case field, score name, or metric name used to match records
-    --score-kind   Score kind used for deltas (default: exact)
+    --score        Score name used for deltas (default: the primary score of the reports, or their only score)
     --group-by     Case field, score name, or metric name used for grouped deltas
 `
 
@@ -101,13 +108,14 @@ const reportCompareHelpText = `
  *
  * Expects:
  * - left and right records are normalized `cases.jsonl` rows
- * - score values are numeric and comparable by `scoreKind`
+ * - `scores` hold counted values (see `CaseRecord.scores`); a case without the score did not count it
  *
  * Returns:
- * - matched case deltas, added/removed cases, top changes, and optional group summaries
+ * - matched case deltas, added/removed cases, top changes, and optional group summaries; cases whose score did not
+ *   count on a side have a `null` delta and are left out of top changes and group averages
  */
 export function buildCaseComparison(args: BuildCaseComparisonArgs): CaseComparisonOutput {
-  const scoreKind = args.scoreKind ?? 'exact'
+  const score = args.score
   const leftByKey = indexRecordsByCaseKey(args.left, args.caseKey, 'left')
   const rightByKey = indexRecordsByCaseKey(args.right, args.caseKey, 'right')
   const cases: CaseComparisonRow[] = []
@@ -121,14 +129,14 @@ export function buildCaseComparison(args: BuildCaseComparisonArgs): CaseComparis
       continue
     }
 
-    const leftScore = getScore(leftRecord, scoreKind)
-    const rightScore = getScore(rightRecord, scoreKind)
+    const leftScore = leftRecord.scores[score] ?? null
+    const rightScore = rightRecord.scores[score] ?? null
     cases.push({
       caseKey,
       delta: {
         left: leftScore,
         right: rightScore,
-        score: rightScore - leftScore,
+        score: leftScore == null || rightScore == null ? null : rightScore - leftScore,
       },
       left: leftRecord,
       metricsChanged: diffMetrics(leftRecord.metrics, rightRecord.metrics),
@@ -142,8 +150,8 @@ export function buildCaseComparison(args: BuildCaseComparisonArgs): CaseComparis
     }
   }
 
-  const sortedCases = [...cases].sort((left, right) => {
-    const deltaOrder = right.delta.score - left.delta.score
+  const sortedCases = cases.filter(row => row.delta.score != null).sort((left, right) => {
+    const deltaOrder = right.delta.score! - left.delta.score!
     return deltaOrder === 0
       ? left.caseKey.localeCompare(right.caseKey)
       : deltaOrder
@@ -153,14 +161,14 @@ export function buildCaseComparison(args: BuildCaseComparisonArgs): CaseComparis
     added: added.sort(compareCaseRecords),
     cases: cases.sort((left, right) => left.caseKey.localeCompare(right.caseKey)),
     groups: args.groupBy == null ? undefined : buildComparisonGroups(cases, args.groupBy),
-    overall: {
-      delta: averageScore(args.right, scoreKind) - averageScore(args.left, scoreKind),
-      leftAverage: averageScore(args.left, scoreKind),
-      rightAverage: averageScore(args.right, scoreKind),
-    },
+    overall: summarizeAverages(
+      args.left.flatMap(record => record.scores[score] ?? []),
+      args.right.flatMap(record => record.scores[score] ?? []),
+    ),
     removed: removed.sort(compareCaseRecords),
-    topImprovements: sortedCases.filter(row => row.delta.score > 0).slice(0, 10),
-    topRegressions: [...sortedCases].reverse().filter(row => row.delta.score < 0).slice(0, 10),
+    score,
+    topImprovements: sortedCases.filter(row => row.delta.score! > 0).slice(0, 10),
+    topRegressions: [...sortedCases].reverse().filter(row => row.delta.score! < 0).slice(0, 10),
   }
 }
 
@@ -178,32 +186,34 @@ export function buildCaseComparison(args: BuildCaseComparisonArgs): CaseComparis
  * - multi-line text containing aggregate, group, top-change, case, and unmatched summaries
  */
 export function formatCaseComparisonTable(output: CaseComparisonOutput): string {
+  const fixed = (value: null | number) => value == null ? '-' : value.toFixed(3)
   const lines = [
     'COMPARE  vieval report cases',
+    `Score     ${output.score}`,
     `Matched   ${output.cases.length}`,
     `Added     ${output.added.length}`,
     `Removed   ${output.removed.length}`,
-    `Scores    left=${output.overall.leftAverage.toFixed(3)} right=${output.overall.rightAverage.toFixed(3)} delta=${output.overall.delta.toFixed(3)}`,
+    `Scores    left=${fixed(output.overall.leftAverage)} right=${fixed(output.overall.rightAverage)} delta=${fixed(output.overall.delta)}`,
   ]
 
   if (output.groups != null && Object.keys(output.groups).length > 0) {
     lines.push('Groups')
     for (const [groupKey, group] of Object.entries(output.groups)) {
-      lines.push(`${groupKey}  count=${group.count} left=${group.leftAverage.toFixed(3)} right=${group.rightAverage.toFixed(3)} delta=${group.delta.toFixed(3)}`)
+      lines.push(`${groupKey}  count=${group.count} left=${fixed(group.leftAverage)} right=${fixed(group.rightAverage)} delta=${fixed(group.delta)}`)
     }
   }
 
   if (output.topImprovements.length > 0) {
     lines.push('Top improvements')
     for (const row of output.topImprovements) {
-      lines.push(`${row.caseKey}  delta=${row.delta.score.toFixed(3)} left=${row.delta.left.toFixed(3)} right=${row.delta.right.toFixed(3)}`)
+      lines.push(`${row.caseKey}  delta=${fixed(row.delta.score)} left=${fixed(row.delta.left)} right=${fixed(row.delta.right)}`)
     }
   }
 
   if (output.topRegressions.length > 0) {
     lines.push('Top regressions')
     for (const row of output.topRegressions) {
-      lines.push(`${row.caseKey}  delta=${row.delta.score.toFixed(3)} left=${row.delta.left.toFixed(3)} right=${row.delta.right.toFixed(3)}`)
+      lines.push(`${row.caseKey}  delta=${fixed(row.delta.score)} left=${fixed(row.delta.left)} right=${fixed(row.delta.right)}`)
     }
   }
 
@@ -211,7 +221,7 @@ export function formatCaseComparisonTable(output: CaseComparisonOutput): string 
     lines.push('Cases')
     for (const row of output.cases) {
       const changedMetricNames = Object.keys(row.metricsChanged)
-      lines.push(`${row.caseKey}  delta=${row.delta.score.toFixed(3)} changedMetrics=${changedMetricNames.length === 0 ? 'none' : changedMetricNames.join(',')}`)
+      lines.push(`${row.caseKey}  delta=${fixed(row.delta.score)} changedMetrics=${changedMetricNames.length === 0 ? 'none' : changedMetricNames.join(',')}`)
     }
   }
 
@@ -227,6 +237,41 @@ export function formatCaseComparisonTable(output: CaseComparisonOutput): string 
 }
 
 /**
+ * Resolves the score `vieval report compare` uses when `--score` is not given.
+ *
+ * Use when:
+ * - the user compares two reports without naming a score
+ *
+ * Expects:
+ * - `reportPaths` to be the compared report locations, whose `run-summary.json` files hold the resolved headlines
+ *
+ * Returns:
+ * - the primary score name when every report's headline that has a score names the same one
+ * - otherwise the only score name the records have
+ * - throws when neither decides, listing the score names to pick from
+ */
+export async function resolveComparedScore(reportPaths: readonly string[], records: readonly CaseRecord[]): Promise<string> {
+  const summaryPaths = (await Promise.all(reportPaths.map(reportPath => resolveRunSummaryPaths(reportPath)))).flat()
+  const primaryNames = new Set(summaryPaths.flatMap(summaryPath => readRunSummary(summaryPath).projects.flatMap((project) => {
+    const headline = project.headline?.headline
+    return headline?.kind === 'score' ? [headline.score.name] : []
+  })))
+  if (primaryNames.size === 1) {
+    return [...primaryNames][0]!
+  }
+
+  const scoreNames = [...new Set(records.flatMap(record => Object.keys(record.scores)))].sort()
+  if (scoreNames.length === 1) {
+    return scoreNames[0]!
+  }
+
+  const reason = primaryNames.size > 1
+    ? `the reports have different primary scores (${[...primaryNames].sort().join(', ')})`
+    : `the reports have no primary score`
+  throw new Error(`Pass --score <name>: ${reason}. Scores in the reports: ${scoreNames.length === 0 ? 'none' : scoreNames.join(', ')}.`)
+}
+
+/**
  * Runs the `vieval report compare` command.
  *
  * Call stack:
@@ -235,6 +280,7 @@ export function formatCaseComparisonTable(output: CaseComparisonOutput): string 
  *   -> {@link import('./index').runTopLevelCli}
  *     -> {@link runReportCompareCli}
  *       -> {@link readCaseRecordsFromReport}
+ *       -> {@link resolveComparedScore} (without `--score`)
  *       -> {@link buildCaseComparison}
  *
  * Use when:
@@ -258,7 +304,7 @@ export async function runReportCompareCli(argv: readonly string[]): Promise<void
       groupBy: parsed.groupBy,
       left,
       right,
-      scoreKind: parsed.scoreKind,
+      score: parsed.score ?? await resolveComparedScore([parsed.leftReportPath, parsed.rightReportPath], [...left, ...right]),
     })
 
     if (parsed.format === 'json') {
@@ -275,16 +321,8 @@ export async function runReportCompareCli(argv: readonly string[]): Promise<void
   }
 }
 
-function averageScore(records: readonly CaseRecord[], scoreKind: string): number {
-  const values = records
-    .map(record => record.scores[scoreKind])
-    .filter((value): value is number => typeof value === 'number')
-
-  if (values.length === 0) {
-    return 0
-  }
-
-  return values.reduce((sum, value) => sum + value, 0) / values.length
+function averageOf(values: readonly number[]): null | number {
+  return values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0) / values.length
 }
 
 function buildComparisonGroups(
@@ -308,14 +346,11 @@ function buildComparisonGroups(
     Object.entries(groupedRows)
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([groupKey, rows]) => {
-        const leftAverage = rows.reduce((sum, row) => sum + row.delta.left, 0) / rows.length
-        const rightAverage = rows.reduce((sum, row) => sum + row.delta.right, 0) / rows.length
-
+        // Only rows that count the score on both sides compare like with like.
+        const compared = rows.filter(row => row.delta.score != null)
         return [groupKey, {
           count: rows.length,
-          delta: rightAverage - leftAverage,
-          leftAverage,
-          rightAverage,
+          ...summarizeAverages(compared.map(row => row.delta.left!), compared.map(row => row.delta.right!)),
         }]
       }),
   )
@@ -342,10 +377,6 @@ function diffMetrics(
   }
 
   return changed
-}
-
-function getScore(record: CaseRecord, scoreKind: string): number {
-  return record.scores[scoreKind] ?? 0
 }
 
 function indexRecordsByCaseKey(records: readonly CaseRecord[], caseKey: string | undefined, side: 'left' | 'right'): Map<string, CaseRecord> {
@@ -393,8 +424,7 @@ function parseReportCompareCliArguments(argv: readonly string[]): ParsedReportCo
       groupBy: {
         type: 'string',
       },
-      scoreKind: {
-        default: 'exact',
+      score: {
         type: 'string',
       },
     },
@@ -413,7 +443,7 @@ function parseReportCompareCliArguments(argv: readonly string[]): ParsedReportCo
     groupBy: cli.flags.groupBy,
     leftReportPath,
     rightReportPath,
-    scoreKind: cli.flags.scoreKind,
+    score: cli.flags.score,
   }
 }
 
@@ -440,4 +470,14 @@ function resolveCaseKey(record: CaseRecord, caseKey: string | undefined): string
   // A case id is only unique within its task, and it carries the case's index, which differs when two runs list
   // cases in another order. The task id plus the case name names one case across tasks, matrix rows, and runs.
   return `${record.taskId}::${record.caseName}`
+}
+
+function summarizeAverages(left: readonly number[], right: readonly number[]): CaseComparisonSummary {
+  const leftAverage = averageOf(left)
+  const rightAverage = averageOf(right)
+  return {
+    delta: leftAverage == null || rightAverage == null ? null : rightAverage - leftAverage,
+    leftAverage,
+    rightAverage,
+  }
 }

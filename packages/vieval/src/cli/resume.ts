@@ -1,14 +1,14 @@
 import type { CaseRecord } from './report-records'
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 
-import { errorMessageFrom } from '@moeru/std'
 import { glob } from 'tinyglobby'
 
 import { isMeasuredState } from '../core/scoring'
 import { sanitizeIdentitySegment } from './report-artifacts'
+import { readCaseRecordFile } from './report-records'
 
 /** `--resume` value that picks the most recent attempt of the experiment. */
 export const LATEST_ATTEMPT = 'latest'
@@ -118,7 +118,7 @@ export function formatResumeHint(input: ResumeHintInput): string | undefined {
  * - case names with a result in their last record (the highest auto attempt), by task id
  *
  * Throws:
- * - when the workspace has no such attempt, or a `cases.jsonl` line is not JSON
+ * - when the workspace has no such attempt, or a `cases.jsonl` line is not JSON or was written by an older vieval
  */
 export async function readMeasuredCases(options: {
   attemptId: string
@@ -141,7 +141,7 @@ export async function readMeasuredCases(options: {
   // Keyed by task and case id: the last record of an auto-attempted case decides whether it has a result.
   const lastRecords = new Map<string, CaseRecord>()
   for (const caseFile of caseFiles) {
-    for (const record of readCaseRecords(caseFile)) {
+    for (const record of readCaseRecordFile(caseFile)) {
       const key = `${record.taskId}\u0000${record.caseId}`
       const previous = lastRecords.get(key)
       if (previous == null || (record.attemptIndex ?? 0) >= (previous.attemptIndex ?? 0)) {
@@ -226,20 +226,6 @@ function noResultCount(count: number): string {
  */
 function quoteShellArgument(value: string): string {
   return /^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replaceAll('\'', '\'\\\'\'')}'`
-}
-
-function readCaseRecords(filePath: string): CaseRecord[] {
-  return readFileSync(filePath, 'utf-8').split('\n').flatMap((line, index) => {
-    if (line.trim() === '') {
-      return []
-    }
-    try {
-      return [JSON.parse(line) as CaseRecord]
-    }
-    catch (error) {
-      throw new Error(`Invalid cases.jsonl line ${index + 1} in "${filePath}": ${errorMessageFrom(error) ?? 'unknown parse error'}`)
-    }
-  })
 }
 
 /**

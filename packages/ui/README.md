@@ -178,7 +178,7 @@ See [API.md § Security](./API.md#security) for the status codes.
 | A new run does not appear in the sidebar | The sidebar re-reads report roots every 10 s. Check that the run writes below one of the roots in `GET /api/health`. |
 | Evidence says "Path is outside the allowed evidence roots." | The `*.evidence` metric points outside the `.vieval` directory. Add its directory with `--evidence-root`. |
 | *Command logs* is empty | The viewer looks for `.vieval/logs/*.jsonl` next to the report root. Logs without the case id, pod, or a time in the case's window are not matched. |
-| No rounds, tries, or console logs for an old run | The run used event schema version 1. These runs only have `cases.jsonl` (shown as `legacy`). |
+| An old run is listed but does not open | It was written by a vieval before named scores (event schema version below 3). Run it again. It is shown as `unsupported`. |
 | Component tests fail with "browserType.launch" | Run `pnpm exec playwright install chromium` once. |
 | `vieval run` without `--with-viewer` changed behavior | It should not: the viewer package is not imported then. Report it with the command and the `stdout` of both versions. |
 

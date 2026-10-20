@@ -29,11 +29,11 @@ Every project is its own run. Vieval places each run under the report root as `<
 
 | Artifact | Confirmed contents |
 | --- | --- |
-| `run-summary.json` | The run output of exactly one project, with `schemaVersion: 1`, `runId`, `reportDirectory`, identities, project status, case summaries and failures, matrix summaries, and aggregated run scores. `vieval report` commands reject other versions. |
-| `events.jsonl` | Ordered run, task, case, score, metric, and custom event envelopes captured during execution. |
-| `cases.jsonl` | One normalized final record per observed task/case, with identities, state, timing, a derived retry count, scores, metrics, optional input/output, and, for tasks with automatic attempts, `attemptIndex`, `autoAttempt`, and every attempt in `attempts`. |
-| `metrics-summary.json` | Overall score counts, sums, and averages derived from normalized case records. |
-| `otlp/traces.json`, `otlp/logs.json`, `otlp/metrics.json` | Local OTLP-shaped projections derived from the case records. Each resource and the `vieval.run` span carry `vieval.workspace.id`, `vieval.experiment.id`, `vieval.attempt.id`, and `vieval.run.id`. |
+| `run-summary.json` | The run output of exactly one project, with `schemaVersion: 2`, `runId`, `reportDirectory`, identities, project status, case summaries and failures, matrix summaries, the score summaries of every task run, the `scoreDefinitions` the tasks announced, and the resolved headline (see below). `vieval report` commands reject other versions. |
+| `events.jsonl` | Ordered run, task, case, score (`score.defined`, `score.recorded`), metric, and custom event envelopes captured during execution. |
+| `cases.jsonl` | One normalized final record per observed task/case (`schemaVersion: 2`), with identities, state, timing, a derived retry count, scores, metrics, optional input/output, and, for tasks with automatic attempts, `attemptIndex`, `autoAttempt`, and every attempt in `attempts`. `scores` maps score names to the counted value, `unscored` maps score names to the reason the grader gave none, and `scoreDetails` keeps the `rationale`, `grader`, and `metadata` of each record. |
+| `metrics-summary.json` | Overall score counts, sums, and averages per score name, derived from normalized case records. |
+| `otlp/traces.json`, `otlp/logs.json`, `otlp/metrics.json` | Local OTLP-shaped projections derived from the case records. Score gauges are named `vieval.score.<name>`. Each resource and the `vieval.run` span carry `vieval.workspace.id`, `vieval.experiment.id`, `vieval.attempt.id`, and `vieval.run.id`. |
 
 `vieval report index` creates another artifact, `index/runs.jsonl` by default. It is not written by `vieval run`.
 
@@ -43,11 +43,29 @@ Automatic attempts require one reading caveat. `run-summary.json` contains the t
 
 The `retryCount` field counts retries within the final attempt. For tasks with automatic attempts it uses `attemptIndex`, so additional attempts are not counted as retries. Reports written before `attemptIndex` existed have no such field; for them, repeated starts from additional attempts may still increase `retryCount`.
 
-Event lines keep `schemaVersion: 2` and case records keep `schemaVersion: 1`: new optional fields and new event names do not change the version, and readers ignore fields they do not know. A renamed, removed, or retyped field would increment the version.
+Event lines have `schemaVersion: 3` and case records have `schemaVersion: 2`. Version 3 of the events replaced the fixed `exact` and `judge` score kinds with named scores. New optional fields and new event names do not change the version, and readers ignore fields they do not know. A renamed, removed, or retyped field increments the version. Readers reject reports written with an older version ("This report was written by an older vieval. Run it again."), and the viewer lists such a run as unsupported; there is no migration command.
 
 ::: warning Treat report artifacts as potentially sensitive
 Artifacts may contain case inputs and outputs, error messages, custom metrics, model or benchmark identifiers, and other event payloads. Store them under an appropriate retention policy, restrict access, and remove or redact fields that should not leave the evaluation environment.
 :::
+
+## Read the headline
+
+The headline of each project and of the run is resolved once, when the run ends, and written into `run-summary.json` as `{ headline, completion }`. The CLI, the viewer, and `vieval report` read it instead of deriving it again:
+
+| `headline.kind` | When | Shown as |
+| --- | --- | --- |
+| `score` | Every task that has scores shares one primary score name. | The pooled primary score with its label, for example `Pass 87.5%`. |
+| `per-task` | The tasks have different primary scores. | No run-level score. Each task's primary score is listed with its task name. |
+| `passed-cases` | No task has a primary score. | The share of passed cases, labeled "Passed cases". |
+
+`completion` is the completion rate, `(passed + failed) / (passed + failed + errored + timeout)`, and it is always shown next to the headline. The run summary line prints both, for example:
+
+```text
+Pass 87.5% · completed 96.8% (4 errored)
+```
+
+Every score summary has `name`, `mean` (or `null` when no case counted), `n` (cases that counted), `total` (settled cases that were not skipped), `sum`, and `unscored` (counts per reason). Summaries of a project or a run pool the cases of their tasks; they are not a mean of task means.
 
 ## Index, inspect, and analyze reports
 
@@ -75,7 +93,7 @@ vieval report analyze <report-directory>
 vieval report attempts --config vieval.config.ts
 ```
 
-`attempts` lists the attempts in a report root, newest first: per experiment and attempt, the workspaces, the passed, failed, and no-result case counts, and the coverage. "←" marks the attempt that `vieval run --resume` continues without an id; notes show which attempt an attempt resumed, interrupts, and runs killed before they wrote a summary. Pass a report root, or `--config` to list the reports next to it; filter with `--experiment` and `--workspace`, and choose `--format table|json`.
+`attempts` lists the attempts in a report root, newest first: per experiment and attempt, the workspaces, the passed, failed, and no-result case counts, and the completion rate. "←" marks the attempt that `vieval run --resume` continues without an id; notes show which attempt an attempt resumed, interrupts, and runs killed before they wrote a summary. Pass a report root, or `--config` to list the reports next to it; filter with `--experiment` and `--workspace`, and choose `--format table|json`.
 
 ## Compare two existing report sets
 
@@ -85,7 +103,7 @@ The report comparison command requires a left baseline and a right candidate:
 vieval report compare <left-report-directory> <right-report-directory>
 ```
 
-It reads normalized cases, aligns them by a case key, and reports matched deltas plus added and removed cases. Per-case and grouped deltas use matched records and are `right - left`; grouping uses the right-side record's selector value. A missing selected score on a matched case is treated as `0`. The overall delta instead subtracts the two full record-set means, ignoring records that lack the selected score, so additions and removals affect it and it is not the mean matched delta. `--score-kind <kind>` defaults to `exact`, and output can be `table` or `json`.
+It reads normalized cases, aligns them by a case key, and reports matched deltas plus added and removed cases. Per-case and grouped deltas use matched records and are `right - left`; grouping uses the right-side record's selector value. A missing selected score on a matched case is treated as `0`. The overall delta instead subtracts the two full record-set means, ignoring records that lack the selected score, so additions and removals affect it and it is not the mean matched delta. `--score <name>` selects the score and defaults to the primary score in `run-summary.json`. Output can be `table` or `json`.
 
 The default alignment key is the `benchmark.case.id` metric when present, then `vieval.case.id`, then `<taskId>::<caseName>`. Use `--case-key <key>` when the benchmark has another stable identifier. An explicit key must exist on every record. Duplicate resolved keys on either side are an error rather than an arbitrary match.
 
@@ -117,7 +135,7 @@ vieval run --config evals/agent-memory/vieval.config.ts
 - The comparison `env` (and an entry's `env`) wins over each workspace config's `env`, and is applied before the workspace's plugins run.
 - `cache: { namespace }` makes all workspaces share `.vieval/cache/<comparison id>/<namespace>/` next to the comparison config.
 - One live terminal window shows `Workspaces`, `Projects`, `Tasks`, `Cases`, `Concurrency`, and `Time` rows for all workspaces. A failing workspace does not stop the others.
-- At the end, a leaderboard prints one row per workspace and project, sorted by hybrid score, then the failed workspaces with the last lines of their stderr.
+- At the end, a leaderboard prints one row per workspace and project, ranked by the primary score, with the completion rate in its own column, then the failed workspaces with the last lines of their stderr. If the workspaces have different primary scores, the leaderboard says so and ranks by passed cases.
 - The exit code is `1` when any workspace failed or had failing cases. `--json` prints the comparison output.
 - Reports go to `.vieval/reports` next to the comparison config. The experiment defaults to the comparison id, and all workspaces share one attempt, so every run of the comparison sits under `<workspace>/<project>/<comparison id>/<attempt>/`.
 - With `--with-viewer`, one viewer serves the comparison's report root.
@@ -168,7 +186,7 @@ vieval report compare \
   .vieval/reports/baseline \
   .vieval/reports/candidate \
   --case-key benchmark.case.id \
-  --score-kind exact \
+  --score retrieval.recall \
   --format table
 ```
 

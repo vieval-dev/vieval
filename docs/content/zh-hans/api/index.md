@@ -6,11 +6,11 @@ Vieval 提供以下公开导入路径。编写普通评测时，通常只需从 
 
 | 导入路径 | 提供的功能 |
 | --- | --- |
-| `vieval` | 用于编写评测文件和 CLI 配置的常用 API，包括 `describeTask`、`describeEval`、`caseOf`、`casesFromInputs`、`defineConfig`、`loadEnv`、`requiredEnvFrom`，以及已安装 Vieval 匹配器（matcher）的 `expect`。 |
+| `vieval` | 用于编写评测文件和 CLI 配置的常用 API，包括 `describeTask`、`describeEval`、`caseOf`、`casesFromInputs`、`defineScore`、`defineMetric`、`defineConfig`、`loadEnv`、`requiredEnvFrom`，以及已安装 Vieval 匹配器（matcher）的 `expect`。 |
 | `vieval/expect` | 仅导出已安装 Vieval 匹配器的 `expect`。不需要任务 DSL 时，可以使用此入口。 |
-| `vieval/core/assertions` | 创建和执行结构化断言，并将断言结果转换为供运行器使用的分数。常用导出包括 `evaluateAssertions`、`expectRubric` 和 `toRunScores`。 |
+| `vieval/core/assertions` | 创建和执行结构化断言。常用导出包括 `evaluateAssertions`、`expectRubric` 和 `expectCustom`。每个断言结果都带有 `0..1` 之间的 `score`，由用例通过 `context.recordScore(definition, outcome.score)` 记录。 |
 
-从 `vieval/core/assertions` 获得的断言结果不会自动写入任务的用例结果。调用方需要自行执行断言，并将结果传给 `toRunScores` 等后续处理函数。相关用法见[任务、用例与输入](/zh-hans/guide/learn/tasks-cases-and-inputs)和[断言、分数与指标](/zh-hans/guide/learn/assertions-scores-and-metrics)。
+从 `vieval/core/assertions` 获得的断言结果不会自动写入任务的用例结果。调用方需要自行执行断言，并把结果的 `score` 记到它所测量的分数上。相关用法见[任务、用例与输入](/zh-hans/guide/learn/tasks-cases-and-inputs)和[断言、分数与指标](/zh-hans/guide/learn/assertions-scores-and-metrics)。
 
 ## 配置模型和执行器
 
@@ -31,8 +31,7 @@ Vieval 提供以下公开导入路径。编写普通评测时，通常只需从 
 | `vieval/cli` | 解析顶层 CLI 参数并分派命令，导出 `parseTopLevelCliArguments` 和 `runTopLevelCli`。 |
 | `vieval/core/runner` | 收集评测、生成调度任务、执行任务并汇总结果。常用导出包括 `collectEvalEntries`、`createRunnerSchedule`、`runScheduledTasks` 和 `aggregateRunResults`。 |
 | `vieval/core/scheduler` | 通过槽位池和中间件放行项目、任务和用例，导出 `createScheduler`；用 `Scheduler.child` 创建只属于某个项目、任务或用例组的池。 |
-| `vieval/core/scoring` | 用与任务和查看器相同的规则为用例结果计分，导出 `scoreCaseOutcomes`、`strictExactOf` 和 `isMeasuredState`。它没有副作用，浏览器代码也可以导入。 |
-| `vieval/core/processors/results` | 处理运行结果并执行内置的结果判定策略，导出 `processRunResults` 和 `ResultGateDecision`。 |
+| `vieval/core/scoring` | 用与任务、报告和查看器相同的规则为用例结果计分。`scoreCases(outcomes, definitions)` 返回各分数的汇总、执行成功率、通过用例比例和主分数名，自定义的 `defineTask` 可以直接把它作为 `TaskRunOutput` 返回。`deriveScores` 计算一次用例尝试的派生分数（`combine`），`poolScoreSummaries` 合并多次任务运行中同名的汇总，`resolveHeadline` 解析项目或运行的标题数值，`isMeasuredState` 判断某个状态是否得出了结果。它没有副作用，浏览器代码也可以导入。 |
 
 如果需要自行组织运行器、调度器、重试和缓存逻辑，请先阅读[可靠执行](/zh-hans/guide/learn/reliable-execution)。结果汇总、判定和报告文件的关系见[报告与比较](/zh-hans/guide/learn/reports-and-comparisons)。
 

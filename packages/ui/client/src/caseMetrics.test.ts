@@ -1,8 +1,8 @@
-import type { CaseNode, MetricsResponse } from '../../src/shared/contract'
+import type { CaseNode, MetricsResponse, ScoreDefinition } from '../../src/shared/contract'
 
 import { describe, expect, it } from 'vitest'
 
-import { buildCaseTable, derivedMetricName, matchesFilters, metricLabel, separationOf } from './caseMetrics'
+import { buildCaseTable, columnDefinitions, derivedMetricName, formatColumnValue, matchesFilters, metricDefinition, metricLabel, separationOf } from './caseMetrics'
 
 function caseNode(index: number, name: string, state: CaseNode['state']): CaseNode {
   const caseId = `${index}:${name}`
@@ -19,14 +19,22 @@ function caseNode(index: number, name: string, state: CaseNode['state']): CaseNo
     metricCount: 0,
     name,
     rounds: [],
-    scores: {},
+    scores: { unscored: {}, values: {} },
     startedAt: '2026-10-13T00:00:00.000Z',
     state,
     taskId: 'task',
   }
 }
 
-function metrics(series: Record<string, [caseId: string, value: unknown, roundIndex?: number][]>): MetricsResponse {
+/**
+ * A metrics response of the task `task`: `series` as recorded metrics, `scores` as each case's counted score value,
+ * with the scores' `score.defined`.
+ */
+function metrics(
+  series: Record<string, [caseId: string, value: unknown, roundIndex?: number][]>,
+  scores: Record<string, [caseId: string, value: number][]> = {},
+  scoreDefinitions: ScoreDefinition[] = [],
+): MetricsResponse {
   const point = (name: string, [caseId, value, roundIndex]: [string, unknown, number?], seq: number) => ({ caseId, name, roundIndex, seq, taskId: 'task', time: '2026-10-13T00:00:00.000Z', value })
   const entries = Object.entries(series)
   return {
@@ -37,6 +45,12 @@ function metrics(series: Record<string, [caseId: string, value: unknown, roundIn
       name,
       points: points.map((item, seq) => point(name, item, seq)),
       summary: { avg: 0, count: points.length, max: 0, min: 0, sum: 0 },
+    })),
+    scoreDefinitions,
+    scores: Object.entries(scores).map(([name, points]) => ({
+      name,
+      points: points.map(([caseId, value]) => ({ caseId, taskId: 'task', value })),
+      summary: { mean: null, n: points.length, name, sum: 0, total: points.length, unscored: {} },
     })),
   }
 }
@@ -158,16 +172,18 @@ describe('buildCaseTable across tasks', () => {
 describe('buildCaseTable categories', () => {
   /**
    * @example
-   * expect(table.duplicates).toEqual([{ name: 'exact', of: 'state' }, { name: 'domain', of: 'group' }])
+   * expect(table.duplicates).toEqual([{ name: 'domain', of: 'group' }, { name: 'pass', of: 'state' }])
    */
   it('hides categories that split the cases exactly like an earlier one', () => {
-    const scored = cases.map((node, index) => ({ ...node, scores: index === 3 ? {} : { exact: node.state === 'passed' ? 1 : 0 } }))
-    const table = buildCaseTable(scored, metrics({
+    const table = buildCaseTable(cases, metrics({
       domain: cases.map(node => [node.caseId, node.name.split('/')[0]]),
+    }, {
+      // The running case has no counted value yet.
+      pass: cases.slice(0, 3).map(node => [node.caseId, node.state === 'passed' ? 1 : 0]),
     }))
 
     expect(table.categories).toEqual(['state', 'group'])
-    expect(table.duplicates).toEqual([{ name: 'domain', of: 'group' }, { name: 'exact', of: 'state' }])
+    expect(table.duplicates).toEqual([{ name: 'domain', of: 'group' }, { name: 'pass', of: 'state' }])
     expect(table.groups.map(group => group.representative)).toEqual(['duration_s'])
   })
 })
@@ -197,18 +213,21 @@ describe('separationOf', () => {
    * expect(separation.get('steps')).toEqual({ auc: 1, higherIn: 'failed' })
    */
   it('folds the AUC to 0.5..1, keeps the direction, and leaves scores out', () => {
-    const scored = cases.map((node, index) => ({ ...node, scores: { exact: index === 1 ? 0 : 1 } }))
-    const table = buildCaseTable(scored, metrics({
+    const table = buildCaseTable(cases, metrics({
       captures: cases.map((node, index) => [node.caseId, [5, 1, 6, 7][index]!]),
       flat: cases.map((node, index) => [node.caseId, index % 2]),
       steps: cases.map((node, index) => [node.caseId, [2, 50, 4, 9][index]!]),
+    }, {
+      // Three distinct values, so the score is a numeric axis like the metrics.
+      natural: cases.map((node, index) => [node.caseId, [1, 0, 0.5, 1][index]!]),
     }))
     const separation = separationOf(table)
 
     // The one failed case has the most steps, and the fewest captures.
     expect(separation.get('steps')).toEqual({ auc: 1, higherIn: 'failed' })
     expect(separation.get('captures')).toEqual({ auc: 1, higherIn: 'passed' })
-    expect(separation.has('exact')).toBe(false)
+    expect(table.groups.map(group => group.representative)).toContain('natural')
+    expect(separation.has('natural')).toBe(false)
   })
 
   // ROOT CAUSE:
@@ -216,17 +235,97 @@ describe('separationOf', () => {
   // In a scored eval every case passes (a score of 0 is a result), so there was no failed case to compare against and
   // the ranking was empty; the chart opened on metrics in recording order instead of the ones that lower the score.
   //
-  // We fixed this by comparing cases below the mean `exact` score with the rest when no case failed.
+  // We fixed this by comparing cases below the mean primary score with the rest when no case failed.
   /**
    * @example
    * expect(separation.get('steps')).toEqual({ auc: 1, higherIn: 'lower-scored' })
    */
-  it('ranks against the exact score when every case passed', () => {
-    const passed = cases.slice(0, 3).map((node, index) => ({ ...node, scores: { exact: [1, 0, 1][index]! }, state: 'passed' as const }))
+  it('ranks against the primary score when every case passed', () => {
+    const passed = cases.slice(0, 3).map(node => ({ ...node, state: 'passed' as const }))
     const table = buildCaseTable(passed, metrics({
       steps: passed.map((node, index) => [node.caseId, [2, 50, 4][index]!]),
+    }, {
+      correct: passed.map(node => [node.caseId, 1]),
+      pass: passed.map((node, index) => [node.caseId, [1, 0, 1][index]!]),
+    }, [{ name: 'correct' }, { name: 'pass', primary: true }]))
+
+    expect(table.primary).toBe('pass')
+    expect(separationOf(table).get('steps')).toEqual({ auc: 1, higherIn: 'lower-scored' })
+  })
+
+  /**
+   * @example
+   * expect(separationOf(table).size).toBe(0)
+   */
+  it('ranks nothing when every case passed and no score is primary', () => {
+    const passed = cases.slice(0, 3).map(node => ({ ...node, state: 'passed' as const }))
+    const table = buildCaseTable(passed, metrics({
+      steps: passed.map((node, index) => [node.caseId, [2, 50, 4][index]!]),
+    }, {
+      correct: passed.map((node, index) => [node.caseId, [1, 0, 1][index]!]),
+      natural: passed.map((node, index) => [node.caseId, [0, 1, 1][index]!]),
     }))
 
-    expect(separationOf(table).get('steps')).toEqual({ auc: 1, higherIn: 'lower-scored' })
+    expect(table.primary).toBeUndefined()
+    expect(separationOf(table).size).toBe(0)
+  })
+})
+
+describe('buildCaseTable scores', () => {
+  /**
+   * @example
+   * expect(table.scores).toEqual(['pass', 'correct'])
+   */
+  it('joins the counted score values, the primary score first and before the metrics', () => {
+    const table = buildCaseTable(cases, metrics({
+      steps: cases.map((node, index) => [node.caseId, [2, 8, 30, 64][index]!]),
+    }, {
+      correct: cases.map((node, index) => [node.caseId, [1, 0.5, 0, 1][index]!]),
+      // The failed case counts 0 whatever it recorded; the running one is not counted yet.
+      pass: cases.slice(0, 3).map((node, index) => [node.caseId, [1, 0, 0.5][index]!]),
+    }, [{ name: 'correct' }, { name: 'pass', primary: true }]))
+
+    expect(table.primary).toBe('pass')
+    expect(table.scores).toEqual(['pass', 'correct'])
+    expect(table.rows.map(row => row.numbers.pass)).toEqual([1, 0, 0.5, undefined])
+    // Scores lead the axes; the metrics follow in recording order.
+    expect(table.groups.map(group => group.representative).slice(0, 2)).toEqual(['pass', 'correct'])
+  })
+
+  /**
+   * @example
+   * expect(table.rows.map(row => row.numbers.pass)).toEqual([1, 0, undefined, undefined])
+   */
+  it('reads the recorded values of the cases while the metrics are not loaded', () => {
+    const recorded = cases.map((node, index): CaseNode => ({
+      ...node,
+      scores: { unscored: index === 2 ? { pass: 'grader_failed' } : {}, values: index < 2 ? { pass: [1, 0][index]! } : {} },
+    }))
+    const table = buildCaseTable(recorded, undefined)
+
+    expect(table.rows.map(row => row.numbers.pass)).toEqual([1, 0, undefined, undefined])
+    // The only score of the cases is their primary one.
+    expect(table.primary).toBe('pass')
+  })
+})
+
+describe('columnDefinitions', () => {
+  /**
+   * @example
+   * expect(metricLabel('pass', definitions)).toBe('Pass')
+   */
+  it('reads scores as higher-is-better columns with their formula, shown as percentages', () => {
+    const scoreDefinitions: ScoreDefinition[] = [
+      { label: 'Written back correctly', name: 'correct' },
+      { combine: { inputs: [{ name: 'correct' }, { atLeast: 0.5, name: 'natural' }], kind: 'all' }, label: 'Pass', name: 'pass', primary: true },
+    ]
+    const definitions = columnDefinitions([{ better: 'lower', name: 'latency', unit: 'ms' }], scoreDefinitions)
+
+    expect(metricLabel('pass', definitions)).toBe('Pass')
+    expect(metricDefinition('pass', definitions)?.better).toBe('higher')
+    expect(metricDefinition('pass', definitions)?.formula).toBe('all of: Written back correctly, natural ≥ 50%')
+    expect(formatColumnValue(0.875, metricDefinition('pass', definitions))).toBe('87.5%')
+    expect(formatColumnValue(1234.5, metricDefinition('latency', definitions))).toBe('1.2K ms')
+    expect(formatColumnValue(1.23456, undefined)).toBe('1.23')
   })
 })

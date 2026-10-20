@@ -39,6 +39,9 @@ export function buildOtelLogs(handle: RunHandle): OtelLogsResponse {
 
 /**
  * Gauges: every numeric metric, case scores, and case durations.
+ *
+ * A case score gauge is `vieval.score.<name>` with the value each round recorded: the same name as in the CLI's
+ * `otlp/metrics.json` and as the score attributes of the task and case spans.
  */
 export function buildOtelMetrics(handle: RunHandle): OtelMetricsResponse {
   const reducer = handle.reducer()
@@ -63,11 +66,8 @@ export function buildOtelMetrics(handle: RunHandle): OtelMetricsResponse {
       if (round.endedAt != null) {
         push('vieval.case.duration_ms', { attributes, time: round.endedAt, value: Date.parse(round.endedAt) - Date.parse(round.startedAt) })
       }
-      for (const kind of ['exact', 'judge'] as const) {
-        const value = round.scores[kind]
-        if (value != null) {
-          push(`vieval.case.score.${kind}`, { attributes, time: round.endedAt ?? round.startedAt, value })
-        }
+      for (const [name, value] of Object.entries(round.scores.values)) {
+        push(`vieval.score.${name}`, { attributes, time: round.endedAt ?? round.startedAt, value })
       }
     }
   }
@@ -124,7 +124,12 @@ export function buildOtelTraces(handle: RunHandle): OtelTracesResponse {
   for (const task of buildTaskNodes(reducer, () => 0)) {
     const taskSpanId = hash(`task:${runId}:${task.id}`, 16)
     spans.push({
-      attributes: { 'vieval.task.display_name': task.displayName, 'vieval.task.id': task.id, 'vieval.task.score.exact': task.scores.exact },
+      attributes: {
+        'vieval.task.display_name': task.displayName,
+        'vieval.task.id': task.id,
+        ...(task.scoring.primary == null ? {} : { 'vieval.task.primary_score': task.scoring.primary }),
+        ...Object.fromEntries(task.scoring.scores.map(score => [`vieval.score.${score.name}`, score.mean])),
+      },
       endTime: task.endedAt,
       kind: 'task',
       name: 'vieval.task',
@@ -147,7 +152,14 @@ export function buildOtelTraces(handle: RunHandle): OtelTracesResponse {
         }
         const caseSpanId = hash(`case:${runId}:${node.key}:${round.roundIndex}`, 16)
         spans.push({
-          attributes: { 'vieval.case.id': node.caseId, 'vieval.case.name': node.name, 'vieval.case.round_index': round.roundIndex, 'vieval.case.state': round.state, ...(round.scores.exact == null ? {} : { 'vieval.case.score.exact': round.scores.exact }) },
+          attributes: {
+            'vieval.case.id': node.caseId,
+            'vieval.case.name': node.name,
+            'vieval.case.round_index': round.roundIndex,
+            'vieval.case.state': round.state,
+            ...Object.fromEntries(Object.entries(round.scores.values).map(([name, value]) => [`vieval.score.${name}`, value])),
+            ...Object.fromEntries(Object.entries(round.scores.unscored).map(([name, reason]) => [`vieval.score.${name}.unscored`, reason])),
+          },
           endTime: round.endedAt,
           kind: 'case',
           name: 'vieval.case',

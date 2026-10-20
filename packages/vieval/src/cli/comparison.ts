@@ -23,12 +23,13 @@ import { glob } from 'tinyglobby'
 
 import packageJSON from '../../package.json'
 
+import { poolScoreSummaries } from '../core/scoring'
 import { runEnded, runStarted } from '../events'
 import { detectCliConfigMode, loadRawVievalConfig, supportedConfigFileNames } from './config'
 import { exitCodeFromSignal, listenForInterrupt } from './interrupt'
 import { resolveRunReportDirectory, sanitizeIdentitySegment } from './report-artifacts'
 import { resolveResumedAttemptId } from './resume'
-import { createRunReporter, forwardRunEventToReporter, hasRunFailures } from './run'
+import { createRunReporter, formatCompletion, formatHeadline, forwardRunEventToReporter, hasRunFailures } from './run'
 
 /**
  * File descriptor a workspace process sends its events and final output on.
@@ -156,24 +157,51 @@ export function comparisonExitCode(output: ComparisonOutput): number {
 }
 
 /**
- * Formats the leaderboard of a comparison: one row per project of every workspace, best hybrid score first, then
- * every workspace that failed with its reason.
+ * Formats the leaderboard of a comparison: one row per project of every workspace, then every workspace that failed
+ * with its reason.
+ *
+ * Rows rank by the mean of the primary score when every project with a result has the same primary score. Otherwise
+ * the leaderboard says that the primary scores differ and ranks by the share of passed cases, the one value every
+ * project has. The completion rate stands in its own column, because a score over few completed cases is not
+ * comparable.
  */
 export function formatComparisonOutput(output: ComparisonOutput): string {
-  const rows = output.workspaces.flatMap(workspace => (workspace.output?.projects ?? []).map(project => ({ project, workspace })))
-  rows.sort((left, right) => (right.project.result?.overall.hybridAverage ?? -1) - (left.project.result?.overall.hybridAverage ?? -1))
-  const score = (value: null | number | undefined) => value == null ? '-' : value.toFixed(3)
+  const rows = output.workspaces.flatMap(workspace => (workspace.output?.projects ?? []).map((project) => {
+    const headline = project.result?.overall.headline
+    const passed = poolScoreSummaries((project.result?.runs ?? []).flatMap(run => run.passed == null ? [] : [run.passed]))[0]
+    return {
+      headline,
+      passed,
+      primary: headline?.headline.kind === 'score' ? headline.headline.score : undefined,
+      project,
+      workspace,
+    }
+  }))
+  const scored = rows.filter(row => row.headline != null)
+  const primaryNames = [...new Set(scored.flatMap(row => row.primary == null ? [] : [row.primary.name]))]
+  const ranksByPrimary = primaryNames.length === 1 && scored.every(row => row.primary != null)
+  const rankValue = (row: typeof rows[number]) => (ranksByPrimary ? row.primary?.mean : row.passed?.mean) ?? -1
+  rows.sort((left, right) => rankValue(right) - rankValue(left))
+
   const lines = [
     ` ${c.dim('COMPARE')}  ${c.yellow(output.comparisonId)}  ${c.dim(`${output.workspaces.length} workspaces, invocation ${output.invocationId}`)}`,
     '',
-    ...rows.map(({ project, workspace }, index) => {
+    ...(ranksByPrimary || primaryNames.length === 0
+      ? []
+      : [` ${c.yellow(`Primary scores differ (${primaryNames.join(', ')}), so the rows rank by passed cases.`)}`, '']),
+    ...rows.map((row, index) => {
+      const { headline, project, workspace } = row
       const cases = project.caseSummary
       const unmeasured = (cases?.errored ?? 0) + (cases?.timeout ?? 0)
       const failed = project.errorMessage != null || (cases != null && (cases.failed > 0 || unmeasured > 0))
-      // A score over few measured cases is not comparable, so the coverage stands next to it.
-      const coverage = project.result?.overall.coverage
-      const coverageLabel = coverage == null || coverage.total === 0 ? '' : `  coverage ${score(coverage.measured / coverage.total)}`
-      return ` ${failed ? c.red('✗') : c.green('✓')} ${String(index + 1).padStart(2)}. ${workspace.id}/${project.name}  hybrid ${score(project.result?.overall.hybridAverage)}  exact ${score(project.result?.overall.exactAverage)}${coverageLabel}  cases ${cases?.passed ?? 0}/${cases?.total ?? 0}${cases != null && cases.failed > 0 ? c.red(` (${cases.failed} failed)`) : ''}${unmeasured > 0 ? c.yellow(` (${unmeasured} without result)`) : ''}${project.errorMessage == null ? '' : c.red(`  ${project.errorMessage}`)}${workspace.output?.interruptSignal == null ? '' : c.yellow(`  interrupted by ${workspace.output.interruptSignal}`)}`
+      const definitions = project.scoreDefinitions ?? []
+      const rankLabel = headline == null
+        ? 'n/a'
+        : ranksByPrimary || row.passed == null
+          ? formatHeadline(headline, definitions)
+          : `${formatHeadline({ ...headline, headline: { kind: 'passed-cases', score: row.passed } }, definitions)}${row.primary == null ? '' : c.dim(` (${formatHeadline(headline, definitions)})`)}`
+      const completionLabel = headline == null ? '' : `  ${formatCompletion(headline.completion)}`
+      return ` ${failed ? c.red('✗') : c.green('✓')} ${String(index + 1).padStart(2)}. ${workspace.id}/${project.name}  ${rankLabel}${completionLabel}  cases ${cases?.passed ?? 0}/${cases?.total ?? 0}${cases != null && cases.failed > 0 ? c.red(` (${cases.failed} failed)`) : ''}${project.errorMessage == null ? '' : c.red(`  ${project.errorMessage}`)}${workspace.output?.interruptSignal == null ? '' : c.yellow(`  interrupted by ${workspace.output.interruptSignal}`)}`
     }),
     ...output.workspaces.filter(workspace => workspace.output == null).flatMap(workspace => [
       ` ${c.red('✗')} ${workspace.id}  ${c.red(workspace.errorMessage ?? 'failed')}`,

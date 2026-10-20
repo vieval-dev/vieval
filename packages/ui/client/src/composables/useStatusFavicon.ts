@@ -125,7 +125,7 @@ async function draw(status: FaviconStatus): Promise<string> {
  * Maps a run, task, or case state to the badge of the tab icon; states without a clear outcome get none.
  *
  * Before:
- * - "running", "stale", "queued" / "failed", "timeout", "interrupted", "unfinished" / "ended", "passed" / "legacy"
+ * - "running", "stale", "queued" / "failed", "timeout", "interrupted", "unfinished" / "ended", "passed" / "unsupported"
  *
  * After:
  * - "pending" / "failure" / "success" / undefined

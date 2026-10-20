@@ -15,7 +15,7 @@ function caseOf(fields: Partial<CaseNode> & Pick<CaseNode, 'caseId' | 'state'>):
     metricCount: 0,
     name: fields.caseId,
     rounds: [],
-    scores: {},
+    scores: { unscored: {}, values: {} },
     startedAt: '2026-10-19T06:36:26.000Z',
     taskId: 'task',
     ...fields,

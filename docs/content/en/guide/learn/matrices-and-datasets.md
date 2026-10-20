@@ -100,6 +100,7 @@ Within every layer, Vieval applies controls in this order:
 
 ```ts [evals/layered.eval.ts]
 import { defineEval, defineTask } from 'vieval/config'
+import { scoreCases } from 'vieval/core/scoring'
 
 export default defineEval({
   description: 'Shows matrix layering.',
@@ -125,12 +126,12 @@ export default defineEval({
       },
     },
     run(context) {
-      return {
-        scores: [{
-          kind: 'exact',
-          score: context.task.matrix.eval.rubric === 'strict' ? 1 : 0,
-        }],
-      }
+      // A custom task returns score summaries; `scoreCases` builds them from case outcomes.
+      return scoreCases([{
+        scores: { 'layered.strict': context.task.matrix.eval.rubric === 'strict' ? 1 : 0 },
+        state: 'passed',
+        unscored: {},
+      }])
     },
   }),
 })
