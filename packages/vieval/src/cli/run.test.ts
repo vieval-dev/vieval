@@ -1613,7 +1613,7 @@ export default defineConfig({
       configFilePath: join(concurrencyCasesFromInputsProjectDirectory, 'vieval.config.ts'),
       cwd: concurrencyCasesFromInputsProjectDirectory,
       report: false,
-    }, RUN_STATE_WAIT)
+    })
 
     expect(output.projects[0]?.executed).toBe(true)
     expect(output.projects[0]?.taskCount).toBe(1)
