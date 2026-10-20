@@ -463,7 +463,6 @@ A concurrency value is shared by the work where it is declared: top-level `sched
 - `vieval/core/runner`: collection, scheduling, task context, cache runtime, scheduler, execution, and aggregation utilities.
 - `vieval/core/assertions`: assertion primitives and pipeline helpers. Outcomes carry a `score`; record it with `context.recordScore(definition, outcome.score)`.
 - `vieval/core/scoring`: the one scoring rule (`scoreCases`), derived scores (`deriveScores`), pooling (`poolScoreSummaries`), and headline resolution (`resolveHeadline`). Side-effect free.
-- `vieval/core/processors/results`: `processRunResults` with the `threshold` (score-threshold) and `maxFailedRuns` policies, gating on the primary score unless `score` names another.
 - `vieval/core/inference-executors`: env helpers and remote provider executors.
 - `vieval/testing/expect-extensions`: Vitest expect extensions for testing eval behavior.
 

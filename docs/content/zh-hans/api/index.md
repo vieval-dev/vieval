@@ -32,7 +32,6 @@ Vieval 提供以下公开导入路径。编写普通评测时，通常只需从 
 | `vieval/core/runner` | 收集评测、生成调度任务、执行任务并汇总结果。常用导出包括 `collectEvalEntries`、`createRunnerSchedule`、`runScheduledTasks` 和 `aggregateRunResults`。 |
 | `vieval/core/scheduler` | 通过槽位池和中间件放行项目、任务和用例，导出 `createScheduler`；用 `Scheduler.child` 创建只属于某个项目、任务或用例组的池。 |
 | `vieval/core/scoring` | 用与任务、报告和查看器相同的规则为用例结果计分。`scoreCases(outcomes, definitions)` 返回各分数的汇总、执行成功率、通过用例比例和主分数名，自定义的 `defineTask` 可以直接把它作为 `TaskRunOutput` 返回。`deriveScores` 计算一次用例尝试的派生分数（`combine`），`poolScoreSummaries` 合并多次任务运行中同名的汇总，`resolveHeadline` 解析项目或运行的标题数值，`isMeasuredState` 判断某个状态是否得出了结果。它没有副作用，浏览器代码也可以导入。 |
-| `vieval/core/processors/results` | 用 `processRunResults` 判定汇总结果，并返回 `ResultGateDecision`。`threshold` 策略（`ScoreThresholdPolicyOptions`：`score`、`minOverall`、`minPerExecutor`）和 `maxFailedRuns` 策略（`maxFailedRuns`、`minRunScore`、`score`）默认按主分数判定，也可以用 `score` 指定其他分数；找不到对应分数时会报告违规。 |
 
 如果需要自行组织运行器、调度器、重试和缓存逻辑，请先阅读[可靠执行](/zh-hans/guide/learn/reliable-execution)。结果汇总、判定和报告文件的关系见[报告与比较](/zh-hans/guide/learn/reports-and-comparisons)。
 

@@ -3,7 +3,7 @@ import type { HeadlineInput, ScoredCaseOutcome } from './index'
 
 import { describe, expect, it } from 'vitest'
 
-import { deriveScores, emptyScoreSummary, isMeasuredState, poolScoreSummaries, resolveHeadline, scoreCases } from './index'
+import { countCase, deriveScores, emptyScoreSummary, isMeasuredState, poolScoreSummaries, resolveHeadline, scoreCases } from './index'
 
 function outcome(state: ScoredCaseOutcome['state'], scores: Record<string, number> = {}, unscored: Record<string, string> = {}): ScoredCaseOutcome {
   return { scores, state, unscored }
@@ -122,6 +122,23 @@ describe('scoreCases', () => {
     expect(scoreCases([outcome('passed', { correct: 1, pass: 1 })], [{ name: 'correct' }, { name: 'pass', primary: true }]).primary).toBe('pass')
     expect(scoreCases([outcome('passed', { only: 1 })]).primary).toBe('only')
     expect(scoreCases([outcome('passed', { a: 1, b: 1 })]).primary).toBeUndefined()
+  })
+})
+
+describe('countCase', () => {
+  const definitions = [{ name: 'correct' }, { errors: 'zero' as const, name: 'answered' }]
+
+  /**
+   * @example
+   * failed -> 0 in every score of the task; errored -> 0 only in `errors: 'zero'` scores; unscored -> absent.
+   */
+  it('counts one outcome by its state', () => {
+    expect(countCase(outcome('passed', { answered: 1, correct: 1 }), definitions)).toEqual({ answered: 1, correct: 1 })
+    expect(countCase(outcome('passed', { answered: 1 }, { correct: 'grader_failed' }), definitions)).toEqual({ answered: 1 })
+    expect(countCase(outcome('failed', { correct: 1 }), definitions)).toEqual({ answered: 0, correct: 0 })
+    expect(countCase(outcome('errored'), definitions)).toEqual({ answered: 0 })
+    expect(countCase(outcome('timeout'), definitions)).toEqual({ answered: 0 })
+    expect(countCase(outcome('skipped'), definitions)).toEqual({})
   })
 })
 

@@ -165,20 +165,14 @@ describe('buildCaseRecords', () => {
       ],
       projectName: 'project-1',
     })
-    const byName = Object.fromEntries(records.map(record => [record.caseName, record]))
+    const failed = records.find(record => record.caseName === 'failed')
 
     /**
      * @example
-     * expect(byName.failed?.scores).toEqual({ answered: 0, correct: 0 })
+     * expect(failed?.scores).toEqual({ answered: 0, correct: 0 })
      */
-    expect(byName.passed?.scores).toEqual({ answered: 1, correct: 1 })
-    expect(byName['passed-missing']?.scores).toEqual({ answered: 1 })
-    expect(byName['passed-unscored']?.scores).toEqual({ answered: 1 })
-    expect(byName['passed-unscored']?.unscored).toEqual({ correct: 'grader_failed' })
-    expect(byName.failed?.scores).toEqual({ answered: 0, correct: 0 })
-    expect(byName.errored?.scores).toEqual({ answered: 0 })
-    expect(byName.timeout?.scores).toEqual({ answered: 0 })
-    expect(byName.skipped?.scores).toEqual({})
+    // The per-state rule itself is `countCase`, tested in `core/scoring`; here the records must use it.
+    expect(failed?.scores).toEqual({ answered: 0, correct: 0 })
 
     const outcomes: ScoredCaseOutcome[] = [
       { scores: { answered: 1, correct: 1 }, state: 'passed', unscored: {} },
