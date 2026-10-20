@@ -48,6 +48,17 @@ watch(() => props.refreshKey, () => {
 })
 
 const matrixKeys = computed(() => [...new Set(props.snapshot.tasks.flatMap(task => Object.keys({ ...task.matrix?.run, ...task.matrix?.eval })))])
+/**
+ * Normalizes a task's display name for the matrix rows table, whose axis columns already show the matrix values that
+ * `vieval run` appends in brackets (`formatTaskDisplayName` in `packages/vieval/src/cli/run.ts`).
+ *
+ * Before:
+ * - "en [tts=official, asr=gemini-3.8-flash]"
+ *
+ * After:
+ * - "en"
+ */
+const taskName = (displayName: string) => displayName.replace(/ \[[^\]]*\]$/, '')
 const scoreDefinitions = computed(() => scores.data.value?.definitions ?? props.snapshot.scoreDefinitions)
 /** Every score of the run in the order the summary lists them; the series of the bar charts and the table columns. */
 const scoreNames = computed(() => (scores.data.value?.overall.scores ?? []).map(summary => summary.name))
@@ -176,7 +187,7 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
             </thead>
             <tbody>
               <tr v-for="row in scoreRows" :key="row.summary.name" :class="['border-b border-neutral-100/70 dark:border-neutral-900']" data-testid="score-row">
-                <td :class="['td text-sm whitespace-nowrap']">
+                <td :class="['td text-sm max-md:text-xs whitespace-nowrap']">
                   <MetricInfo :name="row.summary.name" :definition="row.column" :values="[]" :summary="row.summary">
                     <span :class="['cursor-help', row.column?.label == null && row.column != null && 'mono']">{{ row.label }}</span>
                   </MetricInfo>
@@ -191,10 +202,10 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
                 <td :class="['td text-xs muted']">
                   {{ unscoredText(row.summary.unscored) || '—' }}
                 </td>
-                <td :class="['td text-xs']">
+                <td :class="['td text-xs min-w-64']">
                   {{ row.column?.formula ?? '—' }}
                 </td>
-                <td :class="['td text-xs mono']">
+                <td :class="['td text-xs mono whitespace-nowrap']">
                   {{ row.grader ?? '—' }}
                 </td>
               </tr>
@@ -244,10 +255,10 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
             </thead>
             <tbody>
               <tr v-for="task in props.snapshot.tasks" :key="task.id" :class="['border-b border-neutral-100/70 dark:border-neutral-900']">
-                <td class="td">
-                  <a :class="['link']" :href="href({ name: 'task', runKey, taskId: task.id })">{{ task.displayName }}</a>
+                <td :class="['td whitespace-nowrap']">
+                  <a :class="['link']" :href="href({ name: 'task', runKey, taskId: task.id })" :title="task.displayName">{{ matrixKeys.length > 0 ? taskName(task.displayName) : task.displayName }}</a>
                 </td>
-                <td v-for="key in matrixKeys" :key="key" :class="['td mono text-xs']">
+                <td v-for="key in matrixKeys" :key="key" :class="['td mono text-xs whitespace-nowrap']">
                   {{ task.matrix?.run[key] ?? task.matrix?.eval[key] ?? '—' }}
                 </td>
                 <td :class="['td min-w-48']">
@@ -355,9 +366,10 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
           </li>
         </ul>
       </section>
-      <section v-if="metrics.data.value && metrics.data.value.inference.requests > 0" :class="['card p-3 text-sm']">
-        Inference: {{ metrics.data.value.inference.requests }} requests · {{ metrics.data.value.inference.responses }} responses · {{ metrics.data.value.inference.failed }} failed
-        <span v-for="(value, key) in metrics.data.value.inference.totals" :key="key" class="ml-3 tabular-nums">{{ key }}={{ value }}</span>
+      <!-- The totals are one unbreakable `key=value` token each; the flex row wraps between them on narrow screens. -->
+      <section v-if="metrics.data.value && metrics.data.value.inference.requests > 0" :class="['card p-3 text-sm', 'flex flex-wrap items-baseline gap-x-3 gap-y-1']">
+        <span>Inference: {{ metrics.data.value.inference.requests }} requests · {{ metrics.data.value.inference.responses }} responses · {{ metrics.data.value.inference.failed }} failed</span>
+        <span v-for="(value, key) in metrics.data.value.inference.totals" :key="key" :class="['tabular-nums break-all']">{{ key }}={{ value }}</span>
       </section>
     </StateView>
   </div>

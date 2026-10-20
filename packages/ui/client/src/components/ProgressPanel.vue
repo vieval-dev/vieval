@@ -5,6 +5,7 @@ import type { LiveConnection } from '../composables/useRunLive'
 import { useIntervalFn, useTimestamp } from '@vueuse/core'
 import { computed } from 'vue'
 
+import InfoButton from './InfoButton.vue'
 import ProgressBar from './ProgressBar.vue'
 import ProgressChart from './ProgressChart.vue'
 import StateBadge from './StateBadge.vue'
@@ -40,6 +41,8 @@ const basisText = computed(() => ({
   'ended': 'run ended',
   'unknown': 'no case finished yet: no estimate',
 })[progress.value.basis])
+/** How the remaining time is estimated: printed under the numbers on desktop, behind an info button on phones. */
+const etaBasis = computed(() => `ETA basis: ${basisText.value}${live.value && progress.value.lowerBound ? '; auto attempts were seen, so more rounds may follow (lower bound)' : ''}. Rule: elapsed ÷ settled cases × estimated cases − elapsed, and at least as long as the longest running case has run.`)
 const connectionText = computed(() => ({
   closed: 'not connected',
   connecting: 'connecting…',
@@ -122,8 +125,9 @@ const connectionText = computed(() => ({
         </dd>
       </div>
       <div>
-        <dt class="text-xs muted">
+        <dt :class="['flex items-center gap-1 text-xs muted']">
           {{ live ? 'Estimated remaining' : 'Total duration' }}
+          <span :class="['flex md:hidden']"><InfoButton label="How the ETA is estimated"><p>{{ etaBasis }}</p></InfoButton></span>
         </dt>
         <dd :class="['text-xl font-semibold tabular-nums']" data-testid="progress-eta">
           <template v-if="live">
@@ -143,8 +147,8 @@ const connectionText = computed(() => ({
         </dd>
       </div>
     </dl>
-    <p :class="['text-xs muted max-md:order-1']">
-      {{ `ETA basis: ${basisText}${live && progress.lowerBound ? '; auto attempts were seen, so more rounds may follow (lower bound)' : ''}. Rule: elapsed ÷ settled cases × estimated cases − elapsed, and at least as long as the longest running case has run.` }}
+    <p :class="['text-xs muted max-md:hidden']">
+      {{ etaBasis }}
     </p>
 
     <div v-if="props.snapshot.current.running.length > 0 || props.snapshot.current.waiting.length > 0" :class="['max-md:order-1']" data-testid="current-position">
