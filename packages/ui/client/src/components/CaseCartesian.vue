@@ -76,7 +76,12 @@ function drawDots(svg: Selection<SVGSVGElement, unknown, null, undefined>) {
       g.call((horizontal ? axisBottom(scale) : axisLeft(scale)).tickSizeOuter(0))
     else
       g.call((horizontal ? axisBottom(scale) : axisLeft(scale)).ticks(horizontal ? 8 : 5).tickFormat(value => formatTick(value as number)).tickSizeOuter(0))
-    g.call(group => group.selectAll('line, path').attr('stroke', 'var(--chart-grid)'))
+    // NOTICE:
+    // d3-axis writes `font-family="sans-serif"` (and `font-size="10"`) onto the axis group on every call,
+    // so tick labels would render in the system sans instead of the viewer font. Drop the attribute so
+    // the labels inherit `font.sans` from the page. See `node_modules/d3-axis/src/axis.js:109-110` (`selection.attr("font-family", "sans-serif")`).
+    g.attr('font-family', null)
+      .call(group => group.selectAll('line, path').attr('stroke', 'var(--chart-grid)'))
       .call(group => group.selectAll('text').attr('fill', 'var(--chart-text)').attr('font-size', 11))
     if (axis.kind === 'category') {
       const picked = props.filters.categories[axis.name]

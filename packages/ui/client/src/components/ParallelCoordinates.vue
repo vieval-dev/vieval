@@ -193,7 +193,12 @@ function drawLines(svg: Selection<SVGSVGElement, unknown, null, undefined>) {
       return
     }
     const scale = scales.get(axis.name) as ScaleContinuousNumeric<number, number>
+    // NOTICE:
+    // d3-axis writes `font-family="sans-serif"` (and `font-size="10"`) onto the axis group on every call,
+    // so tick labels would render in the system sans instead of the viewer font. Drop the attribute so
+    // the labels inherit `font.sans` from the page. See `node_modules/d3-axis/src/axis.js:109-110` (`selection.attr("font-family", "sans-serif")`).
     g.call(axisLeft(scale).ticks(5).tickFormat(value => formatTick(value as number)).tickSizeOuter(0))
+      .attr('font-family', null)
       .call(axisGroup => axisGroup.selectAll('text').attr('fill', 'var(--chart-text)'))
       .call(axisGroup => axisGroup.selectAll('line, path').attr('stroke', 'var(--chart-grid)'))
     const brush = brushY<unknown>().extent([[-12, margin.top], [12, height - margin.bottom]]).on('brush end', (event: { selection: [number, number] | null, sourceEvent?: Event }) => {
