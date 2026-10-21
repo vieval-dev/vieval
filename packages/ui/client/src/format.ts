@@ -45,19 +45,6 @@ export function formatTick(value: number): string {
 const compactFormats = new Map<string, Intl.NumberFormat>()
 
 /**
- * Formats a count with its noun in the right number, for short summaries.
- *
- * Before:
- * - (1, 'run'), (12, 'run'), (3, 'experiment')
- *
- * After:
- * - "1 run", "12 runs", "3 experiments"
- */
-export function countOf(count: number, noun: string): string {
-  return `${formatCount(count)} ${noun}${count === 1 ? '' : 's'}`
-}
-
-/**
  * Formats a number in compact notation in the viewer's locale, with at most one decimal.
  *
  * Use when:

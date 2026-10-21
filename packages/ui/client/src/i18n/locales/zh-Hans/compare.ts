@@ -18,8 +18,8 @@ export default {
   result: {
     case: '用例',
     cases: '用例',
-    chartTitle: '各列的主分数和完成率',
-    completed: '完成率',
+    chartTitle: '各列的主分数和执行成功率',
+    completed: '执行成功率',
     differs: '各列结果不同',
     empty: '没有可对比的内容',
     emptyHint: '这一层级还没有包含用例的运行。',
