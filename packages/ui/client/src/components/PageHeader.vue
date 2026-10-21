@@ -30,6 +30,11 @@ const props = defineProps<{
   subtitle?: string
   /** Name of the page: the heading (unless the `title` slot replaces it) and the document title. */
   title: string
+  /**
+   * `sm` sets the title in body size, for a page whose header leads with something else (the run's score).
+   * @default 'lg'
+   */
+  titleSize?: 'lg' | 'sm'
 }>()
 // The browser tab follows the page; a page still loading keeps the plain "Vieval" of the title template.
 useHead({ title: () => (props.loading ? undefined : props.title) })
@@ -62,7 +67,7 @@ const siblings = computed(() => {
          title would get narrower than 24rem. -->
     <div :class="['flex items-start gap-x-3 gap-y-2 flex-wrap']">
       <div :class="['min-w-0 flex-1 md:basis-96']">
-        <h1 :class="['flex items-start gap-2 text-lg font-semibold [overflow-wrap:anywhere] leading-7']">
+        <h1 :class="['flex items-start gap-2 font-semibold [overflow-wrap:anywhere]', props.titleSize === 'sm' ? 'text-base leading-6' : 'text-lg leading-7']">
           <span v-if="props.level" :class="[levelIcons[props.level], 'shrink-0 mt-1 muted']" role="img" :aria-label="levelLabels[props.level]" :title="levelLabels[props.level]" />
           <span v-if="props.loading" :class="['skeleton h-6 my-0.5 w-56 max-w-full']" data-testid="page-header-skeleton" />
           <slot v-else name="title">
@@ -83,7 +88,12 @@ const siblings = computed(() => {
       </div>
       <!-- IdMenu renders no element of its own; the wrapper carries the order and the alignment. -->
       <span v-if="props.id && props.level" :class="['flex items-center min-h-7 max-md:order-1']">
-        <IdMenu :id="props.id" :kind="levelLabels[props.level].toLowerCase()" />
+        <!-- The page's secondary actions join the menu only when the page has some, so the menu adds no empty group. -->
+        <IdMenu :id="props.id" :kind="levelLabels[props.level].toLowerCase()">
+          <template v-if="$slots.menu" #default>
+            <slot name="menu" />
+          </template>
+        </IdMenu>
       </span>
     </div>
   </header>
