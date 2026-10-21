@@ -1,0 +1,47 @@
+import type en from '../en/compare'
+
+export default {
+  list: {
+    compareAttempts: '对比 {n} 次尝试',
+    compareExperiments: '对比 {n} 个实验',
+    empty: '没有可对比的运行',
+    matrixRuns: '一次运行内的矩阵行',
+    subtitle: '选择要对比的内容',
+  },
+  menu: {
+    all: '全部对比',
+    attempts: '对比此实验的尝试',
+    experiments: '对比此项目的实验',
+    matrix: '对比此运行的矩阵行',
+    title: '对比',
+  },
+  result: {
+    case: '用例',
+    cases: '用例',
+    chartTitle: '各列的主分数和执行成功率',
+    completed: '执行成功率',
+    differs: '各列结果不同',
+    empty: '没有可对比的内容',
+    emptyHint: '这一层级还没有包含用例的运行。',
+    entry: '评测入口',
+    entryRows: '{entry} · {n} 行',
+    filterEmpty: '没有匹配筛选条件的用例',
+    filterPlaceholder: '筛选用例…',
+    gradersDiffer: '评分方式不同：{graders}',
+    graderWarning: '各列对 {score} 的评分方式不同，因此它的值衡量的不是同一件事。',
+    newestOf: '{n} 次运行中最新的一次',
+    notRun: '未运行',
+    onlyDiffering: '只看不同',
+    passedCases: '通过的用例',
+    subtitle: '{columns} · {cases} · {changed} 个不同',
+    subtitleCases: '{n} 个用例',
+    subtitleColumns: '{n} 列',
+  },
+  title: {
+    attempts: '实验的尝试',
+    experiments: '项目的实验',
+    list: '对比',
+    matrix: '运行的矩阵行',
+    runs: '所选运行',
+  },
+} satisfies typeof en

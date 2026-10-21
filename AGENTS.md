@@ -92,13 +92,14 @@ Concise but detailed reference for contributors working in the `vieval-dev/vieva
 - Use Iconify icon sets; avoid bespoke SVGs.
 - Animations: keep intuitive, lively, and readable.
 - Viewer UI (`packages/ui/client`) floating surfaces reuse the existing wrappers, never a bare reka-ui content or a new look:
-  - Menus, popovers, and hover cards: reka-ui `DropdownMenuContent` / `PopoverContent` / `HoverCardContent` with `as-child`, wrapping `AnimatedContent` (`components/AnimatedContent.vue`, the open/close motion ported from airi), styled with the `floating` / `floating-arrow` shortcuts. Follow `CompareMenu.vue` and `HuePicker.vue`. When the content scrolls, scroll an inner element: `AnimatedContent` clips its own root.
+  - Menus, popovers, and hover cards: reka-ui `DropdownMenuContent` / `PopoverContent` / `HoverCardContent` with `as-child`, wrapping `AnimatedContent` (`components/AnimatedContent.vue`, the open/close motion ported from airi), styled with the `floating` / `floating-arrow` shortcuts. Follow `CompareMenu.vue` and `PreferencesMenu.vue` (a popover with a nested dropdown menu). When the content scrolls, scroll an inner element: `AnimatedContent` clips its own root.
   - One-line hints: reka-ui `Tooltip` with the `tooltip` / `tooltip-arrow` shortcuts (animated in `styles.css`).
   - Phones: bottom sheets use vaul-vue `Drawer` (as in airi's Live2D report modal) on the same `floating` surface; share the body component between the desktop popover and the phone drawer.
   - In-page choices use reka-ui (`DropdownMenuRadioGroup` for one of many), not native `<select>`.
   - Choice controls share one look, a gray track meaning "pick from these": `SegmentedControl` (`segmented`, with a raised block that slides to the picked choice) for a few visible choices, `option-trigger` for a control that opens a list (menu, popover). Controls are not text-selectable (`select-none`, already in `btn` / `segmented` / `option-trigger`).
 - Before adding a UnoCSS shortcut or keyframes, search `packages/ui/uno.config.ts` and `client/src/styles.css` for one with the same role and reuse it; do not add near-duplicates (a second "floating card" shortcut, a second fade).
 - `useDark` (VueUse): set `disableTransition: false` or use existing composables in `packages/ui`.
+- Viewer text goes through vue-i18n (`packages/ui/client/src/i18n`): add each string to the `en` area module and its `zh-Hans` counterpart (typed by the `en` module), and call `t()` / `i18n.global.t()`. Format numbers, dates, and relative times with the helpers in `format.ts` / `labels.ts`, or pass `currentLocale()` to `Intl`. Do not translate report data (case, task, metric, and score names, ids, outputs).
 
 ## Testing Practices
 

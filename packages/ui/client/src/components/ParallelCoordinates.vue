@@ -5,8 +5,9 @@ import type { CaseFilters, CaseRow } from '../caseMetrics'
 
 import { axisLeft, brushY, drag, line, scalePoint, select } from 'd3'
 import { onMounted, shallowRef, useTemplateRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
-import { caseOffset, shortMetricName } from '../caseMetrics'
+import { caseOffset, categoryValueLabel, shortMetricName } from '../caseMetrics'
 import { useElementWidth } from '../composables/useElementWidth'
 import { formatTick } from '../format'
 
@@ -60,6 +61,7 @@ const emit = defineEmits<{
   reorder: [names: string[]]
 }>()
 
+const { locale, t } = useI18n()
 const root = useTemplateRef<HTMLElement>('root')
 const width = useElementWidth(root, 800)
 const height = 360
@@ -184,12 +186,12 @@ function drawLines(svg: Selection<SVGSVGElement, unknown, null, undefined>) {
       })
       .on('end', () => emit('reorder', ordered().map(item => item.name)))
     g.append('text').attr('y', 14).attr('text-anchor', 'middle').attr('font-size', 12).attr('font-weight', 600).attr('fill', 'currentColor').style('cursor', 'grab').text(props.labelOf(axis.name) === axis.name ? shortMetricName(axis.name, props.axes.map(item => item.name)) : props.labelOf(axis.name)).on('pointerenter', (event: PointerEvent) => emit('inspect', axis.name, (event.currentTarget as SVGTextElement).getBoundingClientRect())).on('pointerleave', () => emit('inspect', null, null)).call(moveAxis)
-    g.append('text').attr('y', 27).attr('text-anchor', 'middle').attr('font-size', 10).attr('fill', 'var(--chart-text)').text(axis.kind === 'category' ? 'click to pick' : 'constant' in props.scales[axis.name]! ? 'symlog · drag' : 'drag to select')
+    g.append('text').attr('y', 27).attr('text-anchor', 'middle').attr('font-size', 10).attr('fill', 'var(--chart-text)').text(axis.kind === 'category' ? t('metrics.charts.clickToPick') : 'constant' in props.scales[axis.name]! ? t('metrics.charts.symlogDrag') : t('metrics.charts.dragToSelect'))
     if (axis.kind === 'category') {
       const scale = scales.get(axis.name) as ReturnType<typeof scalePoint<string>>
       const picked = props.filters.categories[axis.name]
       g.append('line').attr('y1', margin.top).attr('y2', height - margin.bottom).attr('stroke', 'var(--chart-grid)')
-      g.selectAll('text.value').data(scale.domain()).join('text').attr('class', 'value stroke-white dark:stroke-neutral-900 [paint-order:stroke]').attr('stroke-width', 3).attr('stroke-linejoin', 'round').attr('x', index === 0 ? -8 : 8).attr('text-anchor', index === 0 ? 'end' : 'start').attr('y', value => scale(value)! + 3.5).attr('font-size', 11).attr('font-weight', value => (picked?.has(value) ? 700 : 400)).attr('fill', value => (picked?.has(value) ? 'var(--series-1)' : 'var(--chart-text)')).style('cursor', 'pointer').text(value => value).on('click', (_, value) => emit('pick', axis.name, value))
+      g.selectAll('text.value').data(scale.domain()).join('text').attr('class', 'value stroke-white dark:stroke-neutral-900 [paint-order:stroke]').attr('stroke-width', 3).attr('stroke-linejoin', 'round').attr('x', index === 0 ? -8 : 8).attr('text-anchor', index === 0 ? 'end' : 'start').attr('y', value => scale(value)! + 3.5).attr('font-size', 11).attr('font-weight', value => (picked?.has(value) ? 700 : 400)).attr('fill', value => (picked?.has(value) ? 'var(--series-1)' : 'var(--chart-text)')).style('cursor', 'pointer').text(value => categoryValueLabel(axis.name, value)).on('click', (_, value) => emit('pick', axis.name, value))
       return
     }
     const scale = scales.get(axis.name) as ScaleContinuousNumeric<number, number>
@@ -259,7 +261,7 @@ function drawCuts(g: Selection<SVGGElement, unknown, null, undefined>, name: str
         cut.attr('transform', `translate(0,${event.y})`)
         const off = event.y < top - CUT_REMOVE_PX || event.y > bottom + CUT_REMOVE_PX
         cut.attr('opacity', off ? 0.35 : 1)
-        label.text(off ? 'remove' : formatTick(scale.invert(Math.min(bottom, Math.max(top, event.y)))))
+        label.text(off ? t('metrics.charts.removeCut') : formatTick(scale.invert(Math.min(bottom, Math.max(top, event.y)))))
       })
       .on('end', (event: { y: number }) => {
         const next = values.filter((_, other) => other !== index)
@@ -316,8 +318,9 @@ function render(): void {
 onMounted(render)
 // Separate sources, compared one by one: a getter returning a fresh array would redraw on every brush event (it
 // reads `props.filters`), which drops the brush the viewer is still dragging. Picked categories keep their object
-// while a range is brushed, so only a pick redraws (to bold the picked label).
-watch([() => props.rows, () => props.axes, () => props.categoryValues, () => props.scales, width, () => props.filters.categories, () => props.cuts], render)
+// while a range is brushed, so only a pick redraws (to bold the picked label). The SVG text is written once per draw,
+// so a change of language redraws too.
+watch([() => props.rows, () => props.axes, () => props.categoryValues, () => props.scales, width, () => props.filters.categories, () => props.cuts, locale], render)
 watch([() => props.selected, () => props.colorOf], paint)
 // Pinning redraws only the pinned line and its marks.
 watch(() => props.pinnedKey, () => drawFocus?.())
@@ -325,7 +328,7 @@ watch(() => props.pinnedKey, () => drawFocus?.())
 
 <template>
   <div ref="root" :class="['relative overflow-x-auto select-none text-neutral-800 dark:text-neutral-200']" data-testid="parallel-coordinates">
-    <svg role="img" aria-label="Parallel coordinates of the cases" />
+    <svg role="img" :aria-label="t('metrics.charts.parallel')" />
     <div
       v-for="flash in flashes" :key="flash.id"
       :class="['vv-flash absolute top-0 rounded-md pointer-events-none']"

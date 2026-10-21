@@ -4,6 +4,7 @@ import type { LiveConnection } from '../composables/useRunLive'
 
 import { useIntervalFn, useTimestamp } from '@vueuse/core'
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import InfoButton from './InfoButton.vue'
 import ProgressBar from './ProgressBar.vue'
@@ -21,6 +22,7 @@ import { href } from '../router'
  * each server `progress` event (or snapshot) resets them to the server's numbers.
  */
 const props = defineProps<{ connection: LiveConnection, receivedAt: number, snapshot: RunSnapshot }>()
+const { t } = useI18n()
 
 // Once per second: elapsed and ETA show whole seconds (the default scheduler would update every frame).
 const now = useTimestamp({ scheduler: callback => useIntervalFn(callback, 1000) })
@@ -36,40 +38,51 @@ const runningPercent = computed(() => {
   return total == null || total === 0 ? 0 : (progress.value.cases.running / total) * 100
 })
 const basisText = computed(() => ({
-  'cases': 'case totals of every task are known',
-  'cases+task-extrapolation': 'totals of tasks that did not start yet are extrapolated',
-  'ended': 'run ended',
-  'unknown': 'no case finished yet: no estimate',
+  'cases': t('runs.progress.basis.cases'),
+  'cases+task-extrapolation': t('runs.progress.basis.taskExtrapolation'),
+  'ended': t('runs.progress.basis.ended'),
+  'unknown': t('runs.progress.basis.unknown'),
 })[progress.value.basis])
-/** How the remaining time is estimated: printed under the numbers on desktop, behind an info button on phones. */
-const etaBasis = computed(() => `ETA basis: ${basisText.value}${live.value && progress.value.lowerBound ? '; auto attempts were seen, so more rounds may follow (lower bound)' : ''}. Rule: elapsed ÷ settled cases × estimated cases − elapsed, and at least as long as the longest running case has run.`)
 const connectionText = computed(() => ({
-  closed: 'not connected',
-  connecting: 'connecting…',
-  ended: props.snapshot.state === 'running' ? 'stream closed' : 'finished — no live updates',
-  error: 'disconnected (retrying)',
-  open: 'live',
+  closed: t('runs.progress.connection.closed'),
+  connecting: t('runs.progress.connection.connecting'),
+  ended: props.snapshot.state === 'running' ? t('runs.progress.connection.streamClosed') : t('runs.progress.connection.finished'),
+  error: t('runs.progress.connection.error'),
+  open: t('runs.progress.connection.open'),
 })[props.connection])
+/**
+ * How the remaining time is estimated: its basis (a lower bound once auto attempts were seen), then the rule. Printed
+ * under the numbers on desktop, behind an info button on phones.
+ */
+const etaBasis = computed(() => {
+  const basis = t(live.value && progress.value.lowerBound ? 'runs.progress.etaLowerBound' : 'runs.progress.eta', { basis: basisText.value })
+  return `${basis} ${t('runs.progress.etaRule')}`
+})
 </script>
 
 <template>
   <section :class="['card p-3 flex flex-col gap-3']" data-testid="progress-panel">
     <div :class="['flex items-center gap-3 flex-wrap text-sm']">
       <StateBadge :state="props.snapshot.state" />
-      <span :class="['badge', props.connection === 'open' ? 'state-running' : props.connection === 'error' ? 'state-failed' : 'state-neutral']" :title="props.connection === 'open' ? `updated ${formatTime(new Date(props.receivedAt).toISOString())}` : undefined" data-testid="live-indicator">
+      <span :class="['badge', props.connection === 'open' ? 'state-running' : props.connection === 'error' ? 'state-failed' : 'state-neutral']" :title="props.connection === 'open' ? t('runs.progress.updated', { time: formatTime(new Date(props.receivedAt).toISOString()) }) : undefined" data-testid="live-indicator">
         <span :class="[props.connection === 'open' ? 'i-mingcute-airdrop-line vv-pulse' : 'i-mingcute-signal-line']" aria-hidden="true" />{{ connectionText }}
       </span>
       <!-- Only while the run should be moving but no live stream proves it: then the last event tells whether it stalled. -->
-      <span v-if="props.snapshot.current.lastEvent && props.connection !== 'open' && (props.snapshot.state === 'running' || props.snapshot.state === 'stale')" class="text-xs muted ml-auto">last event <b>{{ props.snapshot.current.lastEvent.event }}</b> at {{ formatTime(props.snapshot.current.lastEvent.time) }}</span>
+      <span v-if="props.snapshot.current.lastEvent && props.connection !== 'open' && (props.snapshot.state === 'running' || props.snapshot.state === 'stale')" class="text-xs muted ml-auto">
+        <i18n-t keypath="runs.progress.lastEvent" scope="global">
+          <template #event><b>{{ props.snapshot.current.lastEvent.event }}</b></template>
+          <template #time>{{ formatTime(props.snapshot.current.lastEvent.time) }}</template>
+        </i18n-t>
+      </span>
     </div>
 
     <ProgressBar
-      label="Run progress"
+      :label="t('runs.progress.barLabel')"
       :active="live"
       :value="percent ?? 0"
       :segments="[
-        { class: 'bg-primary-500 dark:bg-primary-400', percent: percent ?? 0, title: `${progress.cases.completed} cases done` },
-        ...(live ? [{ class: '[background-color:color-mix(in_oklab,var(--mark-running)_50%,transparent)]', percent: runningPercent, title: `${progress.cases.running} cases running` }] : []),
+        { class: 'bg-primary-500 dark:bg-primary-400', percent: percent ?? 0, title: t('runs.progress.casesDone', { n: progress.cases.completed }, progress.cases.completed) },
+        ...(live ? [{ class: '[background-color:color-mix(in_oklab,var(--mark-running)_50%,transparent)]', percent: runningPercent, title: t('runs.progress.casesRunning', { n: progress.cases.running }, progress.cases.running) }] : []),
       ]"
     />
     <!-- Phones show the numbers (progress, ETA, expected finish) right under the bar and the chart after them. -->
@@ -78,7 +91,7 @@ const connectionText = computed(() => ({
     <dl :class="['grid gap-x-6 gap-y-2 text-sm']" style="grid-template-columns: repeat(auto-fill, minmax(150px, 1fr))">
       <div>
         <dt class="text-xs muted">
-          Progress
+          {{ t('runs.progress.fields.progress') }}
         </dt>
         <dd :class="['text-xl font-semibold tabular-nums']" data-testid="progress-percent">
           {{ percent == null ? '—' : `${percent.toFixed(1)}%` }}
@@ -86,7 +99,7 @@ const connectionText = computed(() => ({
       </div>
       <div>
         <dt class="text-xs muted">
-          Cases done / estimated
+          {{ t('runs.progress.fields.casesDone') }}
         </dt>
         <dd :class="['text-xl font-semibold tabular-nums']" data-testid="progress-cases">
           {{ progress.cases.completed }} / {{ progress.cases.estimatedTotal ?? '?' }}
@@ -94,7 +107,7 @@ const connectionText = computed(() => ({
       </div>
       <div>
         <dt class="text-xs muted">
-          Running now
+          {{ t('runs.progress.fields.runningNow') }}
         </dt>
         <dd :class="['text-xl font-semibold tabular-nums']">
           {{ progress.cases.running }}
@@ -102,7 +115,7 @@ const connectionText = computed(() => ({
       </div>
       <div v-if="progress.cases.waiting > 0">
         <dt class="text-xs muted">
-          Waiting to rerun
+          {{ t('runs.progress.fields.waitingToRerun') }}
         </dt>
         <dd :class="['text-xl font-semibold tabular-nums', '[color:var(--ink-errored)]']" data-testid="progress-waiting">
           {{ progress.cases.waiting }}
@@ -110,7 +123,7 @@ const connectionText = computed(() => ({
       </div>
       <div>
         <dt class="text-xs muted">
-          Tasks done
+          {{ t('runs.progress.fields.tasksDone') }}
         </dt>
         <dd :class="['text-xl font-semibold tabular-nums']">
           {{ progress.tasks.completed }} / {{ progress.tasks.total }}
@@ -118,7 +131,7 @@ const connectionText = computed(() => ({
       </div>
       <div>
         <dt class="text-xs muted">
-          Elapsed
+          {{ t('runs.progress.fields.elapsed') }}
         </dt>
         <dd :class="['text-xl font-semibold tabular-nums']" data-testid="progress-elapsed">
           {{ formatDuration(elapsed) }}
@@ -126,8 +139,8 @@ const connectionText = computed(() => ({
       </div>
       <div>
         <dt :class="['flex items-center gap-1 text-xs muted']">
-          {{ live ? 'Estimated remaining' : 'Total duration' }}
-          <span :class="['flex md:hidden']"><InfoButton label="How the ETA is estimated"><p>{{ etaBasis }}</p></InfoButton></span>
+          {{ live ? t('runs.progress.fields.estimatedRemaining') : t('runs.progress.fields.totalDuration') }}
+          <span :class="['flex md:hidden']"><InfoButton :label="t('runs.progress.etaInfo')"><p>{{ etaBasis }}</p></InfoButton></span>
         </dt>
         <dd :class="['text-xl font-semibold tabular-nums']" data-testid="progress-eta">
           <template v-if="live">
@@ -140,7 +153,7 @@ const connectionText = computed(() => ({
       </div>
       <div v-if="live && finishAt">
         <dt class="text-xs muted">
-          Expected finish
+          {{ t('runs.progress.fields.expectedFinish') }}
         </dt>
         <dd :class="['text-xl font-semibold tabular-nums']">
           {{ formatFinish(finishAt) }}
@@ -153,24 +166,24 @@ const connectionText = computed(() => ({
 
     <div v-if="props.snapshot.current.running.length > 0 || props.snapshot.current.waiting.length > 0" :class="['max-md:order-1']" data-testid="current-position">
       <div :class="['text-xs font-semibold mb-1 flex items-center gap-1']">
-        <span :class="['i-mingcute-aiming-2-line', '[color:var(--mark-running)]']" aria-hidden="true" />Current position · {{ props.snapshot.current.running.length }} running<template v-if="props.snapshot.current.waiting.length > 0">
-          · {{ props.snapshot.current.waiting.length }} waiting
+        <span :class="['i-mingcute-aiming-2-line', '[color:var(--mark-running)]']" aria-hidden="true" />{{ t('runs.progress.currentPosition') }} · {{ t('runs.progress.running', { n: props.snapshot.current.running.length }) }}<template v-if="props.snapshot.current.waiting.length > 0">
+          · {{ t('runs.progress.waiting', { n: props.snapshot.current.waiting.length }) }}
         </template>
       </div>
       <ul :class="['grid gap-1']" style="grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr))">
         <li v-for="item in props.snapshot.current.running" :key="`${item.taskId}/${item.caseId}`" :class="['flex items-center gap-2 rounded-md px-2 py-1 text-xs', '[background-color:color-mix(in_oklab,var(--mark-running)_10%,transparent)]']">
           <span :class="['i-mingcute-loading-line shrink-0 animate-spin', '[color:var(--mark-running)]']" aria-hidden="true" />
           <a :href="href({ caseId: item.caseId, name: 'case', runKey: props.snapshot.runKey, taskId: item.taskId })" :class="['link mono text-xs truncate']" :title="item.name">{{ item.name }}</a>
-          <span v-if="item.roundIndex > 0" class="badge state-neutral">round {{ item.roundIndex }}</span>
-          <span v-if="item.retryIndex > 0" class="badge state-interrupted">retry {{ item.retryIndex }}</span>
+          <span v-if="item.roundIndex > 0" class="badge state-neutral">{{ t('runs.position.round', { n: item.roundIndex }) }}</span>
+          <span v-if="item.retryIndex > 0" class="badge state-interrupted">{{ t('runs.position.retry', { n: item.retryIndex }) }}</span>
           <span :class="['ml-auto mono text-xs muted whitespace-nowrap']">{{ formatDuration(item.elapsedMs + drift) }}</span>
         </li>
         <!-- Cases waiting to rerun follow the running ones, in the order they were requeued. -->
         <li v-for="item in props.snapshot.current.waiting" :key="`${item.taskId}/${item.caseId}`" :class="['flex items-center gap-2 rounded-md px-2 py-1 text-xs', '[background-color:color-mix(in_oklab,var(--mark-errored)_10%,transparent)]']" data-testid="current-waiting">
           <span :class="['i-mingcute-time-fill shrink-0', '[color:var(--mark-errored)]']" aria-hidden="true" />
           <a :href="href({ caseId: item.caseId, name: 'case', runKey: props.snapshot.runKey, taskId: item.taskId })" :class="['link mono text-xs truncate']" :title="item.name">{{ item.name }}</a>
-          <span class="badge state-interrupted">requeue {{ item.requeueIndex }}/{{ item.requeue }}</span>
-          <span :class="['ml-auto mono text-xs whitespace-nowrap', '[color:var(--ink-errored)]']">{{ Date.parse(item.requeuedAt) + item.delayMs > now ? `rerun in ${formatDuration(Date.parse(item.requeuedAt) + item.delayMs - now)}` : 'waiting for a slot' }}</span>
+          <span class="badge state-interrupted">{{ t('runs.position.requeue', { index: item.requeueIndex, total: item.requeue }) }}</span>
+          <span :class="['ml-auto mono text-xs whitespace-nowrap', '[color:var(--ink-errored)]']">{{ Date.parse(item.requeuedAt) + item.delayMs > now ? t('runs.position.rerunIn', { duration: formatDuration(Date.parse(item.requeuedAt) + item.delayMs - now) }) : t('runs.position.waitingForSlot') }}</span>
         </li>
       </ul>
     </div>

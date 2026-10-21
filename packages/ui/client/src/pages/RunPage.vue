@@ -7,6 +7,7 @@ import type { Route } from '../router'
 
 import { DropdownMenuItem } from 'reka-ui'
 import { computed, toRef, useTemplateRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import CountsBar from '../components/CountsBar.vue'
 import ErrorGroupsPanel from '../components/ErrorGroupsPanel.vue'
@@ -38,18 +39,19 @@ import { href, navigate } from '../router'
  */
 const props = defineProps<{ route: Extract<Route, { name: 'run' }>, run?: RunListItem }>()
 
+const { t } = useI18n()
 const live = useRunLive(toRef(() => props.route.runKey))
 type Tab = 'execution' | 'logs' | 'otel' | 'scores'
-const tabs: ViewTab<Tab>[] = [
-  { icon: 'i-mingcute-sitemap-line', label: 'Execution', value: 'execution' },
-  { icon: 'i-mingcute-chart-horizontal-line', label: 'Scores & metrics', value: 'scores' },
-  { icon: 'i-mingcute-terminal-box-line', label: 'Console logs', value: 'logs' },
-  { icon: 'i-mingcute-heartbeat-line', label: 'OpenTelemetry', value: 'otel' },
-]
+const tabs = computed<ViewTab<Tab>[]>(() => [
+  { icon: 'i-mingcute-sitemap-line', label: t('runs.run.tabs.execution'), value: 'execution' },
+  { icon: 'i-mingcute-chart-horizontal-line', label: t('runs.run.tabs.scores'), value: 'scores' },
+  { icon: 'i-mingcute-terminal-box-line', label: t('runs.run.tabs.logs'), value: 'logs' },
+  { icon: 'i-mingcute-heartbeat-line', label: t('runs.run.tabs.otel'), value: 'otel' },
+])
 const tabRoute = (value: Tab): Route => ({ name: 'run', runKey: props.route.runKey, tab: value === 'execution' ? undefined : value })
 // An unknown `tab` in the address shows the default view.
 const tab = computed<Tab>({
-  get: () => tabs.find(item => item.value === props.route.tab)?.value ?? 'execution',
+  get: () => tabs.value.find(item => item.value === props.route.tab)?.value ?? 'execution',
   set: value => navigate(tabRoute(value)),
 })
 
@@ -118,10 +120,10 @@ const errorCaseHref = (target: { caseId: string, taskId: string }) => href({ ...
       <!-- The start is the title already; only the end (or the interruption) adds a fact. -->
       <template v-if="live.snapshot.value?.endedAt || live.snapshot.value?.interruptSignal">
         <br><template v-if="live.snapshot.value.endedAt">
-          ended {{ formatDateTime(live.snapshot.value.endedAt) }}
+          {{ t('runs.run.ended', { time: formatDateTime(live.snapshot.value.endedAt) }) }}
         </template>
         <template v-if="live.snapshot.value.interruptSignal">
-          · interrupted by {{ live.snapshot.value.interruptSignal }}
+          · {{ t('runs.run.interruptedBy', { signal: live.snapshot.value.interruptSignal }) }}
         </template>
       </template>
     </template>
@@ -138,21 +140,21 @@ const errorCaseHref = (target: { caseId: string, taskId: string }) => href({ ...
     <template v-if="position.workspace && position.project && position.experiment" #menu>
       <DropdownMenuItem as-child :class="['menu-item']">
         <a :href="href({ name: 'compare', query: { experiment: position.experiment, project: position.project, view: 'attempts', workspace: position.workspace } })">
-          <span class="i-mingcute-git-compare-line" aria-hidden="true" />Compare attempts
+          <span class="i-mingcute-git-compare-line" aria-hidden="true" />{{ t('runs.run.compareAttempts') }}
         </a>
       </DropdownMenuItem>
     </template>
   </PageHeader>
 
-  <StateView :error="live.error.value && !live.snapshot.value ? live.error.value : undefined" :loading="!live.snapshot.value" loading-text="Reading the run…" skeleton="run" @retry="live.reload">
+  <StateView :error="live.error.value && !live.snapshot.value ? live.error.value : undefined" :loading="!live.snapshot.value" :loading-text="t('runs.run.loading')" skeleton="run" @retry="live.reload">
     <template v-if="live.snapshot.value">
       <ProgressPanel :snapshot="live.snapshot.value" :connection="live.connection.value" :received-at="live.receivedAt.value" />
       <div v-if="live.error.value" role="alert" :class="['mt-2 text-xs rounded state-failed px-2 py-1']">
-        Refresh failed: {{ live.error.value.message }} — showing the last snapshot.
+        {{ t('runs.run.refreshFailed', { message: live.error.value.message }) }}
       </div>
       <ErrorGroupsPanel ref="errorGroups" :tasks="live.snapshot.value.tasks" :case-href="errorCaseHref" />
       <div :class="['mt-4']">
-        <ViewTabs v-model="tab" :items="tabs" :href="value => href(tabRoute(value))" label="Run views">
+        <ViewTabs v-model="tab" :items="tabs" :href="value => href(tabRoute(value))" :label="t('runs.run.tabs.label')">
           <ExecutionTree v-if="tab === 'execution'" :snapshot="live.snapshot.value" />
           <ScoresPanel v-else-if="tab === 'scores'" :snapshot="live.snapshot.value" :refresh-key="live.refreshKey.value" />
           <section v-else-if="tab === 'logs'" class="card">

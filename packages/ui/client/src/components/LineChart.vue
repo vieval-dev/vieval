@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, shallowRef, useTemplateRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import { useElementWidth } from '../composables/useElementWidth'
 import { extent } from '../extent'
@@ -24,6 +25,7 @@ const props = withDefaults(defineProps<{
   height: 120,
 })
 
+const { t } = useI18n()
 const root = useTemplateRef<HTMLElement>('root')
 const width = useElementWidth(root, 480)
 const pad = { bottom: 16, left: 44, right: 8, top: 8 }
@@ -81,7 +83,7 @@ function onMove(event: MouseEvent): void {
         {{ props.name }}
       </slot>
     </figcaption>
-    <svg :viewBox="`0 0 ${width} ${props.height}`" :class="['w-full h-auto']" role="img" :aria-label="`Line chart of ${props.name}`" @mousemove="onMove" @mouseleave="hover = undefined">
+    <svg :viewBox="`0 0 ${width} ${props.height}`" :class="['w-full h-auto']" role="img" :aria-label="t('metrics.charts.line', { name: props.name })" @mousemove="onMove" @mouseleave="hover = undefined">
       <line v-for="fraction in [0, 0.5, 1]" :key="fraction" :x1="pad.left" :x2="width - pad.right" :y1="sy(bounds.minY + (bounds.maxY - bounds.minY) * fraction)" :y2="sy(bounds.minY + (bounds.maxY - bounds.minY) * fraction)" stroke="var(--chart-grid)" />
       <text v-for="fraction in [0, 1]" :key="`l${fraction}`" :x="pad.left - 4" :y="sy(bounds.minY + (bounds.maxY - bounds.minY) * fraction) + 3" font-size="9" text-anchor="end" fill="var(--chart-text)">{{ props.format(bounds.minY + (bounds.maxY - bounds.minY) * fraction) }}</text>
       <path :d="path" fill="none" stroke="var(--series-1)" stroke-width="2" stroke-linejoin="round" />

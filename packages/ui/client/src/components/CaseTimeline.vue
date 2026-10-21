@@ -3,6 +3,7 @@ import type { TimelineResponse } from '../../../src/shared/contract'
 
 import { useIntervalFn, useTimestamp } from '@vueuse/core'
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import StateBadge from './StateBadge.vue'
 
@@ -14,6 +15,9 @@ import { formatDuration, formatTime } from '../format'
  * other in the same lane), on a shared time axis.
  */
 const props = defineProps<{ timeline: TimelineResponse }>()
+const { t, te } = useI18n()
+/** State name in the viewer's language, as `StateBadge` shows it; a state without a translation stays as reported. */
+const stateName = (state: string) => (te(`states.${state}`, 'en') ? t(`states.${state}`) : state)
 // Once per second: elapsed and ETA show whole seconds (the default scheduler would update every frame).
 const now = useTimestamp({ scheduler: callback => useIntervalFn(callback, 1000) })
 
@@ -72,10 +76,10 @@ const stateColor = (state: string) => ['errored', 'failed', 'passed', 'running',
     <div v-for="lane in lanes.lanes" :key="lane.roundIndex" :class="['flex items-center gap-2']">
       <div :class="['w-20 md:w-26 shrink-0 text-xs']">
         <div class="font-medium">
-          round {{ lane.roundIndex }}
+          {{ t('cases.round', { n: lane.roundIndex }) }}
         </div>
         <div class="muted">
-          {{ lane.roundIndex === 0 ? 'first run' : `auto attempt ${lane.roundIndex}` }}{{ lane.inferred ? ' *' : '' }}
+          {{ lane.roundIndex === 0 ? t('cases.timeline.firstRun') : t('cases.timeline.autoAttempt', { n: lane.roundIndex }) }}{{ lane.inferred ? ' *' : '' }}
         </div>
       </div>
       <div :class="['relative flex-1 h-7 rounded bg-neutral-100 dark:bg-neutral-800']">
@@ -84,18 +88,18 @@ const stateColor = (state: string) => ['errored', 'failed', 'passed', 'running',
           v-for="wait in lane.waits" :key="wait.key"
           :class="['absolute top-1 h-5 rounded-sm border border-dashed flex items-center px-1 text-[10px] overflow-hidden whitespace-nowrap', '[border-color:var(--mark-errored)] [color:var(--ink-errored)]']"
           :style="{ left: `${wait.left}%`, width: `${wait.width}%` }"
-          :title="`waited ${formatDuration(wait.ms)} at the end of the queue`"
+          :title="t('cases.timeline.waited', { duration: formatDuration(wait.ms) })"
           data-testid="timeline-wait"
         >
-          waiting
+          {{ t('cases.timeline.waiting') }}
         </div>
         <div
           v-for="entry in lane.tries" :key="entry.tryNumber"
           :class="['absolute top-1 h-5 rounded-sm flex items-center px-1 text-[10px] text-white overflow-hidden whitespace-nowrap', entry.state === 'running' && 'vv-pulse']"
           :style="{ left: `${entry.left}%`, width: `${entry.width}%`, background: stateColor(entry.state) }"
-          :title="`round ${entry.roundIndex}, try ${entry.tryNumber}: ${entry.state}, ${formatDuration(entry.durationMs)}${entry.errorMessage ? `\n${entry.errorMessage}` : ''}`"
+          :title="`${t('cases.timeline.tryTitle', { duration: formatDuration(entry.durationMs), round: entry.roundIndex, state: stateName(entry.state), try: entry.tryNumber })}${entry.errorMessage ? `\n${entry.errorMessage}` : ''}`"
         >
-          try {{ entry.tryNumber }}
+          {{ t('cases.timeline.tryBar', { n: entry.tryNumber }) }}
         </div>
       </div>
     </div>
@@ -105,22 +109,22 @@ const stateColor = (state: string) => ['errored', 'failed', 'passed', 'running',
         <thead>
           <tr :class="['border-b border-neutral-200/50 dark:border-neutral-800/50']">
             <th class="th">
-              Round
+              {{ t('cases.timeline.round') }}
             </th>
             <th class="th">
-              Try
+              {{ t('cases.timeline.try') }}
             </th>
             <th class="th">
-              State
+              {{ t('cases.timeline.state') }}
             </th>
             <th class="th">
-              Started
+              {{ t('cases.timeline.started') }}
             </th>
             <th class="th">
-              Duration
+              {{ t('cases.timeline.duration') }}
             </th>
             <th class="th">
-              Error
+              {{ t('cases.timeline.error') }}
             </th>
           </tr>
         </thead>
@@ -130,7 +134,7 @@ const stateColor = (state: string) => ['errored', 'failed', 'passed', 'running',
               {{ entry.roundIndex }}
             </td>
             <td :class="['td mono text-xs']">
-              {{ entry.tryNumber }}<span v-if="entry.retryIndex > 0" class="muted"> (retry {{ entry.retryIndex }})</span><span v-else-if="entry.requeueIndex > 0" class="muted"> (requeue {{ entry.requeueIndex }})</span>
+              {{ entry.tryNumber }}<span v-if="entry.retryIndex > 0" class="muted">{{ t('cases.timeline.retry', { n: entry.retryIndex }) }}</span><span v-else-if="entry.requeueIndex > 0" class="muted">{{ t('cases.timeline.requeue', { n: entry.requeueIndex }) }}</span>
             </td>
             <td class="td">
               <StateBadge :state="entry.state" />
@@ -149,7 +153,7 @@ const stateColor = (state: string) => ['errored', 'failed', 'passed', 'running',
       </table>
     </div>
     <p v-if="lanes.lanes.some(lane => lane.inferred)" class="text-xs muted">
-      * Round derived from the order of case starts (the event log carries no attempt index).
+      {{ t('cases.timeline.inferredRound') }}
     </p>
   </div>
 </template>

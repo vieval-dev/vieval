@@ -5,6 +5,8 @@ import { render } from 'vitest-browser-vue'
 
 import HeadlineScore from './HeadlineScore.vue'
 
+import { i18n } from '../i18n'
+
 const pass = { mean: 0.875, n: 119, name: 'pass', sum: 104.125, total: 121, unscored: { grader_failed: 2 } }
 const definitions: ScoreDefinition[] = [{ description: 'Written back correctly and read naturally.', label: { 'en': 'Pass', 'zh-Hans': '通过' }, name: 'pass', primary: true }]
 /** A run whose primary score is `pass`, with 4 of 125 cases errored and 2 the judge could not grade. */
@@ -78,5 +80,20 @@ describe('headlineScore', () => {
     await expect.element(screen.getByTestId('headline-label')).toHaveTextContent('completed')
     await expect.element(screen.getByTestId('headline-tasks')).toHaveTextContent(/tts \[en\]\s*Pass\s*87\.5%/)
     await expect.element(screen.getByTestId('headline-tasks')).toHaveTextContent(/osworld \[en\]\s*Success\s*40\.0%/)
+  })
+
+  /**
+   * @example
+   * i18n.global.locale.value = 'zh-Hans'
+   * expect(screen.getByTestId('headline-completion')).toHaveTextContent('执行成功率 96.8% （4 个出错）')
+   */
+  it('reads the headline, the completion rate, and the unscored reasons in the language picked for the viewer', async () => {
+    i18n.global.locale.value = 'zh-Hans'
+    const screen = await render(HeadlineScore, { props: { definitions, result } })
+
+    await expect.element(screen.getByTestId('headline-label')).toHaveTextContent('通过')
+    await expect.element(screen.getByTestId('headline-completion')).toHaveTextContent('执行成功率 96.8% （4 个出错）')
+    await expect.element(screen.getByTestId('headline-unscored')).toHaveTextContent('2 个未打分')
+    await expect.element(screen.getByTestId('headline-unscored')).toHaveAttribute('title', '2 个评分失败')
   })
 })

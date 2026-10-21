@@ -2,6 +2,7 @@ import type { MatrixAxes } from './labels'
 
 import { describe, expect, it } from 'vitest'
 
+import { i18n } from './i18n'
 import { attemptDate, attemptLabel, differingAxes, experimentLabel, formatAxisValues, formatFinish, mergeMatrices, relativeTime, runLabel, shortRunHash } from './labels'
 
 describe('formatAxisValues', () => {
@@ -117,6 +118,20 @@ describe('attempt and run labels', () => {
     expect(relativeTime(new Date(now - 3 * 3_600_000), now)).toBe('3 hours ago')
     expect(relativeTime(new Date(now - 2 * 86_400_000), now)).toBe('2 days ago')
     expect(relativeTime(new Date(now - 5000), now)).toBe('5 seconds ago')
+  })
+
+  /**
+   * @example
+   * i18n.global.locale.value = 'zh-Hans'
+   * expect(relativeTime(threeHoursAgo, now)).toBe('3小时前')
+   */
+  it('words times and dates in the language picked for the viewer', () => {
+    const now = Date.parse('2026-10-12T10:00:00Z')
+    i18n.global.locale.value = 'zh-Hans'
+
+    expect(relativeTime(new Date(now - 3 * 3_600_000), now)).toBe('3小时前')
+    expect(formatFinish('2026-11-25T03:45:00Z', now)).toMatch(/^11月2[45]日 \d{2}:\d{2}$/)
+    expect(runLabel({ runKey: 'run-1791789112616-e67c9b33', startedAt: '2026-10-12T07:11:52.616Z' })).toMatch(/^10月1[23]日 \d{2}:\d{2} · e67c9b33$/)
   })
 
   // ROOT CAUSE:

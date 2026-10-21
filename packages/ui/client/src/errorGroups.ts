@@ -1,5 +1,7 @@
 import type { CaseNode, TaskNode } from '../../src/shared/contract'
 
+import { i18n } from './i18n'
+
 /**
  * Cases without a result that ended with the same error.
  */
@@ -30,7 +32,8 @@ const MAX_MESSAGE_LENGTH = 160
  * - task nodes of one run snapshot; each case contributes its final state and error
  *
  * Returns:
- * - groups by error name and normalized message, largest first, then by message
+ * - groups by error name and normalized message, largest first, then by message; a case without a message is grouped
+ *   under a note in the viewer's language (reactive in the locale inside a `computed`)
  */
 export function groupErrors(tasks: readonly Pick<TaskNode, 'cases'>[]): ErrorGroup[] {
   const groups = new Map<string, ErrorGroup>()
@@ -40,7 +43,7 @@ export function groupErrors(tasks: readonly Pick<TaskNode, 'cases'>[]): ErrorGro
     }
 
     const message = node.errorMessage == null
-      ? node.state === 'unfinished' ? 'The run ended while the case ran.' : 'No error message.'
+      ? i18n.global.t(node.state === 'unfinished' ? 'runs.errors.unfinished' : 'runs.errors.noMessage')
       : normalizeErrorMessage(node.errorMessage)
     const key = `${node.errorName ?? ''}\u0000${message}`
     const group = groups.get(key)

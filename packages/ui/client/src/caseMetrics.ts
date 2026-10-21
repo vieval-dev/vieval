@@ -6,7 +6,8 @@ import type { ColumnDefinition } from './scores'
 import { scaleLinear, scaleSymlog } from 'd3'
 
 import { parseTaskId } from '../../src/shared/reduce'
-import { formatScore } from './format'
+import { formatCompact, formatScore } from './format'
+import { i18n } from './i18n'
 import { localize } from './localize'
 import { primaryScoreName, scoreColumn } from './scores'
 
@@ -278,6 +279,18 @@ export function buildCaseTable(cases: readonly CaseNode[], metrics: MetricsRespo
 }
 
 /**
+ * Readable value of a category axis: a case state named in the viewer's language (`states` messages, as `StateBadge`
+ * names it), any other value as recorded.
+ *
+ * Use when:
+ * - a chart or legend writes the values of a category axis; filters keep the recorded value
+ */
+export function categoryValueLabel(name: string, value: string): string {
+  const { t, te } = i18n.global
+  return name === 'state' && te(`states.${value}`, 'en') ? t(`states.${value}`) : value
+}
+
+/**
  * Definitions of every column of a case table by name: the metrics' `metric.defined`, and the scores' `score.defined`
  * read as columns ({@link scoreColumn}); a score wins over a metric of the same name.
  *
@@ -303,7 +316,7 @@ export function columnDefinitions(metricDefinitions: readonly MetricDefinition[]
 export function formatColumnValue(value: number, definition: ColumnDefinition | undefined): string {
   if (definition?.score != null)
     return formatScore(value)
-  const text = Math.abs(value) >= 1000 ? new Intl.NumberFormat(undefined, { maximumFractionDigits: 1, notation: 'compact' }).format(value) : String(Math.round(value * 100) / 100)
+  const text = Math.abs(value) >= 1000 ? formatCompact(value) : String(Math.round(value * 100) / 100)
   return definition?.unit == null ? text : `${text} ${definition.unit}`
 }
 
@@ -411,7 +424,7 @@ export function metricDefinition(name: string, definitions: ReadonlyMap<string, 
 
 /**
  * Readable name of a metric: the label it was defined with, else its name; a derived metric names its list metric and
- * the summary (`Listener votes · mean`).
+ * the summary in the viewer's language (`Listener votes · mean`).
  *
  * Use when:
  * - any chart, menu, or table names a metric of a {@link CaseTable}
@@ -419,7 +432,7 @@ export function metricDefinition(name: string, definitions: ReadonlyMap<string, 
 export function metricLabel(name: string, definitions: ReadonlyMap<string, ColumnDefinition>): string {
   const derived = parseDerivedMetric(name)
   if (derived != null)
-    return `${metricLabel(derived.base, definitions)} · ${derived.summary}`
+    return `${metricLabel(derived.base, definitions)} · ${i18n.global.t(`metrics.derived.${derived.summary}`)}`
   return localize(definitions.get(name)?.label) ?? name
 }
 

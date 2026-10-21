@@ -5,6 +5,8 @@ import { defineComponent, h } from 'vue'
 
 import ArtifactViewer from './ArtifactViewer.vue'
 
+import { i18n } from '../i18n'
+
 const location = { path: 'task/case/file', runKey: 'run-1-a' }
 
 /** Renders the viewer under a `TooltipProvider`, as `App.vue` does for every page (its icon buttons need one). */
@@ -33,6 +35,18 @@ describe('artifactViewer', () => {
     await expect.element(screen.getByText('No preview for this file type')).toBeVisible()
     const link = screen.getByRole('link', { name: 'Download dump.bin' })
     await expect.element(link).toHaveAttribute('href', expect.stringContaining('download=1'))
+  })
+
+  /**
+   * @example
+   * i18n.global.locale.value = 'zh-Hans'
+   * expect(screen.getByText('无法预览这种文件类型')).toBeVisible()
+   */
+  it('explains a file without a preview in the language picked for the viewer', async () => {
+    i18n.global.locale.value = 'zh-Hans'
+    const screen = await renderViewer({ contentType: 'application/octet-stream', location, name: 'dump.bin', previewKind: 'binary', size: 8192 })
+    await expect.element(screen.getByText('无法预览这种文件类型')).toBeVisible()
+    await expect.element(screen.getByRole('link', { name: '下载 dump.bin' })).toBeVisible()
   })
 
   /**

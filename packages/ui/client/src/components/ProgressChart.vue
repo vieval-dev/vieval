@@ -2,6 +2,7 @@
 import type { RunProgress } from '../../../src/shared/contract'
 
 import { computed, useTemplateRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import { useElementWidth } from '../composables/useElementWidth'
 import { formatDuration } from '../format'
@@ -24,6 +25,7 @@ const props = defineProps<{
   progress: RunProgress
 }>()
 
+const { t } = useI18n()
 const root = useTemplateRef<HTMLElement>('root')
 const width = useElementWidth(root, 640)
 const height = 140
@@ -114,7 +116,7 @@ const rate = computed(() => {
   <figure ref="root" :class="['relative w-full']" data-testid="progress-chart">
     <!-- A fixed pixel height: with `h-auto` the height followed the width, so every width update resized the figure
          again and the ResizeObserver reported a loop. The viewBox width equals the element width (useElementWidth). -->
-    <svg :viewBox="`0 0 ${width} ${height}`" :style="{ height: `${height}px` }" :class="['w-full overflow-visible']" role="img" :aria-label="`Completed cases over time: ${last.completed} of ${props.progress.cases.estimatedTotal ?? 'unknown'}`">
+    <svg :viewBox="`0 0 ${width} ${height}`" :style="{ height: `${height}px` }" :class="['w-full overflow-visible']" role="img" :aria-label="t('runs.chart.label', { completed: last.completed, total: props.progress.cases.estimatedTotal ?? t('runs.chart.unknown') })">
       <!-- Axes: zero line, estimated total, and the time span. -->
       <line :x1="pad.left" :x2="width - pad.right" :y1="sy(0)" :y2="sy(0)" stroke="var(--chart-grid)" />
       <text :x="pad.left - 6" :y="sy(0) + 3" font-size="10" text-anchor="end" fill="var(--chart-text)">0</text>
@@ -132,7 +134,7 @@ const rate = computed(() => {
       <g v-if="props.live">
         <line :x1="sx(props.elapsedMs)" :x2="sx(props.elapsedMs)" :y1="pad.top" :y2="sy(0)" stroke="var(--chart-text)" stroke-opacity="0.5" stroke-dasharray="2 2" />
         <circle :cx="sx(props.elapsedMs)" :cy="sy(last.completed)" r="4" fill="var(--series-1)" stroke="var(--chart-surface, white)" stroke-width="2" data-testid="progress-now" />
-        <text :x="sx(props.elapsedMs)" :y="pad.top - 2" font-size="10" text-anchor="middle" fill="var(--chart-text)">now</text>
+        <text :x="sx(props.elapsedMs)" :y="pad.top - 2" font-size="10" text-anchor="middle" fill="var(--chart-text)">{{ t('runs.chart.now') }}</text>
       </g>
       <!-- Expected finish at the end of the projection. -->
       <g v-if="projection && projectionEnd && props.finishAt && !projectionCut">
@@ -143,11 +145,13 @@ const rate = computed(() => {
       <text v-if="projectionEnd && props.finishAt && projectionCut" :x="sx(projectionEnd.elapsedMs) + 6" :y="sy(projectionEnd.completed) + 4" font-size="10" fill="var(--chart-text)" data-testid="progress-finish-beyond">→ {{ props.progress.lowerBound ? '≥ ' : '' }}{{ finishLabel }}</text>
     </svg>
     <figcaption :class="['flex flex-wrap gap-x-4 gap-y-1 text-xs muted mt-1']">
-      <span :class="['inline-flex items-center gap-1.5']"><span :class="['inline-block w-4 h-0.5 bg-[var(--series-1)]']" aria-hidden="true" />completed cases</span>
-      <span v-if="projectionPath" :class="['inline-flex items-center gap-1.5']"><span :class="['inline-block w-4 border-t-2 border-dashed border-[var(--series-1)]']" aria-hidden="true" />projection at the current ETA{{ props.progress.lowerBound ? ' (lower bound)' : '' }}</span>
+      <span :class="['inline-flex items-center gap-1.5']"><span :class="['inline-block w-4 h-0.5 bg-[var(--series-1)]']" aria-hidden="true" />{{ t('runs.chart.legendCompleted') }}</span>
+      <span v-if="projectionPath" :class="['inline-flex items-center gap-1.5']"><span :class="['inline-block w-4 border-t-2 border-dashed border-[var(--series-1)]']" aria-hidden="true" />{{ props.progress.lowerBound ? t('runs.chart.legendProjectionLowerBound') : t('runs.chart.legendProjection') }}</span>
       <span v-if="rate" data-testid="progress-rate">
-        <b :class="['tabular-nums text-neutral-700 dark:text-neutral-300']">{{ rate.perHour >= 10 ? Math.round(rate.perHour) : rate.perHour.toFixed(1) }}</b> cases/h
-        {{ rate.overall ? '(whole run)' : `(last ${formatDuration(rate.window)})` }}
+        <i18n-t keypath="runs.chart.rate" scope="global">
+          <template #rate><b :class="['tabular-nums text-neutral-700 dark:text-neutral-300']">{{ rate.perHour >= 10 ? Math.round(rate.perHour) : rate.perHour.toFixed(1) }}</b></template>
+        </i18n-t>
+        {{ rate.overall ? t('runs.chart.rateWholeRun') : t('runs.chart.rateWindow', { window: formatDuration(rate.window) }) }}
       </span>
     </figcaption>
   </figure>

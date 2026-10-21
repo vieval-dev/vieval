@@ -7,6 +7,7 @@ import Anser from 'anser'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useIntervalFn } from '@vueuse/core'
 import { computed, shallowRef, useTemplateRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import SegmentedControl from './SegmentedControl.vue'
 import StateView from './StateView.vue'
@@ -33,6 +34,7 @@ const props = defineProps<{
   showCase?: boolean
 }>()
 
+const { t } = useI18n()
 const pageSize = 1000
 const lines = shallowRef<LogLine[]>([])
 const total = shallowRef(0)
@@ -40,7 +42,8 @@ const loading = shallowRef(true)
 const error = shallowRef<ApiError>()
 type Stream = 'all' | 'stderr' | 'stdout'
 const stream = shallowRef<Stream>('all')
-const streams: Segment<Stream>[] = [{ label: 'all', value: 'all' }, { label: 'stdout', value: 'stdout' }, { label: 'stderr', value: 'stderr' }]
+// `stdout` and `stderr` are the stream names the logs carry, not words to translate.
+const streams = computed<Segment<Stream>[]>(() => [{ label: t('runs.logs.all'), value: 'all' }, { label: 'stdout', value: 'stdout' }, { label: 'stderr', value: 'stderr' }])
 let busy = false
 
 async function loadMore(): Promise<void> {
@@ -105,11 +108,11 @@ const range = computed(() => {
 <template>
   <div :class="['flex flex-col']" data-testid="log-view">
     <div :class="['flex items-center flex-wrap gap-2 px-3 py-1.5 text-xs border-b border-neutral-200/50 dark:border-neutral-800/50']">
-      <SegmentedControl v-model="stream" :items="streams" label="Output stream" />
-      <span :class="['muted ml-auto']" data-testid="log-count">showing {{ range }} of {{ visible.length }} loaded · {{ total }} lines total</span>
-      <span v-if="props.follow" :class="['badge state-running']"><span class="vv-pulse i-mingcute-airdrop-line" aria-hidden="true" />following</span>
+      <SegmentedControl v-model="stream" :items="streams" :label="t('runs.logs.stream')" />
+      <span :class="['muted ml-auto']" data-testid="log-count">{{ t('runs.logs.count', { loaded: visible.length, range, total }) }}</span>
+      <span v-if="props.follow" :class="['badge state-running']"><span class="vv-pulse i-mingcute-airdrop-line" aria-hidden="true" />{{ t('runs.logs.following') }}</span>
     </div>
-    <StateView :error="error" :loading="loading" :empty="total === 0" :empty-text="props.emptyText ?? 'No console output recorded'" empty-hint="vieval records console.log / console.error output written inside cases." skeleton="lines" @retry="reset">
+    <StateView :error="error" :loading="loading" :empty="total === 0" :empty-text="props.emptyText ?? t('runs.logs.empty')" :empty-hint="t('runs.logs.emptyHint')" skeleton="lines" @retry="reset">
       <div ref="scroller" :class="['overflow-auto h-[55vh] max-md:h-[65vh] min-h-48 bg-neutral-50 dark:bg-neutral-950 font-mono text-xs']">
         <div :style="{ height: `${virtualizer.getTotalSize()}px`, position: 'relative', minWidth: '100%' }">
           <div

@@ -3,6 +3,7 @@ import type { HeadlineResult, ScoreDefinition } from '../../../src/shared/contra
 import type { ColumnDefinition } from '../scores'
 
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import MetricInfo from './MetricInfo.vue'
 
@@ -46,6 +47,7 @@ const props = defineProps<{
   taskLabel?: (taskId: string) => string
 }>()
 
+const { t } = useI18n()
 const view = computed(() => (props.result == null ? undefined : headlineView(props.result, props.definitions)))
 const completion = computed(() => (view.value == null ? { rate: '' } : completionParts(view.value.completion)))
 /** What the hover card describes: the primary score, or the built-in passed share or completion rate. */
@@ -55,8 +57,8 @@ const column = computed<ColumnDefinition | undefined>(() => {
   if (view.value.definition != null)
     return scoreColumn(view.value.definition, props.definitions)
   return view.value.kind === 'passed-cases'
-    ? { better: 'higher', description: 'Share of the settled cases that passed. The tasks record no score.', label: view.value.label, name: 'passed' }
-    : { better: 'higher', description: 'Share of the settled cases that produced a result. The tasks name different primary scores, listed below.', label: 'Completion rate', name: 'completion' }
+    ? { better: 'higher', description: t('scores.headline.passedDescription'), label: view.value.label, name: 'passed' }
+    : { better: 'higher', description: t('scores.headline.perTaskDescription'), label: t('scores.completion.label'), name: 'completion' }
 })
 const unscoredCount = computed(() => Object.values(view.value?.summary.unscored ?? {}).reduce((sum, count) => sum + count, 0))
 const incomplete = computed(() => view.value != null && view.value.completion.mean != null && view.value.completion.mean < 1)
@@ -81,7 +83,7 @@ const valueClass = computed(() => ({ lg: 'text-2xl', md: 'text-xl', sm: 'text-sm
         <button
           v-if="incomplete && props.onErrors" type="button"
           :class="['text-right underline decoration-dotted underline-offset-2 [color:var(--ink-errored)]']"
-          title="Show the cases without a result"
+          :title="t('scores.completion.showCases')"
           data-testid="headline-completion"
           @click.stop.prevent="props.onErrors()"
         >
@@ -90,14 +92,14 @@ const valueClass = computed(() => ({ lg: 'text-2xl', md: 'text-xl', sm: 'text-sm
             {{ ' ' }}<span :class="['whitespace-nowrap']">{{ completion.reasons }}</span>
           </template>
         </button>
-        <span v-else :class="[incomplete ? '[color:var(--ink-errored)]' : 'muted']" title="Share of settled cases that produced a result" data-testid="headline-completion">
+        <span v-else :class="[incomplete ? '[color:var(--ink-errored)]' : 'muted']" :title="t('scores.completion.hint')" data-testid="headline-completion">
           <span :class="['whitespace-nowrap']">{{ completion.rate }}</span><template v-if="completion.reasons != null">
             <!-- The space between the parts is the only place a narrow column may wrap the completion text. -->
             {{ ' ' }}<span :class="['whitespace-nowrap']">{{ completion.reasons }}</span>
           </template>
         </span>
       </template>
-      <span v-if="unscoredCount > 0" :class="['muted whitespace-nowrap']" :title="unscoredText(view.summary.unscored)" data-testid="headline-unscored">· {{ unscoredCount }} unscored</span>
+      <span v-if="unscoredCount > 0" :class="['muted whitespace-nowrap']" :title="unscoredText(view.summary.unscored)" data-testid="headline-unscored">· {{ t('scores.headline.unscored', { n: unscoredCount }) }}</span>
     </span>
     <ul v-if="view.tasks.length > 0" :class="['m-0 p-0 list-none grid gap-0.5 text-xs']" data-testid="headline-tasks">
       <li v-for="task in view.tasks" :key="task.taskId" :class="['flex items-baseline gap-1.5 min-w-0']">

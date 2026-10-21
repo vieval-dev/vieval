@@ -5,6 +5,7 @@ import type { Segment } from './SegmentedControl.vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useIntervalFn, useMediaQuery, useTimestamp } from '@vueuse/core'
 import { computed, reactive, shallowRef, useTemplateRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import CountsBar from './CountsBar.vue'
 import IconButton from './IconButton.vue'
@@ -12,7 +13,7 @@ import SegmentedControl from './SegmentedControl.vue'
 import StateBadge from './StateBadge.vue'
 
 import { formatDuration, formatScore } from '../format'
-import { levelIcons, levelLabels } from '../hierarchy'
+import { levelIcons, levelLabel } from '../hierarchy'
 import { href } from '../router'
 import { completionText, headlineOf, headlineView } from '../scores'
 
@@ -21,6 +22,7 @@ import { completionText, headlineOf, headlineView } from '../scores'
  * stay fast. Running cases are highlighted; rows whose state changed since the last update flash once.
  */
 const props = defineProps<{ snapshot: RunSnapshot }>()
+const { t } = useI18n()
 
 /** One visible line of the flattened tree. */
 interface Row {
@@ -46,7 +48,7 @@ interface Row {
 const open = reactive(new Set<string>())
 type Filter = 'all' | 'failed' | 'passed' | 'running'
 const filter = shallowRef<Filter>('all')
-const filters: Segment<Filter>[] = [{ label: 'all', value: 'all' }, { label: 'running', value: 'running' }, { label: 'failed', value: 'failed' }, { label: 'passed', value: 'passed' }]
+const filters = computed<Segment<Filter>[]>(() => (['all', 'running', 'failed', 'passed'] as const).map(value => ({ label: t(`runs.tree.filter.${value}`), value })))
 const search = shallowRef('')
 
 // Open projects and tasks by default; cases stay closed.
@@ -84,7 +86,7 @@ const rows = computed<Row[]>(() => {
   for (const projectId of projectIds) {
     const project = snapshot.projects.find(item => item.id === projectId)
     const tasks = snapshot.tasks.filter(task => task.projectId === projectId)
-    list.push({ depth: 0, detail: `${tasks.length}${project?.taskCount == null ? '' : ` / ${project.taskCount}`} tasks`, expandable: true, key: `p:${projectId}`, kind: 'project', label: projectId, state: project?.failed || tasks.some(task => task.state === 'failed') ? 'failed' : project?.state ?? 'queued' })
+    list.push({ depth: 0, detail: project?.taskCount == null ? t('runs.tree.tasks', { n: tasks.length }, tasks.length) : t('runs.tree.tasksOf', { n: tasks.length, total: project.taskCount }), expandable: true, key: `p:${projectId}`, kind: 'project', label: projectId, state: project?.failed || tasks.some(task => task.state === 'failed') ? 'failed' : project?.state ?? 'queued' })
     if (!open.has(`p:${projectId}`))
       continue
     for (const task of tasks) {
@@ -104,7 +106,7 @@ const rows = computed<Row[]>(() => {
         list.push({
           caseNode: node,
           depth,
-          detail: [node.durationMs == null ? undefined : formatDuration(node.durationMs), retries > 0 ? `${retries} retr${retries === 1 ? 'y' : 'ies'}` : undefined, requeues > 0 ? `requeued ${requeues}/${last?.requeue ?? requeues}` : undefined, node.rounds.length > 1 && round == null ? `${node.rounds.length} rounds` : undefined, node.artifactCount > 0 ? `${node.artifactCount} artifacts` : undefined, node.evidenceLinkCount > 0 ? 'evidence' : undefined].filter(Boolean).join(' · '),
+          detail: [node.durationMs == null ? undefined : formatDuration(node.durationMs), retries > 0 ? t('runs.tree.retries', { n: retries }, retries) : undefined, requeues > 0 ? t('runs.position.requeued', { index: requeues, total: last?.requeue ?? requeues }) : undefined, node.rounds.length > 1 && round == null ? t('runs.tree.rounds', { n: node.rounds.length }, node.rounds.length) : undefined, node.artifactCount > 0 ? t('runs.tree.artifacts', { n: node.artifactCount }, node.artifactCount) : undefined, node.evidenceLinkCount > 0 ? t('runs.tree.evidence') : undefined].filter(Boolean).join(' · '),
           expandable: (last?.tries.length ?? 0) > 0,
           href: href({ caseId: node.caseId, name: 'case', runKey: snapshot.runKey, taskId: node.taskId }),
           key: caseKey,
@@ -118,11 +120,13 @@ const rows = computed<Row[]>(() => {
         if (open.has(caseKey) && last != null) {
           // Tries are numbered across requeues; the note says whether a try was an immediate retry or ran after a requeue.
           last.tries.forEach((attempt, tryIndex) => {
-            const note = attempt.retryIndex > 0 ? ` (retry ${attempt.retryIndex})` : attempt.requeueIndex > 0 ? ` (requeue ${attempt.requeueIndex})` : ''
-            list.push({ depth: depth + 1, detail: `${attempt.endedAt == null ? 'running' : formatDuration(Date.parse(attempt.endedAt) - Date.parse(attempt.startedAt))}`, expandable: false, key: `${caseKey}:try:${tryIndex}`, kind: 'try', label: `try ${tryIndex + 1}${note}`, state: attempt.state })
+            const label = attempt.retryIndex > 0
+              ? t('runs.position.tryRetry', { n: tryIndex + 1, retry: attempt.retryIndex })
+              : attempt.requeueIndex > 0 ? t('runs.position.tryRequeue', { n: tryIndex + 1, requeue: attempt.requeueIndex }) : t('runs.position.try', { n: tryIndex + 1 })
+            list.push({ depth: depth + 1, detail: attempt.endedAt == null ? t('states.running') : formatDuration(Date.parse(attempt.endedAt) - Date.parse(attempt.startedAt)), expandable: false, key: `${caseKey}:try:${tryIndex}`, kind: 'try', label, state: attempt.state })
           })
           if (last.state === 'requeued' && last.requeuedAt != null)
-            list.push({ depth: depth + 1, detail: `after ${last.tries.length} ${last.tries.length === 1 ? 'try' : 'tries'}`, expandable: false, key: `${caseKey}:waiting`, kind: 'try', label: 'waiting to rerun', state: 'requeued', waitingUntil: new Date(Date.parse(last.requeuedAt) + (last.requeueDelayMs ?? 0)).toISOString() })
+            list.push({ depth: depth + 1, detail: t('runs.position.after', { n: last.tries.length }, last.tries.length), expandable: false, key: `${caseKey}:waiting`, kind: 'try', label: t('runs.position.waitingToRerun'), state: 'requeued', waitingUntil: new Date(Date.parse(last.requeuedAt) + (last.requeueDelayMs ?? 0)).toISOString() })
         }
       }
       if (task.roundCount > 1) {
@@ -131,7 +135,7 @@ const rows = computed<Row[]>(() => {
           const inRound = task.cases.flatMap(node => node.rounds.filter(round => round.roundIndex === roundIndex).map(round => ({ node, round })))
           const passed = inRound.filter(item => item.round.state === 'passed').length
           const running = inRound.some(item => item.round.state === 'running')
-          list.push({ depth: 2, detail: `${passed}/${inRound.length} passed`, expandable: true, key: roundKey, kind: 'round', label: `round ${roundIndex} (auto attempt)`, state: running ? 'running' : passed === inRound.length ? 'passed' : 'failed' })
+          list.push({ depth: 2, detail: t('runs.tree.roundPassed', { passed, total: inRound.length }), expandable: true, key: roundKey, kind: 'round', label: t('runs.position.roundAuto', { n: roundIndex }), state: running ? 'running' : passed === inRound.length ? 'passed' : 'failed' })
           if (open.has(roundKey)) {
             for (const item of inRound)
               pushCase(item.node, 3, item.round)
@@ -200,17 +204,17 @@ const counts = computed(() => props.snapshot.tasks.reduce((sum, task) => sum + t
 <template>
   <section :class="['card flex flex-col']" data-testid="execution-tree">
     <h2 :class="['card-title flex-wrap']">
-      <span class="i-mingcute-sitemap-line" aria-hidden="true" />Execution tree
-      <span class="text-xs muted font-normal">{{ counts }} cases · {{ rows.length }} rows</span>
+      <span class="i-mingcute-sitemap-line" aria-hidden="true" />{{ t('runs.tree.title') }}
+      <span class="text-xs muted font-normal">{{ t('runs.tree.cases', { n: counts }, counts) }} · {{ t('runs.tree.rows', { n: rows.length }, rows.length) }}</span>
       <div :class="['ml-auto flex items-center flex-wrap gap-1 font-normal', 'max-md:w-full']">
-        <SegmentedControl v-model="filter" :items="filters" label="Show cases" />
-        <input v-model="search" type="search" placeholder="Filter cases…" :class="['rounded border border-neutral-300/60 dark:border-neutral-700/40 bg-transparent px-2 py-0.5 text-xs w-40', 'max-md:(flex-1 min-w-24 py-1)']">
-        <IconButton icon="i-mingcute-aiming-2-line" label="Scroll to the first running case" :disabled="!rows.some(row => row.running)" @click="jumpToCurrent" />
+        <SegmentedControl v-model="filter" :items="filters" :label="t('runs.tree.filter.label')" />
+        <input v-model="search" type="search" :placeholder="t('runs.tree.search')" :class="['rounded border border-neutral-300/60 dark:border-neutral-700/40 bg-transparent px-2 py-0.5 text-xs w-40', 'max-md:(flex-1 min-w-24 py-1)']">
+        <IconButton icon="i-mingcute-aiming-2-line" :label="t('runs.tree.jumpToRunning')" :disabled="!rows.some(row => row.running)" @click="jumpToCurrent" />
       </div>
     </h2>
     <div ref="scroller" :class="['overflow-auto h-[60vh] min-h-64 max-md:h-[70vh]']">
       <div v-if="rows.length === 0" :class="['muted text-sm p-6 text-center']" data-testid="state-empty">
-        {{ props.snapshot.tasks.length === 0 ? 'No task started yet.' : 'No case matches the filter.' }}
+        {{ props.snapshot.tasks.length === 0 ? t('runs.tree.noTask') : t('runs.tree.empty') }}
       </div>
       <div :style="{ height: `${virtualizer.getTotalSize()}px`, position: 'relative' }">
         <div
@@ -223,21 +227,21 @@ const counts = computed(() => props.snapshot.tasks.reduce((sum, task) => sum + t
           :style="{ height: `${item.size}px`, transform: `translateY(${item.start}px)`, paddingLeft: `${(wide ? 8 : 4) + rows[item.index]!.depth * (wide ? 18 : 10)}px` }"
           :data-kind="rows[item.index]!.kind" :data-state="rows[item.index]!.state"
         >
-          <button v-if="rows[item.index]!.expandable" type="button" :class="['i-mingcute-right-line shrink-0 muted transition-transform', open.has(rows[item.index]!.key) && 'rotate-90']" :aria-label="`Toggle ${rows[item.index]!.label}`" @click="toggle(rows[item.index]!.key)" />
+          <button v-if="rows[item.index]!.expandable" type="button" :class="['i-mingcute-right-line shrink-0 muted transition-transform', open.has(rows[item.index]!.key) && 'rotate-90']" :aria-label="t('runs.tree.toggle', { label: rows[item.index]!.label })" @click="toggle(rows[item.index]!.key)" />
           <span v-else class="shrink-0 w-[1.1em]" />
-          <span :class="[levelIcons[rows[item.index]!.kind], 'shrink-0 muted max-md:hidden']" :title="levelLabels[rows[item.index]!.kind]" aria-hidden="true" />
+          <span :class="[levelIcons[rows[item.index]!.kind], 'shrink-0 muted max-md:hidden']" :title="levelLabel(rows[item.index]!.kind)" aria-hidden="true" />
           <StateBadge :state="rows[item.index]!.state" icon-only />
           <span :class="['flex-1 min-w-0 flex md:items-center max-md:(flex-col justify-center gap-0.5)']">
             <span :class="['flex items-center gap-1.5 min-w-0']">
               <a v-if="rows[item.index]!.href" :href="rows[item.index]!.href" :class="['link truncate', rows[item.index]!.kind !== 'case' && 'font-medium']" :title="rows[item.index]!.label">{{ rows[item.index]!.label }}</a>
               <span v-else :class="['truncate']">{{ rows[item.index]!.label }}</span>
-              <span v-if="rows[item.index]!.running" :class="['badge state-running']"><span class="i-mingcute-aiming-2-line" aria-hidden="true" />now</span>
+              <span v-if="rows[item.index]!.running" :class="['badge state-running']"><span class="i-mingcute-aiming-2-line" aria-hidden="true" />{{ t('runs.position.now') }}</span>
             </span>
             <span :class="['md:(ml-auto pl-2) flex items-center gap-1.5 min-w-0', 'muted mono text-xs whitespace-nowrap max-md:text-[11px]']">
               <CountsBar v-if="rows[item.index]!.counts" :class="['w-24 shrink-0']" :counts="rows[item.index]!.counts!" />
-              <span v-if="rows[item.index]!.runningSince" :class="['[color:var(--ink-running)] tabular-nums']" data-testid="running-elapsed">running {{ formatDuration(Math.max(0, now - Date.parse(rows[item.index]!.runningSince!))) }}</span>
+              <span v-if="rows[item.index]!.runningSince" :class="['[color:var(--ink-running)] tabular-nums']" data-testid="running-elapsed">{{ t('runs.position.runningFor', { duration: formatDuration(Math.max(0, now - Date.parse(rows[item.index]!.runningSince!))) }) }}</span>
               <!-- After the delay the case waits for a slot at the end of the queue, which has no countdown. -->
-              <span v-if="rows[item.index]!.waitingUntil" :class="['[color:var(--ink-errored)] tabular-nums']" data-testid="waiting-countdown">{{ Date.parse(rows[item.index]!.waitingUntil!) > now ? `rerun in ${formatDuration(Date.parse(rows[item.index]!.waitingUntil!) - now)}` : 'waiting for a slot' }}</span>
+              <span v-if="rows[item.index]!.waitingUntil" :class="['[color:var(--ink-errored)] tabular-nums']" data-testid="waiting-countdown">{{ Date.parse(rows[item.index]!.waitingUntil!) > now ? t('runs.position.rerunIn', { duration: formatDuration(Date.parse(rows[item.index]!.waitingUntil!) - now) }) : t('runs.position.waitingForSlot') }}</span>
               <span :class="['truncate']">{{ rows[item.index]!.detail }}</span>
             </span>
           </span>

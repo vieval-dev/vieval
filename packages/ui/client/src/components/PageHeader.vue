@@ -9,7 +9,7 @@ import Breadcrumbs from './Breadcrumbs.vue'
 import IdMenu from './IdMenu.vue'
 
 import { useCatalog } from '../composables/useCatalog'
-import { hierarchyCrumbs, levelIcons, levelLabels } from '../hierarchy'
+import { hierarchyCrumbs, levelIcons, levelLabel } from '../hierarchy'
 import { attemptLabel, experimentLabel, runLabel } from '../labels'
 import { switcherOptions } from '../switcher'
 
@@ -68,7 +68,7 @@ const siblings = computed(() => {
     <div :class="['flex items-start gap-x-3 gap-y-2 flex-wrap']">
       <div :class="['min-w-0 flex-1 md:basis-96']">
         <h1 :class="['flex items-start gap-2 font-semibold [overflow-wrap:anywhere]', props.titleSize === 'sm' ? 'text-base leading-6' : 'text-lg leading-7']">
-          <span v-if="props.level" :class="[levelIcons[props.level], 'shrink-0 mt-1 muted']" role="img" :aria-label="levelLabels[props.level]" :title="levelLabels[props.level]" />
+          <span v-if="props.level" :class="[levelIcons[props.level], 'shrink-0 mt-1 muted']" role="img" :aria-label="levelLabel(props.level)" :title="levelLabel(props.level)" />
           <span v-if="props.loading" :class="['skeleton h-6 my-0.5 w-56 max-w-full']" data-testid="page-header-skeleton" />
           <slot v-else name="title">
             {{ props.title }}
@@ -89,7 +89,7 @@ const siblings = computed(() => {
       <!-- IdMenu renders no element of its own; the wrapper carries the order and the alignment. -->
       <span v-if="props.id && props.level" :class="['flex items-center min-h-7 max-md:order-1']">
         <!-- The page's secondary actions join the menu only when the page has some, so the menu adds no empty group. -->
-        <IdMenu :id="props.id" :kind="levelLabels[props.level].toLowerCase()">
+        <IdMenu :id="props.id" :kind="props.level">
           <template v-if="$slots.menu" #default>
             <slot name="menu" />
           </template>

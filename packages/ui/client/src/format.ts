@@ -1,5 +1,7 @@
 import { format } from 'd3'
 
+import { currentLocale } from './i18n'
+
 const compactNumber = format('~s')
 const plainNumber = format('~r')
 
@@ -39,41 +41,47 @@ export function formatTick(value: number): string {
   return Math.abs(value) >= 1000 ? compactNumber(Number(value.toPrecision(3))) : plainNumber(Number(value.toPrecision(3)))
 }
 
-/** Compact notation for large counts; one formatter, because creating `Intl.NumberFormat` is not free. */
-const compactCount = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1, notation: 'compact' })
+/** Compact number formatters by locale; one per locale, because creating `Intl.NumberFormat` is not free. */
+const compactFormats = new Map<string, Intl.NumberFormat>()
 
 /**
- * Formats a count with its noun in the right number, for short summaries.
+ * Formats a number in compact notation in the viewer's locale, with at most one decimal.
  *
- * Before:
- * - (1, 'run'), (12, 'run'), (3, 'experiment')
+ * Use when:
+ * - a large count or metric value must stay short (`formatCount`, metric values in `caseMetrics.ts`)
  *
- * After:
- * - "1 run", "12 runs", "3 experiments"
+ * Returns:
+ * - `48.2K`, `1M` in English; `4.8万`, `100万` in Chinese
  */
-export function countOf(count: number, noun: string): string {
-  return `${formatCount(count)} ${noun}${count === 1 ? '' : 's'}`
+export function formatCompact(value: number): string {
+  const locale = currentLocale()
+  let compact = compactFormats.get(locale)
+  if (compact == null) {
+    compact = new Intl.NumberFormat(locale, { maximumFractionDigits: 1, notation: 'compact' })
+    compactFormats.set(locale, compact)
+  }
+  return compact.format(value)
 }
 
 /**
- * Formats a case count so it stays short next to a bar: exact below 10 000, compact from there.
+ * Formats a case count so it stays short next to a bar: exact below 10 000, compact in the viewer's locale from there.
  *
  * Before:
  * - 361, 9_999, 48_213, 1_000_000
  *
  * After:
- * - "361", "9999", "48.2K", "1M"
+ * - "361", "9999", "48.2K", "1M" (`zh-Hans`: "4.8万", "100万")
  */
 export function formatCount(count: number): string {
-  return count < 10_000 ? String(count) : compactCount.format(count)
+  return count < 10_000 ? String(count) : formatCompact(count)
 }
 
-/** Local date and time of an ISO timestamp. */
+/** Date and time of an ISO timestamp in the viewer's locale and the browser's time zone. */
 export function formatDateTime(iso: string | undefined): string {
   if (iso == null)
     return '—'
   const date = new Date(iso)
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString(undefined, { hour12: false })
+  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString(currentLocale(), { hour12: false })
 }
 
 /**
@@ -115,12 +123,12 @@ export function formatScore(value: null | number | undefined): string {
   return `${(value * 100).toFixed(1)}%`
 }
 
-/** Local wall-clock time of an ISO timestamp, with seconds. */
+/** Wall-clock time of an ISO timestamp, with seconds, in the viewer's locale and the browser's time zone. */
 export function formatTime(iso: string | undefined): string {
   if (iso == null)
     return '—'
   const date = new Date(iso)
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleTimeString(undefined, { hour12: false })
+  return Number.isNaN(date.getTime()) ? iso : date.toLocaleTimeString(currentLocale(), { hour12: false })
 }
 
 /** One-line preview of any JSON value, cut at `max` characters. */

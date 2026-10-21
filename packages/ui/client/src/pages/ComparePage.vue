@@ -5,6 +5,7 @@ import type { Route } from '../router'
 
 import { useQuery } from '@pinia/colada'
 import { computed, shallowRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import BarChart from '../components/BarChart.vue'
 import ExperimentName from '../components/ExperimentName.vue'
@@ -16,6 +17,7 @@ import StateView from '../components/StateView.vue'
 
 import { api } from '../api'
 import { useCatalog } from '../composables/useCatalog'
+import { formatCount } from '../format'
 import { levelIcons } from '../hierarchy'
 import { attemptLabel, experimentLabel, runLabel } from '../labels'
 import { href } from '../router'
@@ -30,6 +32,7 @@ import { caseScoreText, gradersDiffer, graderText, headlineOf, headlineValue, he
 const props = defineProps<{ route: Extract<Route, { name: 'compare' }> }>()
 const query = computed(() => props.route.query)
 const catalog = useCatalog()
+const { t } = useI18n()
 
 const view = computed(() => query.value.view as 'attempts' | 'experiments' | 'matrix' | 'runs' | undefined)
 
@@ -122,7 +125,7 @@ const rows = computed(() => (result.value?.rows ?? []).filter(row => (!onlyChang
 
 const scoreDefinitions = computed(() => result.value?.scoreDefinitions ?? [])
 /** Label of the score the columns are compared by: the shared primary score, else the headline of passed cases. */
-const primaryLabel = computed(() => (result.value?.primary == null ? 'Passed cases' : scoreLabel(result.value.primary, scoreDefinitions.value)))
+const primaryLabel = computed(() => (result.value?.primary == null ? t('compare.result.passedCases') : scoreLabel(result.value.primary, scoreDefinitions.value)))
 /** Each column's headline next to its completion rate: a score over fewer completed cases is not comparable. */
 const chart = computed<BarDatum[]>(() => (result.value?.columns ?? []).map((column) => {
   const run = column.runs.at(-1)
@@ -130,7 +133,7 @@ const chart = computed<BarDatum[]>(() => (result.value?.columns ?? []).map((colu
 }))
 const chartSeries = computed(() => {
   const headline = result.value?.columns.map(column => column.runs.at(-1)?.headline).find(item => item != null)
-  return [headline == null ? primaryLabel.value : headlineView(headline, scoreDefinitions.value).label, 'completed']
+  return [headline == null ? primaryLabel.value : headlineView(headline, scoreDefinitions.value).label, t('compare.result.completed')]
 })
 
 /**
@@ -150,15 +153,26 @@ const graderWarning = computed(() => {
   return columns.filter(column => column.graders.length > 0).map(column => `${column.label}: ${column.graders.map(graderText).join(' / ')}`).join(' · ')
 })
 
-const title = computed(() => ({ attempts: 'Attempts of an experiment', experiments: 'Experiments of a project', matrix: 'Matrix rows of a run', runs: 'Chosen runs' } as Record<string, string>)[view.value ?? ''] ?? 'Comparisons')
+const title = computed(() => t(`compare.title.${view.value ?? 'list'}`))
+const subtitle = computed(() => {
+  if (view.value == null)
+    return t('compare.list.subtitle')
+  const columns = result.value?.columns.length ?? 0
+  const cases = result.value?.summary.rows ?? 0
+  return t('compare.result.subtitle', {
+    cases: t('compare.result.subtitleCases', { n: formatCount(cases) }, cases),
+    changed: formatCount(result.value?.summary.changed ?? 0),
+    columns: t('compare.result.subtitleColumns', { n: formatCount(columns) }, columns),
+  })
+})
 const position = computed(() => ({ experiment: query.value.experiment, project: query.value.project, runKey: query.value.run, workspace: query.value.workspace }))
 </script>
 
 <template>
-  <PageHeader level="comparison" :position="position" :title="title" :subtitle="view == null ? 'Pick what to compare' : `${result?.columns.length ?? 0} columns · ${result?.summary.rows ?? 0} cases · ${result?.summary.changed ?? 0} differ`" />
+  <PageHeader level="comparison" :position="position" :title="title" :subtitle="subtitle" />
 
   <template v-if="view == null">
-    <StateView :error="tree.error.value ?? catalog.query.error.value" :loading="tree.isPending.value" :empty="tree.data.value?.workspaces.length === 0" empty-text="No runs to compare" skeleton="rows" @retry="tree.refetch()">
+    <StateView :error="tree.error.value ?? catalog.query.error.value" :loading="tree.isPending.value" :empty="tree.data.value?.workspaces.length === 0" :empty-text="t('compare.list.empty')" skeleton="rows" @retry="tree.refetch()">
       <section v-for="workspace in tree.data.value?.workspaces" :key="workspace.id" :class="['card mb-4']">
         <h2 class="card-title">
           <span :class="levelIcons.workspace" aria-hidden="true" />{{ workspace.id }}
@@ -167,20 +181,20 @@ const position = computed(() => ({ experiment: query.value.experiment, project: 
           <div :class="['flex items-center flex-wrap gap-2 mb-1']">
             <span :class="[levelIcons.project, 'muted']" aria-hidden="true" /><span class="font-medium">{{ project.id }}</span>
             <a :class="['btn text-xs ml-auto']" :href="href({ name: 'compare', query: { project: project.id, view: 'experiments', workspace: workspace.id } })">
-              <span :class="levelIcons.experiment" aria-hidden="true" />Compare {{ project.experiments.length }} experiments
+              <span :class="levelIcons.experiment" aria-hidden="true" />{{ t('compare.list.compareExperiments', { n: project.experiments.length }, project.experiments.length) }}
             </a>
           </div>
           <ul :class="['pl-6 max-md:pl-2 text-sm']">
             <li v-for="experiment in project.experiments" :key="experiment.id" :class="['flex items-center flex-wrap gap-x-2 py-0.5 max-md:py-1']">
               <ExperimentName :experiment-id="experiment.id" :matrix="catalog.matrixOf({ experiment: experiment.id, project: project.id, workspace: workspace.id })" />
-              <a :class="['link text-xs ml-auto whitespace-nowrap']" :href="href({ name: 'compare', query: { experiment: experiment.id, project: project.id, view: 'attempts', workspace: workspace.id } })">compare {{ experiment.attempts.length }} attempts<span class="i-mingcute-arrow-right-line ml-0.5 align-[-0.15em]" aria-hidden="true" /></a>
+              <a :class="['link text-xs ml-auto whitespace-nowrap']" :href="href({ name: 'compare', query: { experiment: experiment.id, project: project.id, view: 'attempts', workspace: workspace.id } })">{{ t('compare.list.compareAttempts', { n: experiment.attempts.length }, experiment.attempts.length) }}<span class="i-mingcute-arrow-right-line ml-0.5 align-[-0.15em]" aria-hidden="true" /></a>
             </li>
           </ul>
         </div>
       </section>
       <section :class="['card']">
         <h2 class="card-title">
-          <span class="i-mingcute-layout-grid-line" aria-hidden="true" />Matrix rows inside one run
+          <span class="i-mingcute-layout-grid-line" aria-hidden="true" />{{ t('compare.list.matrixRuns') }}
         </h2>
         <ul :class="['p-3 text-sm']">
           <li v-for="run in matrixRuns" :key="run.runKey" :class="['flex items-center gap-2 py-0.5']">
@@ -193,14 +207,14 @@ const position = computed(() => ({ experiment: query.value.experiment, project: 
     </StateView>
   </template>
 
-  <StateView v-else :error="resultError" :loading="resultLoading" :empty="result?.columns.length === 0" empty-text="Nothing to compare" empty-hint="This level has no runs with cases yet." skeleton="panel" @retry="reloadResult">
+  <StateView v-else :error="resultError" :loading="resultLoading" :empty="result?.columns.length === 0" :empty-text="t('compare.result.empty')" :empty-hint="t('compare.result.emptyHint')" skeleton="panel" @retry="reloadResult">
     <div v-if="view === 'matrix'" :class="['flex items-center gap-2 mb-3 text-sm flex-wrap']">
-      <span class="muted">Eval entry</span>
+      <span class="muted">{{ t('compare.result.entry') }}</span>
       <a
         v-for="item in entries" :key="item.id"
         :href="href({ name: 'compare', query: { ...query, entry: item.id } })"
         :class="['btn text-xs py-0.5', item.id === entry && 'btn-active']"
-      >{{ item.id.split('/').at(-1) }} · {{ item.count }} rows</a>
+      >{{ t('compare.result.entryRows', { entry: item.id.split('/').at(-1), n: item.count }, item.count) }}</a>
     </div>
     <section :class="['grid gap-3 mb-4']" :style="{ gridTemplateColumns: `repeat(auto-fill, minmax(min(240px, 100%), 1fr))` }">
       <ScoreCard
@@ -216,18 +230,18 @@ const position = computed(() => ({ experiment: query.value.experiment, project: 
         <template v-for="run in column.runs.slice(-1)" :key="run.runKey">
           <span v-if="view !== 'matrix'" :title="run.runKey">{{ runLabel(run) }}</span>
         </template>
-        <span v-if="column.runs.length > 1">newest of {{ column.runs.length }} runs</span>
+        <span v-if="column.runs.length > 1">{{ t('compare.result.newestOf', { n: column.runs.length }) }}</span>
       </ScoreCard>
     </section>
 
     <div v-if="graderWarning" role="status" :class="['flex items-start gap-2 mb-4 rounded px-3 py-2 text-sm state-interrupted']" data-testid="compare-grader-warning">
       <span class="i-mingcute-warning-line mt-0.5 shrink-0" aria-hidden="true" />
-      <span>The columns graded {{ primaryLabel }} differently, so its values do not measure the same thing. <span :class="['mono text-xs']">{{ graderWarning }}</span></span>
+      <span>{{ t('compare.result.graderWarning', { score: primaryLabel }) }} <span :class="['mono text-xs']">{{ graderWarning }}</span></span>
     </div>
 
     <section :class="['card mb-4']">
       <h2 class="card-title">
-        <span class="i-mingcute-chart-horizontal-line" aria-hidden="true" />Headline and completion rate per column
+        <span class="i-mingcute-chart-horizontal-line" aria-hidden="true" />{{ t('compare.result.chartTitle') }}
       </h2>
       <div class="p-3">
         <BarChart :data="chart" :series="chartSeries" />
@@ -236,17 +250,17 @@ const position = computed(() => ({ experiment: query.value.experiment, project: 
 
     <section :class="['card']">
       <h2 :class="['card-title flex-wrap']">
-        <span class="i-mingcute-table-line" aria-hidden="true" />Cases
-        <label :class="['ml-auto flex items-center gap-1 text-xs font-normal']"><input v-model="onlyChanged" type="checkbox"> only differing</label>
-        <input v-model="search" type="search" placeholder="Filter cases…" :class="['rounded border border-neutral-300/60 dark:border-neutral-700/40 bg-transparent px-2 py-0.5 text-xs font-normal w-48', 'max-md:(w-full py-1)']">
+        <span class="i-mingcute-table-line" aria-hidden="true" />{{ t('compare.result.cases') }}
+        <label :class="['ml-auto flex items-center gap-1 text-xs font-normal']"><input v-model="onlyChanged" type="checkbox"> {{ t('compare.result.onlyDiffering') }}</label>
+        <input v-model="search" type="search" :placeholder="t('compare.result.filterPlaceholder')" :class="['rounded border border-neutral-300/60 dark:border-neutral-700/40 bg-transparent px-2 py-0.5 text-xs font-normal w-48', 'max-md:(w-full py-1)']">
       </h2>
-      <StateView :empty="rows.length === 0" empty-text="No case matches the filter">
+      <StateView :empty="rows.length === 0" :empty-text="t('compare.result.filterEmpty')">
         <div :class="['overflow-auto max-h-[70vh]']">
           <table :class="['w-full']">
             <thead :class="['sticky top-0 bg-white dark:bg-neutral-900 z-1']">
               <tr :class="['border-b border-neutral-200/50 dark:border-neutral-800/50']">
                 <th class="th">
-                  Case <span :class="['font-normal muted']">· {{ primaryLabel }}</span><span v-if="graderWarning" class="i-mingcute-warning-line text-amber-600 ml-1 align-[-0.15em]" :title="`Graders differ: ${graderWarning}`" data-testid="compare-grader-warning-icon" />
+                  {{ t('compare.result.case') }} <span :class="['font-normal muted']">· {{ primaryLabel }}</span><span v-if="graderWarning" class="i-mingcute-warning-line text-amber-600 ml-1 align-[-0.15em]" :title="t('compare.result.gradersDiffer', { graders: graderWarning })" data-testid="compare-grader-warning-icon" />
                 </th>
                 <th v-for="column in result?.columns" :key="column.id" :class="['th text-xs max-w-40 truncate']" :title="column.label">
                   {{ columnLabel(column) }}
@@ -256,7 +270,7 @@ const position = computed(() => ({ experiment: query.value.experiment, project: 
             <tbody>
               <tr v-for="row in rows" :key="row.caseName" :class="['border-b border-neutral-100/70 dark:border-neutral-900', row.changed && 'bg-amber-50/60 dark:bg-amber-950/30']">
                 <td :class="['td mono text-xs break-all max-md:min-w-40']">
-                  <span v-if="row.changed" class="i-mingcute-git-compare-line text-amber-600 mr-1" title="Differs between columns" />{{ row.caseName }}
+                  <span v-if="row.changed" class="i-mingcute-git-compare-line text-amber-600 mr-1" :title="t('compare.result.differs')" />{{ row.caseName }}
                 </td>
                 <td v-for="column in result?.columns" :key="column.id" class="td">
                   <span v-if="row.cells[column.id]" :class="['inline-flex items-center gap-1']">
@@ -264,7 +278,7 @@ const position = computed(() => ({ experiment: query.value.experiment, project: 
                     <span v-if="result?.primary" class="text-xs mono">{{ caseScoreText(row.cells[column.id]!.scores, result.primary) }}</span>
                     <span v-if="row.cells[column.id]!.roundCount > 1" class="text-xs muted">×{{ row.cells[column.id]!.roundCount }}</span>
                   </span>
-                  <span v-else class="text-xs muted">not run</span>
+                  <span v-else class="text-xs muted">{{ t('compare.result.notRun') }}</span>
                 </td>
               </tr>
             </tbody>

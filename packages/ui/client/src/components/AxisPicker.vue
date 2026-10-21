@@ -6,6 +6,7 @@ import { useMediaQuery } from '@vueuse/core'
 import { PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
 import { DrawerContent, DrawerDescription, DrawerHandle, DrawerOverlay, DrawerPortal, DrawerRoot, DrawerTitle } from 'vaul-vue'
 import { shallowRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import AnimatedContent from './AnimatedContent.vue'
 import AxisPickerList from './AxisPickerList.vue'
@@ -31,6 +32,7 @@ const categories = defineModel<string[]>('categories', { required: true })
 // TODO: preset views ("Outcome", "AUV health", "Cost") as one-click axis sets, later declared by eval authors in the
 // vieval config.
 
+const { t } = useI18n()
 const isDesktop = useMediaQuery('(min-width: 768px)')
 const open = shallowRef(false)
 const trigger = 'option-trigger'
@@ -39,7 +41,7 @@ const trigger = 'option-trigger'
 <template>
   <PopoverRoot v-if="isDesktop" v-model:open="open">
     <PopoverTrigger :class="[trigger]" data-testid="axis-picker">
-      <span class="muted">Axes</span><span :class="['tabular-nums']">{{ metrics.length + categories.length }}</span><span class="i-mingcute-down-line muted" aria-hidden="true" />
+      <span class="muted">{{ t('metrics.axes.title') }}</span><span :class="['tabular-nums']">{{ metrics.length + categories.length }}</span><span class="i-mingcute-down-line muted" aria-hidden="true" />
     </PopoverTrigger>
     <PopoverPortal>
       <PopoverContent as-child align="start" :side-offset="6" :collision-padding="12" :class="['floating w-[26rem] max-w-[calc(100vw-1.5rem)] text-sm outline-none']">
@@ -52,17 +54,17 @@ const trigger = 'option-trigger'
   </PopoverRoot>
   <DrawerRoot v-else v-model:open="open">
     <button type="button" :class="[trigger]" data-testid="axis-picker" @click="open = true">
-      <span class="muted">Axes</span><span :class="['tabular-nums']">{{ metrics.length + categories.length }}</span><span class="i-mingcute-down-line muted" aria-hidden="true" />
+      <span class="muted">{{ t('metrics.axes.title') }}</span><span :class="['tabular-nums']">{{ metrics.length + categories.length }}</span><span class="i-mingcute-down-line muted" aria-hidden="true" />
     </button>
     <DrawerPortal>
       <DrawerOverlay :class="['fixed inset-0 z-50 bg-black/40']" />
       <DrawerContent :class="['floating fixed inset-x-0 bottom-0 max-h-[85dvh] flex flex-col rounded-b-none! rounded-t-2xl! border-b-0! pb-6 text-sm outline-none']">
         <DrawerHandle :class="['mt-3 bg-neutral-300! dark:bg-neutral-600!']" />
         <DrawerTitle :class="['sr-only']">
-          Axes
+          {{ t('metrics.axes.title') }}
         </DrawerTitle>
         <DrawerDescription :class="['sr-only']">
-          Pick the metrics and categories drawn on the case charts.
+          {{ t('metrics.axes.description') }}
         </DrawerDescription>
         <AxisPickerList v-model:metrics="metrics" v-model:categories="categories" :class="['flex-1']" details="drawer" :definition-of="props.definitionOf" :label-of="props.labelOf" :separation="props.separation" :table="props.table" :values-of="props.valuesOf" />
       </DrawerContent>

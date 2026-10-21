@@ -61,7 +61,6 @@
   },
   "devDependencies": {
     "@fontsource-variable/noto-sans": "catalog:",
-    "@fontsource-variable/noto-sans-sc": "catalog:",
     "@fontsource-variable/quicksand": "catalog:",
     "@fontsource/maple-mono": "catalog:",
     "@iconify-json/mingcute": "catalog:",
@@ -85,6 +84,7 @@
     "vieval": "workspace:^",
     "vitest-browser-vue": "catalog:",
     "vue": "catalog:",
+    "vue-i18n": "catalog:",
     "vue-tsc": "catalog:",
     "yaml": "catalog:"
   }

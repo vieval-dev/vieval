@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 /**
- * Colored state label with an icon (state is never shown by color alone).
+ * Colored state label with an icon (state is never shown by color alone), named in the viewer's language; a state
+ * without a translation (`states` messages) is shown as the API reports it.
  */
 const props = defineProps<{
   /** Hide the text and keep only the icon (the label stays as `title`). */
@@ -10,6 +12,9 @@ const props = defineProps<{
   /** Run, task, case, or try state as the API reports it. */
   state: string
 }>()
+
+const { t, te } = useI18n()
+const label = computed(() => (te(`states.${props.state}`, 'en') ? t(`states.${props.state}`) : props.state))
 
 const look = computed(() => {
   switch (props.state) {
@@ -42,8 +47,8 @@ const look = computed(() => {
 </script>
 
 <template>
-  <span :class="['badge', look.class]" :title="props.state" :data-state="props.state">
+  <span :class="['badge', look.class]" :title="label" :data-state="props.state">
     <span :class="[look.icon, 'text-[0.9em]']" aria-hidden="true" />
-    <span v-if="!props.iconOnly">{{ props.state }}</span>
+    <span v-if="!props.iconOnly">{{ label }}</span>
   </span>
 </template>

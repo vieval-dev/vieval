@@ -3,6 +3,7 @@ import type { HierarchyPosition } from './hierarchy'
 import type { MatrixChip } from './labels'
 
 import { formatDuration } from './format'
+import { i18n } from './i18n'
 import { attemptDate, attemptLabel, experimentLabel, mergeMatrices, runLabel } from './labels'
 import { href } from './router'
 import { headlineOf, headlineView, scoreLabel } from './scores'
@@ -109,7 +110,7 @@ export function switcherOptions(position: HierarchyPosition, runs: readonly RunL
 
   if (workspace != null) {
     result.workspace = group(runs, run => run.workspaceId).map(([id, list]) => ({
-      detail: `${new Set(list.map(run => run.projectSegment)).size} project(s) · ${list.length} run(s)`,
+      detail: `${count('projects', new Set(list.map(run => run.projectSegment)).size)} · ${count('runs', list.length)}`,
       href: href({ name: 'scope', workspace: id }),
       id,
       label: id,
@@ -120,7 +121,7 @@ export function switcherOptions(position: HierarchyPosition, runs: readonly RunL
   const inWorkspace = runs.filter(run => run.workspaceId === workspace)
   if (workspace != null && project != null) {
     result.project = group(inWorkspace, run => run.projectSegment).map(([id, list]) => ({
-      detail: `${new Set(list.map(run => run.experimentId)).size} experiment(s) · ${list.length} run(s)`,
+      detail: `${count('experiments', new Set(list.map(run => run.experimentId)).size)} · ${count('runs', list.length)}`,
       ...runScore(list[0]!),
       href: href({ name: 'scope', project: id, workspace }),
       id,
@@ -135,7 +136,7 @@ export function switcherOptions(position: HierarchyPosition, runs: readonly RunL
       const label = experimentLabel(id, mergeMatrices(list.map(run => run.matrix)))
       return {
         chips: label.textIsMatrix ? undefined : label.chips,
-        detail: `${new Set(list.map(run => run.attemptId)).size} attempt(s)`,
+        detail: count('attempts', new Set(list.map(run => run.attemptId)).size),
         ...runScore(list[0]!),
         href: href({ experiment: id, name: 'scope', project, workspace }),
         id,
@@ -172,6 +173,11 @@ export function switcherOptions(position: HierarchyPosition, runs: readonly RunL
     }))
   }
   return result
+}
+
+/** A counted noun in the viewer's language ("3 runs", "3 次运行"). */
+function count(noun: 'attempts' | 'experiments' | 'projects' | 'runs', n: number): string {
+  return i18n.global.t(`runs.count.${noun}`, { n }, n)
 }
 
 /** Groups runs by a key in first-seen order, so newest-first input gives newest-first groups. */

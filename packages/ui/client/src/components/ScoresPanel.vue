@@ -6,6 +6,7 @@ import type { LinePoint } from './LineChart.vue'
 
 import { useQuery } from '@pinia/colada'
 import { computed, reactive, shallowRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import BarChart from './BarChart.vue'
 import CaseCartesian from './CaseCartesian.vue'
@@ -36,6 +37,7 @@ const props = defineProps<{
   refreshKey: number | undefined
   snapshot: RunSnapshot
 }>()
+const { t } = useI18n()
 const runKey = computed(() => props.snapshot.runKey)
 
 // Refetch whenever the run advanced (throttled seq), so live runs keep their charts current.
@@ -93,11 +95,11 @@ const scoreRows = computed(() => {
   if (completion == null)
     return rows
   // Every settled case counts toward the completion rate as 1 or 0, so its count is the cases that produced a result.
-  return [{ column: undefined, counted: completion.sum, grader: undefined, label: 'Completion rate', primary: false, summary: completion }, ...rows]
+  return [{ column: undefined, counted: completion.sum, grader: undefined, label: t('scores.completion.label'), primary: false, summary: completion }, ...rows]
 })
 const meanOf = (scoring: CaseScoring, name: string) => scoring.scores.find(summary => summary.name === name)?.mean ?? null
 const byTask = computed<BarDatum[]>(() => (scores.data.value?.byTask ?? []).map(task => ({ href: href({ name: 'task', runKey: runKey.value, taskId: task.taskId }), label: task.displayName, values: scoreNames.value.map(name => meanOf(task.scoring, name)) })))
-const byRound = computed<BarDatum[]>(() => (scores.data.value?.byRound ?? []).map(round => ({ label: `${props.snapshot.tasks.find(task => task.id === round.taskId)?.displayName ?? round.taskId} · round ${round.roundIndex}`, values: scoreNames.value.map(name => meanOf(round.scoring, name)) })))
+const byRound = computed<BarDatum[]>(() => (scores.data.value?.byRound ?? []).map(round => ({ label: t('scores.panel.round', { round: round.roundIndex, task: props.snapshot.tasks.find(task => task.id === round.taskId)?.displayName ?? round.taskId }), values: scoreNames.value.map(name => meanOf(round.scoring, name)) })))
 const taskLabel = (taskId: string) => props.snapshot.tasks.find(task => task.id === taskId)?.displayName ?? taskId
 /** Names of the "Other metrics" rows that are expanded; every row starts collapsed to one line. */
 const expanded = reactive(new Set<string>())
@@ -124,11 +126,11 @@ const labelOf = (name: string) => metricLabel(name, definitions.value)
  */
 type NumericView = 'matrix' | 'pairs' | 'time'
 const numericView = shallowRef<NumericView>('time')
-const numericViews = [
-  { icon: 'i-mingcute-chart-line-line', label: 'Over time', value: 'time' as const },
-  { icon: 'i-mingcute-grid-line', label: 'Matrix', value: 'matrix' as const },
-  { icon: 'i-mingcute-layout-grid-line', label: 'Pairs', value: 'pairs' as const },
-]
+const numericViews = computed(() => [
+  { icon: 'i-mingcute-chart-line-line', label: t('metrics.run.views.time'), value: 'time' as const },
+  { icon: 'i-mingcute-grid-line', label: t('metrics.run.views.matrix'), value: 'matrix' as const },
+  { icon: 'i-mingcute-layout-grid-line', label: t('metrics.run.views.pairs'), value: 'pairs' as const },
+])
 /** A matrix of scatterplots stays legible up to five metrics; the pairs heatmap up to a dozen. */
 const RUN_MATRIX_METRICS = 5
 const RUN_PAIRS_METRICS = 12
@@ -159,29 +161,29 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
     <StateView :error="scores.error.value" :loading="scores.isPending.value" skeleton="panel" @retry="scores.refetch()">
       <section :class="['card']">
         <h2 class="card-title">
-          <span class="i-mingcute-target-line" aria-hidden="true" />Scores
+          <span class="i-mingcute-target-line" aria-hidden="true" />{{ t('scores.panel.title') }}
         </h2>
         <div :class="['overflow-x-auto']">
           <table :class="['w-full']" data-testid="score-rows">
             <thead>
               <tr :class="['border-b border-neutral-200/50 dark:border-neutral-800/50']">
                 <th class="th">
-                  Score
+                  {{ t('scores.panel.columns.score') }}
                 </th>
                 <th class="th text-right">
-                  Mean
+                  {{ t('scores.panel.columns.mean') }}
                 </th>
                 <th class="th text-right">
-                  Counted
+                  {{ t('scores.panel.columns.counted') }}
                 </th>
                 <th class="th">
-                  Not counted
+                  {{ t('scores.panel.columns.notCounted') }}
                 </th>
                 <th class="th">
-                  Formula
+                  {{ t('scores.panel.columns.formula') }}
                 </th>
                 <th class="th">
-                  Grader
+                  {{ t('scores.panel.columns.grader') }}
                 </th>
               </tr>
             </thead>
@@ -191,7 +193,7 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
                   <MetricInfo :name="row.summary.name" :definition="row.column" :values="[]" :summary="row.summary">
                     <span :class="['cursor-help', row.column?.label == null && row.column != null && 'mono']">{{ row.label }}</span>
                   </MetricInfo>
-                  <span v-if="row.primary" :class="['badge state-neutral ml-1.5']" data-testid="score-row-primary">primary</span>
+                  <span v-if="row.primary" :class="['badge state-neutral ml-1.5']" data-testid="score-row-primary">{{ t('scores.panel.primary') }}</span>
                 </td>
                 <td :class="['td text-right tabular-nums font-semibold']">
                   {{ formatScore(row.summary.mean) }}
@@ -213,10 +215,10 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
           </table>
         </div>
         <p v-if="scoreRows.length <= 1" :class="['px-3 py-2 text-xs muted']">
-          No score recorded. Cases record one with context.recordScore(score, value); the headline is the share of passed cases.
+          {{ t('scores.panel.noScore', { code: 'context.recordScore(score, value)' }) }}
         </p>
         <div v-if="scores.data.value?.summary" :class="['flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2 text-xs']">
-          <span class="muted">Official summary (run-summary.json)</span>
+          <span class="muted">{{ t('scores.panel.officialSummary', { file: 'run-summary.json' }) }}</span>
           <HeadlineScore :result="scores.data.value.summary" :definitions="scoreDefinitions" size="sm" :task-label="taskLabel" />
         </div>
       </section>
@@ -226,30 +228,30 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
 
       <section :class="['card']" data-testid="matrix-rows">
         <h2 :class="['card-title flex-wrap']">
-          <span class="i-mingcute-layout-grid-line" aria-hidden="true" />Matrix rows (tasks)
-          <a :class="['btn text-xs ml-auto font-normal']" :href="href({ name: 'compare', query: { run: runKey, view: 'matrix' } })"><span class="i-mingcute-git-compare-line" aria-hidden="true" />Compare cases across rows</a>
+          <span class="i-mingcute-layout-grid-line" aria-hidden="true" />{{ t('scores.panel.matrixRows') }}
+          <a :class="['btn text-xs ml-auto font-normal']" :href="href({ name: 'compare', query: { run: runKey, view: 'matrix' } })"><span class="i-mingcute-git-compare-line" aria-hidden="true" />{{ t('scores.panel.compareRows') }}</a>
         </h2>
         <div :class="['overflow-x-auto']">
           <table :class="['w-full']">
             <thead>
               <tr :class="['border-b border-neutral-200/50 dark:border-neutral-800/50']">
                 <th class="th">
-                  Task
+                  {{ t('scores.panel.matrixColumns.task') }}
                 </th>
                 <th v-for="key in matrixKeys" :key="key" class="th">
                   {{ key }}
                 </th>
                 <th class="th">
-                  Cases
+                  {{ t('scores.panel.matrixColumns.cases') }}
                 </th>
                 <th class="th text-right">
-                  Headline
+                  {{ t('scores.panel.matrixColumns.headline') }}
                 </th>
                 <th v-for="name in scoreNames" :key="name" class="th text-right">
                   {{ scoreLabel(name, scoreDefinitions) }}
                 </th>
                 <th class="th text-right">
-                  Rounds
+                  {{ t('scores.panel.matrixColumns.rounds') }}
                 </th>
               </tr>
             </thead>
@@ -284,7 +286,7 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
 
       <section v-if="byRound.length > 1 && scoreNames.length > 0" :class="['card']">
         <h2 class="card-title">
-          <span :class="levelIcons.round" aria-hidden="true" />Scores per auto-attempt round
+          <span :class="levelIcons.round" aria-hidden="true" />{{ t('scores.panel.byRound') }}
         </h2>
         <div class="p-3">
           <BarChart :data="byRound" :series="scoreNames.map(name => scoreLabel(name, scoreDefinitions))" />
@@ -292,12 +294,12 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
       </section>
     </StateView>
 
-    <StateView :error="metrics.error.value" :loading="metrics.isPending.value" :empty="metrics.data.value?.numeric.length === 0 && metrics.data.value?.nonNumeric.length === 0" empty-text="No metrics recorded" empty-hint="Cases record metrics with context.recordMetric(name, value)." skeleton="panel" @retry="metrics.refetch()">
+    <StateView :error="metrics.error.value" :loading="metrics.isPending.value" :empty="metrics.data.value?.numeric.length === 0 && metrics.data.value?.nonNumeric.length === 0" :empty-text="t('metrics.run.empty')" :empty-hint="t('metrics.run.emptyHint', { code: 'context.recordMetric(name, value)' })" skeleton="panel" @retry="metrics.refetch()">
       <section v-if="numeric.length > 0" :class="['card']" data-testid="metric-charts">
         <h2 class="card-title flex-wrap">
-          <span class="i-mingcute-chart-line-line" aria-hidden="true" />Numeric metrics
-          <span class="text-xs muted font-normal">{{ numericView === 'time' ? 'in recording order' : `${runTable.rows.length} cases of every task` }}</span>
-          <span :class="['ml-auto font-normal']"><SegmentedControl v-model="numericView" :items="numericViews" label="Numeric metrics view" /></span>
+          <span class="i-mingcute-chart-line-line" aria-hidden="true" />{{ t('metrics.run.numeric') }}
+          <span class="text-xs muted font-normal">{{ numericView === 'time' ? t('metrics.run.inRecordingOrder') : t('metrics.run.casesOfEveryTask', { n: runTable.rows.length }, runTable.rows.length) }}</span>
+          <span :class="['ml-auto font-normal']"><SegmentedControl v-model="numericView" :items="numericViews" :label="t('metrics.run.viewLabel')" /></span>
         </h2>
         <div v-if="numericView === 'time'" :class="['grid gap-4 p-3']" style="grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr))">
           <div v-for="metric in numeric" :key="metric.name">
@@ -309,16 +311,16 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
               </template>
             </LineChart>
             <div class="text-xs muted tabular-nums">
-              n={{ metric.summary.count }} · min {{ metric.summary.min }} · avg {{ Math.round(metric.summary.avg * 1000) / 1000 }} · max {{ metric.summary.max }}
+              {{ t('metrics.run.stats', { avg: Math.round(metric.summary.avg * 1000) / 1000, max: metric.summary.max, min: metric.summary.min, n: metric.summary.count }) }}
             </div>
           </div>
         </div>
         <div v-else-if="runMetrics.length < 2" :class="['p-3 text-sm muted']">
-          Pairs need two numeric metrics that vary across cases.
+          {{ t('metrics.run.pairsNeedTwo') }}
         </div>
         <div v-else-if="numericView === 'matrix'" :class="['grid gap-1 p-3']">
           <div :class="['text-xs muted']">
-            Every pair of the {{ Math.min(RUN_MATRIX_METRICS, runMetrics.length) }} metrics that best tell failed from passed cases · click a dot to open its case
+            {{ t('metrics.run.matrixHint', { n: Math.min(RUN_MATRIX_METRICS, runMetrics.length) }) }}
           </div>
           <ScatterMatrix :color-of="byState" :filters="noFilters" :label-of="labelOf" :metrics="runMetrics.slice(0, RUN_MATRIX_METRICS)" :rows="runTable.rows" :scales="runScales" :selected="everyCase" @pin="openCase" />
         </div>
@@ -333,7 +335,7 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
       </section>
       <section v-if="(metrics.data.value?.nonNumeric.length ?? 0) > 0" :class="['card']">
         <h2 class="card-title">
-          <span class="i-mingcute-list-check-line" aria-hidden="true" />Other metrics
+          <span class="i-mingcute-list-check-line" aria-hidden="true" />{{ t('metrics.run.other') }}
         </h2>
         <ul :class="['divide-y divide-neutral-100/70 dark:divide-neutral-900']">
           <li v-for="metric in metrics.data.value?.nonNumeric" :key="metric.name" :class="['text-xs']">
@@ -359,7 +361,7 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
                   :class="['link mono shrink-0 max-w-64 max-md:max-w-32 truncate']"
                   :title="entry.caseId"
                 >{{ entry.caseId }}</a>
-                <span v-else :class="['mono muted shrink-0']">run</span>
+                <span v-else :class="['mono muted shrink-0']">{{ t('metrics.run.runValue') }}</span>
                 <span :class="['mono whitespace-pre-wrap break-all min-w-0']">{{ fullValue(entry.value) }}</span>
               </li>
             </ol>
@@ -368,7 +370,7 @@ const numeric = computed(() => (metrics.data.value?.numeric ?? []).map(metric =>
       </section>
       <!-- The totals are one unbreakable `key=value` token each; the flex row wraps between them on narrow screens. -->
       <section v-if="metrics.data.value && metrics.data.value.inference.requests > 0" :class="['card p-3 text-sm', 'flex flex-wrap items-baseline gap-x-3 gap-y-1']">
-        <span>Inference: {{ metrics.data.value.inference.requests }} requests · {{ metrics.data.value.inference.responses }} responses · {{ metrics.data.value.inference.failed }} failed</span>
+        <span>{{ t('metrics.run.inference', { failed: metrics.data.value.inference.failed, requests: metrics.data.value.inference.requests, responses: metrics.data.value.inference.responses }) }}</span>
         <span v-for="(value, key) in metrics.data.value.inference.totals" :key="key" :class="['tabular-nums break-all']">{{ key }}={{ value }}</span>
       </section>
     </StateView>

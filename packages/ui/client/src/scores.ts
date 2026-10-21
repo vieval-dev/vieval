@@ -2,8 +2,10 @@ import type { Grader } from 'vieval/events'
 
 import type { CaseScores, CaseScoring, HeadlineResult, MetricDefinition, ScoreDefinition, ScoreSummary } from '../../src/shared/contract'
 import type { InferenceCall } from '../../src/shared/inference'
+import type { Messages } from './i18n'
 
 import { formatScore } from './format'
+import { i18n } from './i18n'
 import { localize } from './localize'
 
 /**
@@ -32,7 +34,7 @@ export interface HeadlineView {
   /** Definition of the headline score; absent for `passed-cases` and `per-task`. */
   definition?: ScoreDefinition
   kind: HeadlineResult['headline']['kind']
-  /** Localized label of the primary score, `Passed cases`, or, for `per-task`, `completed`. */
+  /** Localized label of the primary score, `Passed cases`, or, for `per-task`, `completed` (in the viewer's language). */
   label: string
   /** Summary of the headline value; the completion rate for `per-task`. */
   summary: ScoreSummary
@@ -41,21 +43,26 @@ export interface HeadlineView {
 }
 
 /**
- * Labels of the suggested unscored reasons (`recordUnscored`), and of the reasons a case leaves the completion rate
- * (`errored`, `timeout`); any other reason is shown as written.
+ * Message keys of the suggested unscored reasons (`recordUnscored`), and of the reasons a case leaves the completion
+ * rate (`errored`, `timeout`); any other reason is shown as written.
  */
-const UNSCORED_REASONS: Record<string, string> = {
+const UNSCORED_REASONS: Readonly<Record<string, keyof Messages['scores']['unscoredReasons']>> = {
   errored: 'errored',
-  grader_failed: 'grader failed',
-  input_unscored: 'input unscored',
-  invalid_response: 'invalid response',
-  no_response: 'no response',
+  grader_failed: 'graderFailed',
+  input_unscored: 'inputUnscored',
+  invalid_response: 'invalidResponse',
+  no_response: 'noResponse',
   refusal: 'refusal',
-  timeout: 'timed out',
+  timeout: 'timeout',
 }
 
-/** Shown instead of a score label when a group of cases records no score: its headline is the share of passed cases. */
-const PASSED_CASES_LABEL = 'Passed cases'
+/** Message keys of the grader kinds the events define; another kind is shown as written. */
+const GRADER_KINDS: Readonly<Record<string, keyof Messages['scores']['grader']['kinds']>> = {
+  external: 'external',
+  human: 'human',
+  model: 'model',
+  rule: 'rule',
+}
 
 /**
  * Formats the value of one score of one case: the value as a percentage, the unscored reason, or `—`.
@@ -83,12 +90,12 @@ export function caseScoreText(scores: CaseScores, name: string): string {
  * - { rate: "completed 96.8%", reasons: "(4 errored)" }
  */
 export function completionParts(completion: ScoreSummary): { rate: string, reasons?: string } {
-  const parts = [
-    completion.unscored.errored ? `${completion.unscored.errored} errored` : undefined,
-    completion.unscored.timeout ? `${completion.unscored.timeout} timed out` : undefined,
-  ].filter(Boolean)
-  const rate = `completed ${formatScore(completion.mean)}`
-  return parts.length > 0 ? { rate, reasons: `(${parts.join(', ')})` } : { rate }
+  const { t } = i18n.global
+  const parts = (['errored', 'timeout'] as const)
+    .filter(reason => (completion.unscored[reason] ?? 0) > 0)
+    .map(reason => t('scores.reasonCount', { n: completion.unscored[reason], reason: unscoredReasonLabel(reason) }))
+  const rate = t('scores.completion.rate', { rate: formatScore(completion.mean) })
+  return parts.length > 0 ? { rate, reasons: t('scores.completion.reasons', { reasons: parts.join(t('scores.listSeparator')) }) } : { rate }
 }
 
 /**
@@ -128,8 +135,8 @@ export function formulaText(definition: ScoreDefinition | undefined, definitions
       return `${label} ×${input.weight ?? 1}`
     return label
   })
-  const prefix = { all: 'all of', mean: 'mean of', weighted: 'weighted' }[combine.kind]
-  return `${prefix}: ${inputs.join(', ')}`
+  const { t } = i18n.global
+  return t(`scores.formula.${combine.kind}`, { inputs: inputs.join(t('scores.listSeparator')) })
 }
 
 /**
@@ -152,8 +159,11 @@ export function gradersDiffer(left: Grader | undefined, right: Grader | undefine
  * - "model · gpt-5.5 · 3 votes, median", "rule · version 2"
  */
 export function graderText(grader: Grader): string {
-  const votes = grader.votes == null ? undefined : `${grader.votes} ${grader.votes === 1 ? 'vote' : 'votes'}${grader.reducer == null ? '' : `, ${grader.reducer}`}`
-  return [grader.kind, grader.model, grader.version == null ? undefined : `version ${grader.version}`, votes ?? grader.reducer].filter(Boolean).join(' · ')
+  const { t } = i18n.global
+  const kind = Object.hasOwn(GRADER_KINDS, grader.kind) ? t(`scores.grader.kinds.${GRADER_KINDS[grader.kind]!}`) : grader.kind
+  const voteCount = grader.votes == null ? undefined : t('scores.grader.votes', { n: grader.votes }, grader.votes)
+  const votes = voteCount == null || grader.reducer == null ? voteCount : t('scores.grader.votesReducer', { reducer: grader.reducer, votes: voteCount })
+  return [kind, grader.model, grader.version == null ? undefined : t('scores.grader.version', { version: grader.version }), votes ?? grader.reducer].filter(Boolean).join(' · ')
 }
 
 /**
@@ -203,10 +213,11 @@ export function headlineView(result: HeadlineResult, definitions: readonly Score
   const { completion, headline } = result
   if (headline.kind === 'per-task') {
     const tasks = headline.tasks.map(task => ({ definition: scoreDefinition(task.score.name, definitions), label: scoreLabel(task.score.name, definitions), summary: task.score, taskId: task.taskId }))
-    return { completion, kind: headline.kind, label: 'completed', summary: completion, tasks }
+    return { completion, kind: headline.kind, label: i18n.global.t('scores.headline.completed'), summary: completion, tasks }
   }
+  // Shown instead of a score label when a group of cases records no score: its headline is the share of passed cases.
   if (headline.kind === 'passed-cases')
-    return { completion, kind: headline.kind, label: PASSED_CASES_LABEL, summary: headline.score, tasks: [] }
+    return { completion, kind: headline.kind, label: i18n.global.t('scores.headline.passedCases'), summary: headline.score, tasks: [] }
   return { completion, definition: scoreDefinition(headline.score.name, definitions), kind: headline.kind, label: scoreLabel(headline.score.name, definitions), summary: headline.score, tasks: [] }
 }
 
@@ -268,11 +279,11 @@ export function scoreLabel(name: string, definitions: readonly ScoreDefinition[]
  * - "grader failed", "judge timed out"
  */
 export function unscoredReasonLabel(reason: string): string {
-  return UNSCORED_REASONS[reason] ?? reason
+  return Object.hasOwn(UNSCORED_REASONS, reason) ? i18n.global.t(`scores.unscoredReasons.${UNSCORED_REASONS[reason]!}`) : reason
 }
 
 /**
- * Formats the cases that recorded a score as unscored, per reason, largest first.
+ * Formats the cases that recorded a score as unscored, per reason, largest first, in the viewer's language.
  *
  * Before:
  * - { refusal: 1, grader_failed: 2 }
@@ -281,5 +292,10 @@ export function unscoredReasonLabel(reason: string): string {
  * - "2 grader failed, 1 refusal"
  */
 export function unscoredText(unscored: Readonly<Record<string, number>>): string {
-  return Object.entries(unscored).filter(([, count]) => count > 0).sort((a, b) => b[1] - a[1]).map(([reason, count]) => `${count} ${unscoredReasonLabel(reason)}`).join(', ')
+  const { t } = i18n.global
+  return Object.entries(unscored)
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([reason, count]) => t('scores.reasonCount', { n: count, reason: unscoredReasonLabel(reason) }))
+    .join(t('scores.listSeparator'))
 }

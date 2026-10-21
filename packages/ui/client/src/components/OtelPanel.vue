@@ -5,6 +5,7 @@ import type { ViewTab } from './ViewTabs.vue'
 
 import { useQuery } from '@pinia/colada'
 import { computed, shallowRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import LineChart from './LineChart.vue'
 import ObjectTree from './ObjectTree.vue'
@@ -16,6 +17,7 @@ import ViewTabs from './ViewTabs.vue'
 import { api } from '../api'
 import { extent } from '../extent'
 import { formatDuration, formatTime } from '../format'
+import { levelLabel } from '../hierarchy'
 
 /**
  * Simple OpenTelemetry views of a run, rebuilt from its events by the server: a span waterfall
@@ -30,10 +32,11 @@ const props = defineProps<{
   refreshKey: number | undefined
   snapshot: RunSnapshot
 }>()
+const { t } = useI18n()
 const runKey = computed(() => props.snapshot.runKey)
 type Tab = 'logs' | 'metrics' | 'raw' | 'traces'
 const tab = shallowRef<Tab>('traces')
-const tabItems: ViewTab<Tab>[] = [{ label: 'Traces', value: 'traces' }, { label: 'Logs', value: 'logs' }, { label: 'Metrics', value: 'metrics' }, { label: 'Raw otlp/*.json', value: 'raw' }]
+const tabItems = computed<ViewTab<Tab>[]>(() => (['traces', 'logs', 'metrics', 'raw'] as const).map(value => ({ label: t(`runs.otel.tabs.${value}`), value })))
 
 const traces = useQuery({ key: () => ['runs', runKey.value, 'otel', 'traces'], query: () => api.otelTraces(runKey.value) })
 const logs = useQuery({ key: () => ['runs', runKey.value, 'otel', 'logs'], query: () => api.otelLogs(runKey.value) })
@@ -76,8 +79,8 @@ const waterfall = computed(() => {
 function spanLabel(span: OtelSpan): string {
   const attributes = span.attributes
   const detail = attributes['vieval.case.name'] ?? attributes['vieval.task.display_name'] ?? attributes['vieval.project.name']
-    ?? (attributes['vieval.round.index'] != null ? `round ${attributes['vieval.round.index']}` : undefined)
-    ?? (attributes['vieval.case.retry_index'] != null ? `try ${Number(attributes['vieval.case.retry_index']) + 1}` : undefined)
+    ?? (attributes['vieval.round.index'] != null ? t('runs.position.round', { n: String(attributes['vieval.round.index']) }) : undefined)
+    ?? (attributes['vieval.case.retry_index'] != null ? t('runs.position.try', { n: Number(attributes['vieval.case.retry_index']) + 1 }) : undefined)
   return detail == null ? span.name : `${span.name} · ${String(detail)}`
 }
 const spanColors: Record<OtelSpan['kind'], string> = { case: 'var(--series-1)', project: 'var(--series-3)', round: 'var(--series-2)', run: '#737373', task: 'var(--series-3)', try: 'var(--series-2)' }
@@ -86,30 +89,40 @@ const gaugeCharts = computed(() => (gauges.data.value?.metrics ?? []).map(metric
 
 <template>
   <section :class="['card']" data-testid="otel-panel">
-    <ViewTabs v-model="tab" :items="tabItems" label="OpenTelemetry views" in-card>
+    <ViewTabs v-model="tab" :items="tabItems" :label="t('runs.otel.tabs.label')" in-card>
       <template #extra>
-        <span :class="['ml-auto muted text-xs px-2 whitespace-nowrap max-md:hidden']" title="See the viewer README, section Limits">Rebuilt from run events · no OTLP receiver, user spans, or cross-process traces</span>
+        <span :class="['ml-auto muted text-xs px-2 whitespace-nowrap max-md:hidden']" :title="t('runs.otel.limitsTitle')">{{ t('runs.otel.limits') }}</span>
       </template>
 
-      <StateView v-if="tab === 'traces'" :error="traces.error.value" :loading="traces.isPending.value" :empty="waterfall.list.length === 0" empty-text="No spans yet" skeleton="lines" @retry="traces.refetch()">
+      <StateView v-if="tab === 'traces'" :error="traces.error.value" :loading="traces.isPending.value" :empty="waterfall.list.length === 0" :empty-text="t('runs.otel.noSpans')" skeleton="lines" @retry="traces.refetch()">
         <div :class="['px-3 py-1.5 text-xs muted']">
-          trace <span class="font-medium">{{ traces.data.value?.traceId }}</span> · {{ waterfall.list.length }} spans · {{ formatDuration(waterfall.end - waterfall.start) }}
+          <i18n-t keypath="runs.otel.trace" scope="global">
+            <template #id>
+              <span class="font-medium">{{ traces.data.value?.traceId }}</span>
+            </template>
+            <template #spans>
+              {{ t('runs.otel.spans', { n: waterfall.list.length }, waterfall.list.length) }}
+            </template>
+            <template #duration>
+              {{ formatDuration(waterfall.end - waterfall.start) }}
+            </template>
+          </i18n-t>
         </div>
         <div :class="['overflow-auto max-h-[60vh]']">
           <div v-for="row in waterfall.list" :key="row.span.spanId" :class="['flex items-center text-xs h-6 border-b border-neutral-100/70 dark:border-neutral-900']">
             <div :class="['w-40 md:w-96 shrink-0 flex items-center gap-1 truncate pr-2']" :style="{ paddingLeft: `${8 + row.depth * 14}px` }" :title="JSON.stringify(row.span.attributes, null, 2)">
               <StateBadge :state="row.span.status === 'unset' ? 'running' : row.span.status" icon-only />
-              <span class="muted">{{ row.span.kind }}</span>
+              <span class="muted">{{ levelLabel(row.span.kind).toLowerCase() }}</span>
               <span class="text-xs mono truncate">{{ spanLabel(row.span) }}</span>
             </div>
             <div :class="['relative flex-1 h-3 mr-3']">
-              <div :class="['absolute h-full rounded-sm']" :style="{ left: `${row.left}%`, width: `${row.width}%`, background: row.span.status === 'error' ? '#e34948' : spanColors[row.span.kind] }" :title="`${row.span.name}: ${formatTime(row.span.startTime)} → ${row.span.endTime ? formatTime(row.span.endTime) : 'running'}`" />
+              <div :class="['absolute h-full rounded-sm']" :style="{ left: `${row.left}%`, width: `${row.width}%`, background: row.span.status === 'error' ? '#e34948' : spanColors[row.span.kind] }" :title="`${row.span.name}: ${formatTime(row.span.startTime)} → ${row.span.endTime ? formatTime(row.span.endTime) : t('runs.otel.running')}`" />
             </div>
           </div>
         </div>
       </StateView>
 
-      <StateView v-else-if="tab === 'logs'" :error="logs.error.value" :loading="logs.isPending.value" :empty="logs.data.value?.records.length === 0" empty-text="No log records" skeleton="lines" @retry="logs.refetch()">
+      <StateView v-else-if="tab === 'logs'" :error="logs.error.value" :loading="logs.isPending.value" :empty="logs.data.value?.records.length === 0" :empty-text="t('runs.otel.noLogs')" skeleton="lines" @retry="logs.refetch()">
         <div :class="['overflow-auto max-h-[60vh]']">
           <table :class="['w-full']">
             <tbody>
@@ -132,17 +145,17 @@ const gaugeCharts = computed(() => (gauges.data.value?.metrics ?? []).map(metric
         </div>
       </StateView>
 
-      <StateView v-else-if="tab === 'metrics'" :error="gauges.error.value" :loading="gauges.isPending.value" :empty="gaugeCharts.length === 0" empty-text="No gauges" skeleton="panel" @retry="gauges.refetch()">
+      <StateView v-else-if="tab === 'metrics'" :error="gauges.error.value" :loading="gauges.isPending.value" :empty="gaugeCharts.length === 0" :empty-text="t('runs.otel.noGauges')" skeleton="panel" @retry="gauges.refetch()">
         <div :class="['grid gap-4 p-3']" style="grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr))">
           <div v-for="chart in gaugeCharts" :key="chart.name">
-            <LineChart :name="`${chart.name} (gauge, ${chart.points.length} points)`" :points="chart.points" />
+            <LineChart :name="t('runs.otel.gauge', { name: chart.name, n: chart.points.length }, chart.points.length)" :points="chart.points" />
           </div>
         </div>
       </StateView>
 
       <template v-else>
         <div :class="['px-3 py-2']">
-          <SegmentedControl v-model="rawSignal" :items="(['traces', 'logs', 'metrics'] as const).map(signal => ({ label: `otlp/${signal}.json`, value: signal }))" label="OTLP file" />
+          <SegmentedControl v-model="rawSignal" :items="(['traces', 'logs', 'metrics'] as const).map(signal => ({ label: `otlp/${signal}.json`, value: signal }))" :label="t('runs.otel.file')" />
         </div>
         <StateView :error="raw.error.value" :loading="raw.isPending.value" skeleton="lines" @retry="raw.refetch()">
           <div :class="['p-3 overflow-auto max-h-[60vh]']">

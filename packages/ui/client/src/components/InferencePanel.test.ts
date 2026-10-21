@@ -5,6 +5,8 @@ import { render } from 'vitest-browser-vue'
 
 import InferencePanel from './InferencePanel.vue'
 
+import { i18n } from '../i18n'
+
 const agent = { id: 'openai', model: 'gpt-6.1-sol' }
 const judge = { id: 'anthropic', model: 'judge-1' }
 
@@ -40,5 +42,21 @@ describe('inferencePanel', () => {
     await expect.element(screen.getByTestId('inference-models')).toHaveTextContent('gpt-6.1-sol')
     await expect.element(screen.getByTestId('inference-models')).toHaveTextContent('judge-1')
     await expect.element(screen.getByTestId('inference-call-table')).toHaveTextContent('judge-1')
+  })
+  /**
+   * @example
+   * i18n.global.locale.value = 'zh-Hans'
+   * expect(screen.getByTestId('inference-grader')).toHaveTextContent('评分方 anthropic 的调用')
+   */
+  it('names the grader chip and the usage in the language picked for the viewer', async () => {
+    const events = [...call(1, agent, { input_tokens: 100, output_tokens: 10 }), ...call(3, judge, { input_tokens: 50, output_tokens: 5 })]
+    const english = await render(InferencePanel, { props: { events, grader: 'anthropic' } })
+    await expect.element(english.getByTestId('inference-grader')).toHaveTextContent('calls of grader anthropic')
+    english.unmount()
+
+    i18n.global.locale.value = 'zh-Hans'
+    const screen = await render(InferencePanel, { props: { events, grader: 'anthropic' } })
+    await expect.element(screen.getByTestId('inference-grader')).toHaveTextContent('评分方 anthropic 的调用')
+    await expect.element(screen.getByText('模型调用')).toBeVisible()
   })
 })

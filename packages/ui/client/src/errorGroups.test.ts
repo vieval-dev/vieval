@@ -3,6 +3,7 @@ import type { CaseNode } from '../../src/shared/contract'
 import { describe, expect, it } from 'vitest'
 
 import { groupErrors, normalizeErrorMessage } from './errorGroups'
+import { i18n } from './i18n'
 
 function caseOf(fields: Partial<CaseNode> & Pick<CaseNode, 'caseId' | 'state'>): CaseNode {
   return {
@@ -59,5 +60,17 @@ describe('groupErrors', () => {
       [1, undefined, 'The run ended while the case ran.'],
     ])
     expect(groups[0]!.example).toEqual({ caseId: 'a', name: 'a', taskId: 'task' })
+  })
+
+  /**
+   * @example
+   * zh-Hans: a case without a message groups under '没有错误信息。'
+   */
+  it('notes a case without an error message in the viewer\'s language', () => {
+    i18n.global.locale.value = 'zh-Hans'
+
+    const groups = groupErrors([{ cases: [caseOf({ caseId: 'a', state: 'timeout' }), caseOf({ caseId: 'b', state: 'unfinished' })] }])
+
+    expect(groups.map(group => group.message)).toEqual(['没有错误信息。', '用例运行时，运行已结束。'])
   })
 })

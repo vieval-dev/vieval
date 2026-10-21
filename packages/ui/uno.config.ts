@@ -102,10 +102,11 @@ export default defineConfig({
   },
   theme: {
     // Self-hosted by Fontsource (imported in `client/src/main.ts`), so the viewer also renders offline.
-    // Quicksand has no CJK glyphs; Noto Sans SC covers them, loaded per unicode-range chunk on demand.
+    // Quicksand has no CJK glyphs; Resource Han Rounded SC (a rounded Source Han Sans, `client/src/assets/fonts`) covers
+    // them in the same rounded style, loaded per unicode-range slice on demand.
     font: {
-      mono: '\'Maple Mono\', ui-monospace, SFMono-Regular, Menlo, Consolas, \'Noto Sans SC Variable\', monospace',
-      sans: '\'Quicksand Variable\', \'Noto Sans Variable\', \'Noto Sans SC Variable\', system-ui, \'PingFang SC\', \'Hiragino Sans GB\', \'Microsoft YaHei\', sans-serif',
+      mono: '\'Maple Mono\', ui-monospace, SFMono-Regular, Menlo, Consolas, \'Resource Han Rounded SC\', monospace',
+      sans: '\'Quicksand Variable\', \'Noto Sans Variable\', \'Resource Han Rounded SC\', system-ui, \'PingFang SC\', \'Hiragino Sans GB\', \'Microsoft YaHei\', sans-serif',
     },
   },
   transformers: [transformerVariantGroup()],

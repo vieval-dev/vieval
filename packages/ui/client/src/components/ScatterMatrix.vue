@@ -5,6 +5,7 @@ import type { CaseFilters, CaseRow } from '../caseMetrics'
 
 import { axisBottom, axisLeft, bin, brush, max, select } from 'd3'
 import { onMounted, useTemplateRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import { shortMetricName } from '../caseMetrics'
 import { formatTick } from '../format'
@@ -38,6 +39,7 @@ const emit = defineEmits<{
   pin: [row: CaseRow | null, point: null | { x: number, y: number }, axis: null | string]
 }>()
 
+const { locale, t } = useI18n()
 const root = useTemplateRef<HTMLElement>('root')
 const cell = 128
 const pad = 14
@@ -187,13 +189,14 @@ function render(): void {
 }
 
 onMounted(render)
-watch([() => props.rows, () => props.metrics, () => props.scales], render)
+// The metric labels are SVG text written once per draw, so a change of language redraws too.
+watch([() => props.rows, () => props.metrics, () => props.scales, locale], render)
 watch([() => props.selected, () => props.colorOf], paint)
 watch(() => props.pinnedKey, drawPinned)
 </script>
 
 <template>
   <div ref="root" :class="['relative overflow-x-auto select-none text-neutral-800 dark:text-neutral-200']" data-testid="scatter-matrix">
-    <svg role="img" aria-label="Scatterplot matrix of the cases" />
+    <svg role="img" :aria-label="t('metrics.charts.scatterMatrix')" />
   </div>
 </template>

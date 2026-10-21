@@ -4,6 +4,7 @@ import type { Grader, ScoreRecordedData } from 'vieval/events'
 import type { ScoreDefinition } from '../../../src/shared/contract'
 
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import ObjectTree from './ObjectTree.vue'
 
@@ -30,6 +31,7 @@ const props = defineProps<{
   text: string
 }>()
 
+const { t } = useI18n()
 const definition = computed(() => scoreDefinition(props.name, props.definitions))
 const label = computed(() => scoreLabel(props.name, props.definitions))
 const description = computed(() => localize(definition.value?.description))
@@ -58,9 +60,9 @@ const derived = computed(() => props.record?.derived === true || definition.valu
       <b :class="['ml-auto text-lg tabular-nums leading-none']" data-testid="score-detail-value">{{ props.text }}</b>
     </div>
     <div v-if="definition?.primary || derived || unscored" :class="['flex flex-wrap gap-1']">
-      <span v-if="definition?.primary" :class="['badge state-neutral']">primary</span>
-      <span v-if="derived" :class="['badge state-neutral']" data-testid="score-detail-derived">derived</span>
-      <span v-if="unscored" :class="['badge state-interrupted']" data-testid="score-detail-unscored">unscored · {{ unscored }}</span>
+      <span v-if="definition?.primary" :class="['badge state-neutral']">{{ t('scores.detail.primary') }}</span>
+      <span v-if="derived" :class="['badge state-neutral']" data-testid="score-detail-derived">{{ t('scores.detail.derived') }}</span>
+      <span v-if="unscored" :class="['badge state-interrupted']" data-testid="score-detail-unscored">{{ t('scores.detail.unscored', { reason: unscored }) }}</span>
     </div>
     <p v-if="description" :class="['m-0 leading-snug opacity-90']">
       {{ description }}
@@ -68,7 +70,7 @@ const derived = computed(() => props.record?.derived === true || definition.valu
     <dl :class="['m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1']">
       <template v-if="formula">
         <dt :class="['opacity-70']">
-          formula
+          {{ t('scores.detail.formula') }}
         </dt>
         <dd :class="['m-0']">
           {{ formula }}
@@ -76,7 +78,7 @@ const derived = computed(() => props.record?.derived === true || definition.valu
       </template>
       <template v-if="grader">
         <dt :class="['opacity-70']">
-          grader
+          {{ t('scores.detail.grader') }}
         </dt>
         <dd :class="['m-0']" data-testid="score-detail-grader">
           {{ graderText(grader) }}<span v-if="grader.id" :class="['mono opacity-70']"> ({{ grader.id }})</span>
@@ -84,7 +86,7 @@ const derived = computed(() => props.record?.derived === true || definition.valu
       </template>
       <template v-else-if="inputGraders.length > 0">
         <dt :class="['opacity-70']">
-          graders
+          {{ t('scores.detail.graders') }}
         </dt>
         <dd :class="['m-0 grid gap-0.5']">
           <span v-for="input in inputGraders" :key="input.label">{{ input.label }}: {{ input.text }}</span>
@@ -92,11 +94,11 @@ const derived = computed(() => props.record?.derived === true || definition.valu
       </template>
     </dl>
     <a v-if="props.callsHref && props.callCount > 0" :href="props.callsHref" :class="['link inline-flex items-center gap-1']" data-testid="score-detail-calls">
-      <span class="i-mingcute-robot-line" aria-hidden="true" />{{ props.callCount }} model {{ props.callCount === 1 ? 'call' : 'calls' }} of the grader
+      <span class="i-mingcute-robot-line" aria-hidden="true" />{{ t('scores.detail.calls', { n: props.callCount }, props.callCount) }}
     </a>
     <div v-if="props.record?.rationale" :class="['grid gap-0.5']">
       <div :class="['opacity-70']">
-        rationale
+        {{ t('scores.detail.rationale') }}
       </div>
       <!-- A judge's reasoning can run long; it scrolls inside the card. -->
       <p :class="['m-0 max-h-48 overflow-y-auto whitespace-pre-wrap leading-snug']" data-testid="score-detail-rationale">
@@ -105,14 +107,14 @@ const derived = computed(() => props.record?.derived === true || definition.valu
     </div>
     <div v-if="props.record?.metadata" :class="['grid gap-0.5']">
       <div :class="['opacity-70']">
-        metadata
+        {{ t('scores.detail.metadata') }}
       </div>
       <div :class="['max-h-48 overflow-auto']">
         <ObjectTree :value="props.record.metadata" />
       </div>
     </div>
     <p v-if="props.record == null" :class="['m-0 opacity-70']">
-      This case recorded no value of the score.
+      {{ t('scores.detail.noValue') }}
     </p>
   </div>
 </template>
