@@ -38,7 +38,7 @@ export default {
     legendPartial: '部分运行或其他用例',
     notRun: '未运行',
     partial: '{total} 个用例中 {measured} 个有结果 · 还没有完整运行',
-    pointTitle: '{time} · {coverage}（{total} 个用例中 {measured} 个有结果）· {score} {value} · 完成率 {completion}',
+    pointTitle: '{time} · {coverage}（{total} 个用例中 {measured} 个有结果）· {score} {value} · 执行成功率 {completion}',
     runCount: '{n} 次运行',
     showSuperseded: '显示 {n} 个旧配置',
     sparkline: '{score}，共 {n} 次运行',

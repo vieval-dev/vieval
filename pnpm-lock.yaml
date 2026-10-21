@@ -15,9 +15,6 @@ catalogs:
     '@fontsource-variable/noto-sans':
       specifier: ^5.3.0
       version: 5.3.0
-    '@fontsource-variable/noto-sans-sc':
-      specifier: ^5.3.1
-      version: 5.3.1
     '@fontsource-variable/quicksand':
       specifier: ^5.3.0
       version: 5.3.0
@@ -478,9 +475,6 @@ importers:
       '@fontsource-variable/noto-sans':
         specifier: 'catalog:'
         version: 5.3.0
-      '@fontsource-variable/noto-sans-sc':
-        specifier: 'catalog:'
-        version: 5.3.1
       '@fontsource-variable/quicksand':
         specifier: 'catalog:'
         version: 5.3.0
@@ -1039,9 +1033,6 @@ packages:
     resolution: {integrity: sha512-043dyEKD9TDSfz080YH2vobubgg+NIo/9Fw4RAl7sEMpD8Am1DNrrSTl/GpMBjyGHoD/FbJY2QLawY+HSQsEIA==}
     peerDependencies:
       vue: '>=3.3.0'
-
-  '@fontsource-variable/noto-sans-sc@5.3.1':
-    resolution: {integrity: sha512-UB96JJ17HyD5ehEU7Em0hDdh7fvTMB4B4Hzmq5c4QaNwwSLqTrdM2S+coySeBqCkXwh0DxqXT0b0wMrmzorFpQ==}
 
   '@fontsource-variable/noto-sans@5.3.0':
     resolution: {integrity: sha512-e3ZuxzY9AL2psXPZlhwhnYrHUHv6PMoyK9MQ7croF0CUgURLqu9EMjW7q2FgVLwij1tjLsIHQrnwQ8aUcg4BiA==}
@@ -6037,8 +6028,6 @@ snapshots:
       '@floating-ui/dom': 1.8.0
       '@floating-ui/utils': 0.2.12
       vue: 3.5.43(typescript@6.0.3)
-
-  '@fontsource-variable/noto-sans-sc@5.3.1': {}
 
   '@fontsource-variable/noto-sans@5.3.0': {}
 

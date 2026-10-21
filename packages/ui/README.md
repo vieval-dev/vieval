@@ -217,8 +217,11 @@ UI conventions:
 
 - Icons are MingCute through UnoCSS `presetIcons` (`i-mingcute-*-line`; state badges use `-fill`). Do not add inline SVG
   icons or glyphs such as `✓`.
-- Fonts are self-hosted with Fontsource, so the viewer works offline: Quicksand, Noto Sans, and Noto Sans SC (loaded
-  per `unicode-range`, only when a page shows CJK text) for text; Maple Mono for `font-mono`.
+- Fonts are self-hosted, so the viewer works offline: Quicksand and Noto Sans (Fontsource) for Latin text, Resource Han
+  Rounded SC for CJK text, and Maple Mono for `font-mono`. Resource Han Rounded SC is a rounded Source Han Sans (SIL OFL
+  1.1) that matches Quicksand. It lives in `client/src/assets/fonts/resource-han-rounded-sc` as 101 WOFF2 slices
+  (about 19 MB), loaded per `unicode-range` only when a page shows those characters. Rebuild the slices with
+  `scripts/buildCjkFont.py` (see its header) from the release's `ResourceHanRoundedSC-VF.otf`.
 - Use `mono` (`font-mono tabular-nums`) only in list-like views (tables, timelines, event and log rows) and for raw
   content (JSON, logs, hex). Headers, figures, and navigation use the sans font; add `tabular-nums` to figures.
 - Every hierarchy level (projects, comparison, workspace, project, experiment, attempt, run, task, case, round, try) has

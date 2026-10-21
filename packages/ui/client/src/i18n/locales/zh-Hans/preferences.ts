@@ -6,6 +6,9 @@ export default {
     colorblindHint: '用蓝色、橙色和黄色代替绿色和红色表示状态',
     title: '无障碍',
   },
+  appearance: {
+    title: '外观',
+  },
   language: {
     auto: '自动（{language}）',
     followBrowser: '自动（跟随浏览器）',

@@ -30,7 +30,6 @@ catalog:
   '@antfu/eslint-config': ^9.1.0
   '@arethetypeswrong/core': ^0.18.4
   '@fontsource-variable/noto-sans': ^5.3.0
-  '@fontsource-variable/noto-sans-sc': ^5.3.1
   '@fontsource-variable/quicksand': ^5.3.0
   '@fontsource/maple-mono': ^5.3.0
   '@henrygd/queue': ^1.2.0

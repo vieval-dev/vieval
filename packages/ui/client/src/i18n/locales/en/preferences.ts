@@ -5,6 +5,9 @@ export default {
     colorblindHint: 'Status in blue, orange, and yellow instead of green and red',
     title: 'Accessibility',
   },
+  appearance: {
+    title: 'Appearance',
+  },
   language: {
     /** Trigger text while following the browser; `language` is the native name of the resolved locale. */
     auto: 'Auto ({language})',
