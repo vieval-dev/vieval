@@ -60,13 +60,14 @@ function toRow(experiment: ExperimentEntry) {
 }
 const rows = computed(() => (project.value?.experiments ?? []).map(toRow))
 /**
- * Grid of a row. Wide screens: one line with name, latest run, trend, cases, headline score, attempts (the header
- * uses the same columns). Narrow screens: the name on top, the latest run with the score below it, then the cases;
- * the trend and the attempt count are left out (both are on the experiment page).
+ * Grid of a row. Wide lists: one line with name, latest run, trend, cases, headline score, attempts (the header
+ * uses the same columns). Narrow lists: the name on top, the latest run below it, then the cases with the score
+ * below them; the trend and the attempt count are left out (both are on the experiment page). "Wide" is the width of
+ * the list card (a container query, 65rem), not of the window, so an open sidebar cannot push the columns out of it.
  */
 const rowGrid = [
-  'grid items-center gap-x-4 gap-y-1.5 grid-cols-[minmax(0,1fr)_auto]',
-  'md:grid-cols-[minmax(14rem,2fr)_minmax(12rem,1.2fr)_4.5rem_minmax(16rem,1.8fr)_8rem_4rem]',
+  'grid items-center gap-x-4 gap-y-1.5 grid-cols-[minmax(0,1fr)]',
+  '@[65rem]:grid-cols-[minmax(14rem,2fr)_minmax(12rem,1.2fr)_4.5rem_minmax(16rem,1.8fr)_8rem_4rem]',
 ]
 </script>
 
@@ -79,22 +80,25 @@ const rowGrid = [
 
   <StateView :error="catalog.query.error.value" :loading="catalog.query.isPending.value" :empty="project == null" :empty-text="t('runs.project.empty')" :empty-hint="t('runs.emptyHint')" skeleton="rows" @retry="catalog.query.refetch()">
     <ViewTabs v-model="tab" :items="tabs" :label="t('runs.project.tabs.label')" :href="value => href(tabRoute(value))">
-      <section v-if="tab === 'experiments'" :class="['card']">
-        <div :class="[...rowGrid, 'max-md:hidden px-3 py-1.5 border-b border-neutral-200/50 dark:border-neutral-800/50', 'text-xs font-medium muted']" aria-hidden="true">
-          <span>{{ t('runs.project.columns.experiment') }}</span><span>{{ t('runs.project.columns.latestRun') }}</span><span>{{ t('runs.project.columns.trend') }}</span><span>{{ t('runs.project.columns.casesLatest') }}</span><span class="text-right">
-            {{ t('runs.project.columns.score') }}
-          </span><span class="text-right">
-            {{ t('runs.project.columns.attempts') }}
-          </span>
+      <section v-if="tab === 'experiments'" :class="['card @container']">
+        <!-- The wrapper hides the header on narrow lists; the row grid itself sets `display: grid`. -->
+        <div :class="['hidden @[65rem]:block']" aria-hidden="true">
+          <div :class="[...rowGrid, 'px-3 py-1.5 border-b border-neutral-200/50 dark:border-neutral-800/50', 'text-xs font-medium muted']">
+            <span>{{ t('runs.project.columns.experiment') }}</span><span>{{ t('runs.project.columns.latestRun') }}</span><span>{{ t('runs.project.columns.trend') }}</span><span>{{ t('runs.project.columns.casesLatest') }}</span><span class="text-right">
+              {{ t('runs.project.columns.score') }}
+            </span><span class="text-right">
+              {{ t('runs.project.columns.attempts') }}
+            </span>
+          </div>
         </div>
         <ul>
           <li
             v-for="row in rows"
             :key="row.id"
-            :class="[...rowGrid, 'relative px-3 py-2.5 md:py-2 text-sm transition-colors', 'border-b last:border-b-0 border-neutral-100/70 dark:border-neutral-900 hover:bg-primary-500/5']"
+            :class="[...rowGrid, 'relative px-3 py-2.5 @[65rem]:py-2 text-sm transition-colors', 'border-b last:border-b-0 border-neutral-100/70 dark:border-neutral-900 hover:bg-primary-500/5']"
             data-testid="experiment-row"
           >
-            <span :class="['flex items-center gap-2 min-w-0 max-md:col-span-2']">
+            <span :class="['flex items-center gap-2 min-w-0']">
               <span :class="[levelIcons.experiment, 'muted shrink-0']" aria-hidden="true" />
               <ExperimentName :experiment-id="row.id" :matrix="row.matrix" :href="href({ experiment: row.id, name: 'scope', project: row.project, workspace: row.workspace })" stretch />
             </span>
@@ -103,10 +107,10 @@ const rowGrid = [
               <TimeAgo :time="row.latest.startedAt" :class="['text-xs muted truncate']" />
             </span>
             <!-- The cell stays even when the trend draws nothing (fewer than two scored runs), so later columns keep their place. -->
-            <span :class="['flex max-md:hidden']"><Sparkline :values="row.trend" :label="t('runs.trend.label', { n: row.runs.length, score: row.trendLabel }, row.runs.length)" :width="72" /></span>
-            <CountsBar :class="['max-md:(row-start-3 col-span-2)']" :counts="row.latest.counts" />
-            <HeadlineScore :class="['relative z-1 justify-self-end max-md:(row-start-2 col-start-2)']" :result="row.latest.headline" :definitions="row.latest.headlineDefinitions" size="sm" align="end" />
-            <span :class="['text-right tabular-nums muted max-md:hidden']">{{ row.attempts.length }}</span>
+            <span :class="['hidden @[65rem]:flex']"><Sparkline :values="row.trend" :label="t('runs.trend.label', { n: row.runs.length, score: row.trendLabel }, row.runs.length)" :width="72" /></span>
+            <CountsBar :counts="row.latest.counts" />
+            <HeadlineScore :class="['relative z-1 justify-self-end min-w-0 max-w-full']" :result="row.latest.headline" :definitions="row.latest.headlineDefinitions" size="sm" align="end" />
+            <span :class="['hidden @[65rem]:block text-right tabular-nums muted']">{{ row.attempts.length }}</span>
           </li>
         </ul>
       </section>

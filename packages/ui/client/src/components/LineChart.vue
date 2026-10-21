@@ -33,7 +33,9 @@ const bounds = computed(() => {
   const x = extent(props.points.map(point => point.x))
   const y = extent(props.points.map(point => point.y))
   const minY = Math.min(0, y.min)
-  const maxY = Math.max(y.max, minY + 1e-9)
+  // A constant series (every value 0, say) has no range: one unit above the floor keeps the axis readable (`0`–`1`)
+  // instead of labelling both ends `0`.
+  const maxY = y.max > minY ? y.max : minY + 1
   return { maxX: x.max, maxY, minX: x.min, minY }
 })
 function sx(x: number) {

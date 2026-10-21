@@ -81,14 +81,16 @@ const expectedCounts = (run: (typeof runs.value)[number]) => ({ ...run.counts, t
 const isPartial = (run: (typeof runs.value)[number]) => run.state !== 'running' && run.caseTotal != null && run.counts.total < run.caseTotal
 
 /**
- * Grid of a run row. Wide screens: one line with select, attempt, run, duration, cases, headline score, menu (the
- * header uses the same columns). Narrow screens: select, attempt, score, and menu on the first line, the run and its
- * duration below the attempt, then the cases. The score column fits a typical headline (`100.0% Correct and natural`);
+ * Grid of a run row. Wide lists: one line with select, attempt, run, duration, cases, headline score, menu (the
+ * header uses the same columns). Narrow lists: select, attempt, and menu on the first line, the run and its
+ * duration below the attempt, then the cases, and the score below them, so the attempt keeps the width of the row.
+ * "Wide" is the width of the list card (a container query), not of the window: with the sidebar open, a window past
+ * the `md` breakpoint can still leave the card narrower than the wide columns need (62rem). The score column fits a typical headline (`100.0% Correct and natural`);
  * a longer label truncates inside it instead of spilling over the case bar.
  */
 const rowGrid = [
   'grid items-center gap-x-3 gap-y-1.5 grid-cols-[1rem_minmax(0,1fr)_auto_1.75rem]',
-  'md:(gap-x-4 grid-cols-[1rem_minmax(14rem,1.6fr)_minmax(9rem,1fr)_5rem_minmax(12rem,2fr)_minmax(8rem,12rem)_1.75rem])',
+  '@[62rem]:(gap-x-4 grid-cols-[1rem_minmax(14rem,1.6fr)_minmax(11rem,1fr)_5rem_minmax(12rem,2fr)_minmax(8rem,12rem)_1.75rem])',
 ]
 const selected = shallowRef<string[]>([])
 function duration(run: { endedAt?: string, startedAt?: string }): number | undefined {
@@ -130,11 +132,14 @@ watch([() => props.attempt, () => attempts.value.length], async ([attempt]) => {
             <span :class="levelIcons.comparison" aria-hidden="true" />{{ t('runs.experiment.compare', { n: selected.length }, selected.length) }}
           </button>
         </div>
-        <section :class="['card']">
-          <div :class="[...rowGrid, 'max-md:hidden px-3 py-1.5 border-b border-neutral-200/50 dark:border-neutral-800/50', 'text-xs font-medium muted']" aria-hidden="true">
-            <span /><span>{{ t('runs.experiment.columns.attempt') }}</span><span>{{ t('runs.experiment.columns.run') }}</span><span>{{ t('runs.experiment.columns.duration') }}</span><span>{{ t('runs.experiment.columns.cases') }}</span><span class="text-right">
-              {{ t('runs.experiment.columns.score') }}
-            </span><span />
+        <section :class="['card @container']">
+          <!-- The wrapper hides the header on narrow lists; the row grid itself sets `display: grid`. -->
+          <div :class="['hidden @[62rem]:block']" aria-hidden="true">
+            <div :class="[...rowGrid, 'px-3 py-1.5 border-b border-neutral-200/50 dark:border-neutral-800/50', 'text-xs font-medium muted']">
+              <span /><span>{{ t('runs.experiment.columns.attempt') }}</span><span>{{ t('runs.experiment.columns.run') }}</span><span>{{ t('runs.experiment.columns.duration') }}</span><span>{{ t('runs.experiment.columns.cases') }}</span><span class="text-right">
+                {{ t('runs.experiment.columns.score') }}
+              </span><span />
+            </div>
           </div>
           <ol>
             <li
@@ -147,11 +152,11 @@ watch([() => props.attempt, () => attempts.value.length], async ([attempt]) => {
               <div
                 v-for="(run, index) in entry.runs"
                 :key="run.runKey"
-                :class="[...rowGrid, 'relative px-3 text-sm transition-colors hover:bg-primary-500/5', index === 0 ? 'py-2.5 md:py-2' : 'pb-2.5 md:pb-2 pt-0']"
+                :class="[...rowGrid, 'relative px-3 text-sm transition-colors hover:bg-primary-500/5', index === 0 ? 'py-2.5 @[62rem]:py-2' : 'pb-2.5 @[62rem]:pb-2 pt-0']"
               >
                 <input type="checkbox" :checked="selected.includes(run.runKey)" :aria-label="t('runs.experiment.select', { run: run.runKey })" :class="['relative z-1 accent-[var(--series-1)]']" @change="toggle(run.runKey)">
                 <!-- The attempt (its time) once per attempt; further runs of the same attempt are sub-rows. -->
-                <span v-if="index === 0" :class="['flex flex-col gap-1 min-w-0']">
+                <span v-if="index === 0" :class="['flex flex-col gap-1 min-w-0 col-start-2 col-span-2 @[62rem]:(col-start-auto col-span-1)']">
                   <span :class="['flex items-center gap-2 min-w-0']">
                     <span :class="[levelIcons.attempt, 'muted shrink-0']" aria-hidden="true" />
                     <IdLabel :id="entry.id" :label="entry.label" :href="href({ name: 'run', runKey: run.runKey })" stretch />
@@ -164,20 +169,20 @@ watch([() => props.attempt, () => attempts.value.length], async ([attempt]) => {
                     </span>
                   </span>
                 </span>
-                <span v-else :class="['text-xs muted pl-6']">{{ t('runs.experiment.anotherRun') }}</span>
-                <span :class="['flex items-center gap-2 min-w-0 max-md:(row-start-2 col-start-2)']">
+                <span v-else :class="['text-xs muted pl-6 col-start-2 col-span-2 @[62rem]:(col-start-auto col-span-1)']">{{ t('runs.experiment.anotherRun') }}</span>
+                <span :class="['flex items-center gap-2 min-w-0 row-start-2 col-start-2 @[62rem]:(row-start-auto col-start-auto)']">
                   <StateBadge :state="run.state" />
                   <a v-if="index > 0" :href="href({ name: 'run', runKey: run.runKey })" :class="['link mono text-xs stretched-link']" :title="run.runKey">{{ shortRunHash(run.runKey) }}</a>
                   <span v-else :class="['mono text-xs muted']" :title="run.runKey">{{ shortRunHash(run.runKey) }}</span>
                 </span>
-                <span :class="['text-xs muted tabular-nums whitespace-nowrap max-md:(row-start-2 col-start-3 col-span-2 text-right)']">{{ formatDuration(duration(run)) }}</span>
-                <span :class="['flex items-center gap-2 min-w-0', 'max-md:(row-start-3 col-start-2 col-span-3)']">
+                <span :class="['text-xs muted tabular-nums whitespace-nowrap row-start-2 col-start-3 col-span-2 text-right @[62rem]:(row-start-auto col-start-auto col-span-1 text-left)']">{{ formatDuration(duration(run)) }}</span>
+                <span :class="['flex items-center gap-2 min-w-0', 'row-start-3 col-start-2 col-span-3 @[62rem]:(row-start-auto col-start-auto col-span-1)']">
                   <CountsBar :class="['flex-1']" :counts="expectedCounts(run)" />
                   <span v-if="isPartial(run)" :class="['badge state-interrupted shrink-0']" :title="t('runs.experiment.partial', { ran: run.counts.total, total: run.caseTotal })" data-testid="attempt-partial">{{ run.counts.total }} / {{ run.caseTotal }}</span>
                 </span>
-                <HeadlineScore :class="['relative z-1 justify-self-end min-w-0 max-w-full max-md:(row-start-1 col-start-3)']" :result="run.headline" :definitions="run.headlineDefinitions" size="sm" align="end" />
+                <HeadlineScore :class="['relative z-1 justify-self-end min-w-0 max-w-full row-start-4 col-start-2 col-span-3 @[62rem]:(row-start-auto col-start-auto col-span-1)']" :result="run.headline" :definitions="run.headlineDefinitions" size="sm" align="end" />
                 <!-- IdMenu renders no element of its own; the wrapper carries the grid placement. -->
-                <span :class="['flex max-md:(row-start-1 col-start-4)']"><IdMenu :id="run.runKey" kind="run" /></span>
+                <span :class="['flex row-start-1 col-start-4 @[62rem]:(row-start-auto col-start-auto)']"><IdMenu :id="run.runKey" kind="run" /></span>
               </div>
             </li>
           </ol>

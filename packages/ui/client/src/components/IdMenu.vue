@@ -2,7 +2,7 @@
 import type { HierarchyLevel } from '../hierarchy'
 
 import { useClipboard, useTimeoutFn } from '@vueuse/core'
-import { DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuPortal, DropdownMenuRoot, DropdownMenuTrigger } from 'reka-ui'
+import { DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuPortal, DropdownMenuRoot, DropdownMenuSeparator, DropdownMenuTrigger } from 'reka-ui'
 import { shallowRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
@@ -15,7 +15,8 @@ import { levelLabel } from '../hierarchy'
  * Overflow menu ("⋯") of a page header or a list row with explicit actions on an id, such as "Copy ID".
  *
  * Copying is an action with a text label and a "Copied" confirmation, instead of an unlabeled copy icon next to every
- * name. The id itself is shown in the menu, so it can also be read.
+ * name. The id itself is shown in the menu, so it can also be read. The default slot adds the page's secondary actions
+ * below it (`DropdownMenuItem`s, such as "Compare attempts" on a run page).
  */
 const props = defineProps<{
   /** Full id to copy. */
@@ -53,6 +54,10 @@ async function copyId(event: Event): Promise<void> {
             <span :class="copied ? 'i-mingcute-check-line text-green-600 dark:text-green-400' : 'i-mingcute-copy-2-line'" aria-hidden="true" />
             {{ copied ? t('runs.id.copied') : t('runs.id.copyId') }}
           </DropdownMenuItem>
+          <template v-if="$slots.default">
+            <DropdownMenuSeparator :class="['my-1 h-px bg-neutral-200 dark:bg-neutral-800']" />
+            <slot />
+          </template>
         </AnimatedContent>
       </DropdownMenuContent>
     </DropdownMenuPortal>

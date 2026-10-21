@@ -30,6 +30,11 @@ const props = defineProps<{
   subtitle?: string
   /** Name of the page: the heading (unless the `title` slot replaces it) and the document title. */
   title: string
+  /**
+   * `sm` sets the title in body size, for a page whose header leads with something else (the run's score).
+   * @default 'lg'
+   */
+  titleSize?: 'lg' | 'sm'
 }>()
 // The browser tab follows the page; a page still loading keeps the plain "Vieval" of the title template.
 useHead({ title: () => (props.loading ? undefined : props.title) })
@@ -57,11 +62,12 @@ const siblings = computed(() => {
 <template>
   <header :class="['flex flex-col gap-2 pb-3 mb-3 border-b border-neutral-200/50 dark:border-neutral-800/50']">
     <Breadcrumbs :items="crumbs" :siblings="siblings" />
-    <!-- With page actions, phones give the title its own line and wrap the actions below it instead of squeezing the
-         title; the "⋯" menu alone stays next to the title. -->
+    <!-- Phones keep the "⋯" menu next to the title and wrap the page actions onto their own line below it instead of
+         squeezing the title; wider screens put the actions and the menu after the title, and wrap them below once the
+         title would get narrower than 24rem. -->
     <div :class="['flex items-start gap-x-3 gap-y-2 flex-wrap']">
-      <div :class="['min-w-0 flex-1', $slots.actions && 'max-md:basis-full']">
-        <h1 :class="['flex items-start gap-2 text-lg font-semibold break-all leading-7']">
+      <div :class="['min-w-0 flex-1 md:basis-96']">
+        <h1 :class="['flex items-start gap-2 font-semibold [overflow-wrap:anywhere]', props.titleSize === 'sm' ? 'text-base leading-6' : 'text-lg leading-7']">
           <span v-if="props.level" :class="[levelIcons[props.level], 'shrink-0 mt-1 muted']" role="img" :aria-label="levelLabel(props.level)" :title="levelLabel(props.level)" />
           <span v-if="props.loading" :class="['skeleton h-6 my-0.5 w-56 max-w-full']" data-testid="page-header-skeleton" />
           <slot v-else name="title">
@@ -75,11 +81,20 @@ const siblings = computed(() => {
           </slot>
         </div>
       </div>
-      <!-- As tall as the title's first line, so actions line up with the title wherever the header wraps. -->
-      <div :class="['flex items-center gap-2 flex-wrap min-h-7']">
+      <!-- As tall as the title's first line on wide screens, so actions line up with the title. On phones the line
+           collapses when every action hides itself there (the experiment trend). -->
+      <div v-if="$slots.actions" :class="['flex items-center gap-2 flex-wrap md:min-h-7', 'max-md:(order-2 basis-full)']">
         <slot name="actions" />
-        <IdMenu v-if="props.id && props.level" :id="props.id" :kind="props.level" />
       </div>
+      <!-- IdMenu renders no element of its own; the wrapper carries the order and the alignment. -->
+      <span v-if="props.id && props.level" :class="['flex items-center min-h-7 max-md:order-1']">
+        <!-- The page's secondary actions join the menu only when the page has some, so the menu adds no empty group. -->
+        <IdMenu :id="props.id" :kind="props.level">
+          <template v-if="$slots.menu" #default>
+            <slot name="menu" />
+          </template>
+        </IdMenu>
+      </span>
     </div>
   </header>
 </template>

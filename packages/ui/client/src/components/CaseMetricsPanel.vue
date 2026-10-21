@@ -523,10 +523,11 @@ const formatOf = (name: string, value: number) => formatColumnValue(value, metri
       <span class="text-xs muted font-normal">{{ t('metrics.cases.subtitle') }}</span>
     </h2>
     <StateView :error="metrics.error.value" :loading="metrics.isPending.value" :empty="table.rows.length === 0" :empty-text="t('metrics.cases.empty')" @retry="metrics.refetch()">
-      <div :class="['grid gap-3 p-3']">
+      <!-- `minmax(0,1fr)`: a chart wider than the card scrolls inside its own wrapper instead of widening the grid. -->
+      <div :class="['grid grid-cols-[minmax(0,1fr)] gap-3 p-3']">
         <!-- One toolbar row: the axes behind a button, the color, and what the selection holds. -->
         <div :class="['flex flex-wrap items-center gap-x-2 gap-y-2 text-xs select-none']">
-          <SegmentedControl v-if="views.length > 0" v-model="view" :items="views" :label="t('metrics.cases.viewLabel')" size="md" />
+          <SegmentedControl v-if="views.length > 0" v-model="view" :items="views" :label="t('metrics.cases.viewLabel')" :size="isDesktop ? 'md' : 'sm'" />
           <AxisPicker v-model:metrics="numericAxes" v-model:categories="categoryAxes" :definition-of="name => metricDefinition(name, definitions)" :label-of="labelOf" :separation="separation" :table="table" :values-of="valuesOf" />
           <DropdownMenuRoot @update:open="open => { if (!open) highlightedColor = undefined }">
             <DropdownMenuTrigger :class="['option-trigger max-w-60']" data-testid="color-by">

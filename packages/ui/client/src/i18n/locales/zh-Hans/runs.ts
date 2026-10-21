@@ -32,7 +32,7 @@ export default {
     reportPath: '报告路径',
     reportRoot: '报告根目录',
     runId: '运行 ID',
-    title: '详情',
+    title: '运行详情',
   },
   emptyHint: '`vieval run` 在查看器的报告根目录下写入报告后，运行会显示在这里。',
   errors: {
@@ -163,6 +163,7 @@ export default {
     },
     currentPosition: '当前位置',
     eta: '剩余时间估算依据：{basis}。',
+    etaInfo: '剩余时间如何估算',
     etaLowerBound: '剩余时间估算依据：{basis}；出现了自动尝试，之后可能还有更多轮次（下限）。',
     etaRule: '规则：已用时间 ÷ 已结束用例数 × 预计用例数 − 已用时间，且不少于运行最久的用例已经运行的时间。',
     fields: {

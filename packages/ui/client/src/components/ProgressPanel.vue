@@ -6,6 +6,7 @@ import { useIntervalFn, useTimestamp } from '@vueuse/core'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import InfoButton from './InfoButton.vue'
 import ProgressBar from './ProgressBar.vue'
 import ProgressChart from './ProgressChart.vue'
 import StateBadge from './StateBadge.vue'
@@ -49,8 +50,11 @@ const connectionText = computed(() => ({
   error: t('runs.progress.connection.error'),
   open: t('runs.progress.connection.open'),
 })[props.connection])
-/** How the ETA is computed: its basis (a lower bound once auto attempts were seen), then the rule. */
-const etaNote = computed(() => {
+/**
+ * How the remaining time is estimated: its basis (a lower bound once auto attempts were seen), then the rule. Printed
+ * under the numbers on desktop, behind an info button on phones.
+ */
+const etaBasis = computed(() => {
   const basis = t(live.value && progress.value.lowerBound ? 'runs.progress.etaLowerBound' : 'runs.progress.eta', { basis: basisText.value })
   return `${basis} ${t('runs.progress.etaRule')}`
 })
@@ -134,8 +138,9 @@ const etaNote = computed(() => {
         </dd>
       </div>
       <div>
-        <dt class="text-xs muted">
+        <dt :class="['flex items-center gap-1 text-xs muted']">
           {{ live ? t('runs.progress.fields.estimatedRemaining') : t('runs.progress.fields.totalDuration') }}
+          <span :class="['flex md:hidden']"><InfoButton :label="t('runs.progress.etaInfo')"><p>{{ etaBasis }}</p></InfoButton></span>
         </dt>
         <dd :class="['text-xl font-semibold tabular-nums']" data-testid="progress-eta">
           <template v-if="live">
@@ -155,8 +160,8 @@ const etaNote = computed(() => {
         </dd>
       </div>
     </dl>
-    <p :class="['text-xs muted max-md:order-1']">
-      {{ etaNote }}
+    <p :class="['text-xs muted max-md:hidden']">
+      {{ etaBasis }}
     </p>
 
     <div v-if="props.snapshot.current.running.length > 0 || props.snapshot.current.waiting.length > 0" :class="['max-md:order-1']" data-testid="current-position">

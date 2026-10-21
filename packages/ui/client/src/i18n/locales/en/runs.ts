@@ -37,7 +37,7 @@ export default {
     reportPath: 'Report path',
     reportRoot: 'Report root',
     runId: 'Run ID',
-    title: 'Details',
+    title: 'Run details',
   },
   emptyHint: 'Runs appear here once `vieval run` writes a report below the viewer\'s report roots.',
   errors: {
@@ -170,6 +170,7 @@ export default {
     },
     currentPosition: 'Current position',
     eta: 'ETA basis: {basis}.',
+    etaInfo: 'How the ETA is estimated',
     etaLowerBound: 'ETA basis: {basis}; auto attempts were seen, so more rounds may follow (lower bound).',
     etaRule: 'Rule: elapsed ÷ settled cases × estimated cases − elapsed, and at least as long as the longest running case has run.',
     fields: {
