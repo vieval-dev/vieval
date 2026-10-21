@@ -61,7 +61,6 @@
   },
   "devDependencies": {
     "@fontsource-variable/noto-sans": "catalog:",
-    "@fontsource-variable/noto-sans-sc": "catalog:",
     "@fontsource-variable/quicksand": "catalog:",
     "@fontsource/maple-mono": "catalog:",
     "@iconify-json/mingcute": "catalog:",

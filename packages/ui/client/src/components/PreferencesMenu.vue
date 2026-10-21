@@ -67,13 +67,15 @@ const colorblindLabelId = useId()
       <PopoverContent as-child :side-offset="6" align="start" :collision-padding="12" :class="['floating w-60 p-1 text-sm']">
         <AnimatedContent>
           <!-- Every section is a group label and `h-8` field rows: the field name on the left and its action on the right.
-               A slider takes its own full-width line under its field row. Language is one row that names itself, so it
-               has no group label above it. -->
+               A slider takes its own full-width line under its field row. -->
+          <div :class="['px-2 py-1 text-xs muted']">
+            {{ t('preferences.appearance.title') }}
+          </div>
           <div :class="['flex items-center gap-3 h-8 px-2']">
             <span :id="languageLabelId">{{ t('preferences.language.title') }}</span>
             <DropdownMenuRoot>
-              <!-- `py-1`: the trigger is as tall as the icon buttons of the other rows (`size-7`), inside the `h-8` row. -->
-              <DropdownMenuTrigger :class="['option-trigger ml-auto -mr-1 py-1 min-w-0']" :aria-labelledby="`${languageLabelId} ${languageValueId}`" data-testid="language-trigger">
+              <!-- A compact `option-trigger`: inside an `h-8` row its value reads at the size of the row's label, not larger. -->
+              <DropdownMenuTrigger :class="['option-trigger ml-auto -mr-1 min-w-0', 'gap-1! rounded-md! px-2! py-0.5! text-xs!']" :aria-labelledby="`${languageLabelId} ${languageValueId}`" data-testid="language-trigger">
                 <span :id="languageValueId" :class="['truncate']">{{ languageText }}</span><span class="i-mingcute-down-line muted shrink-0" aria-hidden="true" />
               </DropdownMenuTrigger>
               <DropdownMenuPortal>
