@@ -58,7 +58,8 @@ const sections = computed(() => workspaces.value.map(workspace => ({ id: workspa
         <span :class="[levelIcons.workspace, 'muted']" aria-hidden="true" />
         <a :href="href({ name: 'scope', workspace: section.id })" :class="['link']">{{ section.id }}</a>
       </h2>
-      <div :class="['grid gap-3']" style="grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr))">
+      <!-- No row gap: each card spans two subgrid rows (panel, tray) and carries its own bottom margin. -->
+      <div :class="['grid gap-x-3']" style="grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr))">
         <ScoreCard
           v-for="project in section.projects"
           :key="project.id"
@@ -68,6 +69,7 @@ const sections = computed(() => workspaces.value.map(workspace => ({ id: workspa
           :state="project.latest.state"
           :counts="project.latest.counts"
           :run="project.latest"
+          subgrid :class="['mb-3']"
           data-testid="project-card"
         >
           <template #title>

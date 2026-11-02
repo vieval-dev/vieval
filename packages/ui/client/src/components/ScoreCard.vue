@@ -10,7 +10,7 @@ import StateBadge from './StateBadge.vue'
  * The standard card of a scored item (a project, a matrix cell, a compared column), laid out the same everywhere:
  *
  * ```
- * 66.1% Pass  ↑2.3            [running]
+ * 66.1% Pass  ↑2.3            [running]   ← state badge, then the `corner` slot
  * completed 96.8%
  * Title
  * meta (run counts, times)
@@ -33,11 +33,20 @@ const props = defineProps<{
   definitions: readonly ScoreDefinition[]
   /** Headline of the item ({@link HeadlineScore}); `null` before any case settled. */
   headline: HeadlineResult | null | undefined
+  /** Leaves the completion rate out of the headline (see `HeadlineScore`'s `hideCompletion`). */
+  hideCompletion?: boolean
   href?: string
   /** Run whose progress shows while `state` is `running`. */
   run?: { lastSeq: number, runKey: string, startedAt?: string }
   /** State of the item's newest run, in the top-right corner. */
   state?: string
+  /**
+   * Takes two rows of the parent grid (the panel, then the tray of the `footer` slot) and shares them with the cards
+   * beside it (CSS subgrid): every panel of a grid row is as tall as the tallest, so their bars line up however many
+   * lines of matrix values each footer wraps to. The parent must be a grid without a row gap (it would open between
+   * the panel and the tray); space the cards with a bottom margin instead.
+   */
+  subgrid?: boolean
   /** Readable name of a task, for a headline that lists each task's primary score. */
   taskLabel?: (taskId: string) => string
   title?: string
@@ -49,7 +58,9 @@ const props = defineProps<{
     :is="props.href ? 'a' : 'div'"
     :href="props.href"
     :class="[
-      'flex flex-col min-w-0 rounded-xl overflow-hidden transition-colors',
+      // `minmax(0, 1fr)`: the one column stays the card's width; an `auto` column grew to the widest nowrap footer value.
+      props.subgrid ? 'grid grid-rows-subgrid row-span-2 grid-cols-[minmax(0,1fr)]' : 'flex flex-col',
+      'min-w-0 rounded-xl overflow-hidden transition-colors',
       'bg-neutral-100/70 dark:bg-neutral-800/60 border-2 border-neutral-200/50 dark:border-neutral-800/40',
       props.href && 'hover:border-primary-500/30 dark:hover:border-primary-400/30',
     ]"
@@ -57,11 +68,13 @@ const props = defineProps<{
   >
     <span :class="['relative flex flex-col gap-2 flex-1 min-w-0 rounded-lg bg-white dark:bg-neutral-900', props.compact ? 'p-3 md:p-3.5' : 'p-4']">
       <span :class="['flex items-start gap-2']">
-        <HeadlineScore :class="['min-w-0']" :result="props.headline" :definitions="props.definitions" size="lg" :task-label="props.taskLabel" data-testid="score-card-score">
+        <HeadlineScore :class="['min-w-0']" :result="props.headline" :definitions="props.definitions" size="lg" :task-label="props.taskLabel" :hide-completion="props.hideCompletion" data-testid="score-card-score">
           <!-- Change from the previous run, a trend line, …: facts about the score itself. -->
           <slot name="score" />
         </HeadlineScore>
         <StateBadge v-if="props.state" :class="['ml-auto shrink-0']" :state="props.state" />
+        <!-- A mark of the item's own in the top-right corner, for example the completion ring of a matrix cell. -->
+        <span v-if="$slots.corner" :class="['shrink-0 flex items-center', !props.state && 'ml-auto']"><slot name="corner" /></span>
       </span>
       <span v-if="props.title || $slots.title" :class="['font-semibold min-w-0 truncate']">
         <slot name="title">{{ props.title }}</slot>
@@ -77,7 +90,7 @@ const props = defineProps<{
         </slot>
       </span>
     </span>
-    <span v-if="$slots.footer" :class="['flex flex-wrap gap-1 px-2 py-1.5']">
+    <span v-if="$slots.footer" :class="['flex flex-wrap content-start gap-1 px-2 py-1.5']">
       <slot name="footer" />
     </span>
   </component>

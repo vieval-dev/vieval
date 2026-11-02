@@ -216,7 +216,8 @@ const position = computed(() => ({ experiment: query.value.experiment, project: 
         :class="['btn text-xs py-0.5', item.id === entry && 'btn-active']"
       >{{ t('compare.result.entryRows', { entry: item.id.split('/').at(-1), n: item.count }, item.count) }}</a>
     </div>
-    <section :class="['grid gap-3 mb-4']" :style="{ gridTemplateColumns: `repeat(auto-fill, minmax(min(240px, 100%), 1fr))` }">
+    <!-- No row gap: each card spans two subgrid rows (panel, tray) and carries its own bottom margin. -->
+    <section :class="['grid gap-x-3 mb-1']" :style="{ gridTemplateColumns: `repeat(auto-fill, minmax(min(240px, 100%), 1fr))` }">
       <ScoreCard
         v-for="column in result?.columns"
         :key="column.id"
@@ -226,6 +227,7 @@ const position = computed(() => ({ experiment: query.value.experiment, project: 
         :state="column.runs.at(-1)?.state"
         :counts="column.runs.at(-1)?.counts"
         :title="columnLabel(column)"
+        subgrid :class="['mb-3']"
       >
         <template v-for="run in column.runs.slice(-1)" :key="run.runKey">
           <span v-if="view !== 'matrix'" :title="run.runKey">{{ runLabel(run) }}</span>
