@@ -31,6 +31,8 @@ const props = defineProps<{
   align?: 'end' | 'start'
   /** `score.defined` of the headline's scores (`headlineDefinitions`, `scoreDefinitions`). */
   definitions: readonly ScoreDefinition[]
+  /** Leaves the completion rate out, for a place that shows it another way (the progress ring of a matrix card). */
+  hideCompletion?: boolean
   /**
    * Called when the completion rate below 100 % is clicked; the page shows the cases without a result. Without it, the
    * rate is plain text (inside a card that is a link itself, for example).
@@ -62,7 +64,7 @@ const column = computed<ColumnDefinition | undefined>(() => {
 })
 const unscoredCount = computed(() => Object.values(view.value?.summary.unscored ?? {}).reduce((sum, count) => sum + count, 0))
 const incomplete = computed(() => view.value != null && view.value.completion.mean != null && view.value.completion.mean < 1)
-const showCompletion = computed(() => view.value != null && view.value.kind !== 'per-task' && (props.size !== 'sm' || incomplete.value))
+const showCompletion = computed(() => view.value != null && view.value.kind !== 'per-task' && !props.hideCompletion && (props.size !== 'sm' || incomplete.value))
 const valueClass = computed(() => ({ lg: 'text-2xl', md: 'text-xl', sm: 'text-sm' })[props.size ?? 'md'])
 </script>
 

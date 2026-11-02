@@ -40,6 +40,8 @@
   --seq-3: oklch(76% calc(var(--chromatic-chroma-500) * 0.7) var(--chromatic-hue));
   --seq-4: oklch(67% calc(var(--chromatic-chroma-500) * 0.85) var(--chromatic-hue));
   --seq-5: oklch(58% calc(var(--chromatic-chroma-500) * 0.9) var(--chromatic-hue));
+  /* Text on a strong fill of `--series-1` / `--series-3` (a compact matrix cell): white on the deep light-page hues. */
+  --heat-ink: #fff;
   --chart-grid: #e5e5e5;
   --chart-text: #52514e;
   color-scheme: light;
@@ -58,6 +60,8 @@
   --chromatic-sat: 0.7;
 }
 :root.dark {
+  /* Dark pages fill with the light hues, so the text on a strong fill turns dark. */
+  --heat-ink: #171717;
   --series-1: oklch(74% calc(var(--chromatic-chroma-400) * var(--chromatic-sat)) var(--chromatic-hue));
   --series-2: #d95926;
   --series-3: #199e70;

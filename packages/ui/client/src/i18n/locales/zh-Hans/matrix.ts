@@ -1,12 +1,52 @@
 import type en from '../en/matrix'
 
 export default {
+  averaged: {
+    hint: '把这些轴合并成一格（同一配置的重复）· 圆点：每个取值的平均分',
+    label: '平均',
+    members: '{n} 次 {axes}：',
+    none: '无',
+    spread: '最高与最低取值均分之差（百分点）',
+  },
+  baseline: {
+    clear: '超出噪声范围（约 95%，按两格相互独立计算）',
+    clearAll: '不对比',
+    hint: '每个轴可以选一个值；保持「各格自己的值」的轴不参与对比 · 条形：每个取值的平均分',
+    label: '基线',
+    noise: '在噪声范围内（约 95%，按两格相互独立计算）',
+    none: '无',
+    own: '各格自己的值',
+    tag: '基线',
+  },
+  detail: {
+    against: '与基线格（{baseline}）比较',
+    excluded: '结果齐全之前，不计入本行最好、均值和配色范围',
+    interval: '95% 区间 {low}–{high} · n {n}',
+    members: '每个 {axes}',
+    scores: '全部分数',
+  },
   groupBars: {
     caseCount: '{n} 个用例',
     groupBy: '分组依据',
     hint: '每组的{measure}，从低到高 · 条形颜色与图表一致 · 点击分组即可选中',
     mean: '平均 {score}',
     passRate: '通过率',
+  },
+  legend: {
+    best: '本行最好',
+    delta: '与 {baseline} 的差值 · 淡色：在噪声范围内',
+    ring: '有结果的用例 / 应有的用例 · 琥珀色：没有结果',
+    scale: '分数，从低到高',
+  },
+  margin: {
+    mean: '均值',
+    meanDelta: '平均差值',
+  },
+  mode: {
+    auto: '自动',
+    cards: '卡片',
+    compact: '紧凑',
+    label: '单元格视图',
   },
   parallelSets: {
     axisHint: '点击选择 · 拖动标题',
@@ -15,13 +55,19 @@ export default {
     notSelected: '（未选中）',
     ribbonTitle: '{from} → {to} · {n} 个用例',
   },
+  ring: {
+    errored: '{expected} 个用例中 {scored} 个有结果，{errored} 个没有结果',
+    label: '{expected} 个用例中 {scored} 个有结果',
+    running: '运行中',
+  },
   scoreBar: {
     label: '分数：{summary}',
     part: '{score} 分 {count} 个',
   },
+  sort: '最好的在前',
   view: {
-    all: '全部',
     caseCount: '{n} 个用例',
+    casesEach: '每格 {n} 个用例',
     coverage: {
       full: '全部用例',
       none: '没有结果',
@@ -32,17 +78,14 @@ export default {
     empty: '没有矩阵行',
     emptyHint: '没有任务的运行在这里没有内容可显示。',
     hideSuperseded: '隐藏 {n} 个旧配置',
+    incomplete: '{n} 格不完整',
     intro: '每个组合显示 {n} 次运行中最新的完整运行；部分运行或针对其他用例的运行不会替换它。',
-    legendFull: '完整运行',
-    legendNone: '没有结果',
-    legendPartial: '部分运行或其他用例',
+    missing: '{n} 格未运行',
     notRun: '未运行',
     partial: '{total} 个用例中 {measured} 个有结果 · 还没有完整运行',
     pointTitle: '{time} · {coverage}（{total} 个用例中 {measured} 个有结果）· {score} {value} · 执行成功率 {completion}',
     runCount: '{n} 次运行',
     showSuperseded: '显示 {n} 个旧配置',
     sparkline: '{score}，共 {n} 次运行',
-    superseded: '旧配置：较新的运行用其他评测参数衡量了这个入口',
-    without: '不含 {axes}',
   },
 } satisfies typeof en
