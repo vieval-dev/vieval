@@ -4,6 +4,7 @@ import type { ProjectEntry } from '../composables/useCatalog'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import ComparisonPreview from '../components/ComparisonPreview.vue'
 import PageHeader from '../components/PageHeader.vue'
 import ScoreCard from '../components/ScoreCard.vue'
 import StateView from '../components/StateView.vue'
@@ -16,7 +17,8 @@ import { formatAxisValues, mergeMatrices } from '../labels'
 import { href } from '../router'
 
 /**
- * Entry page: one card per project (all workspaces, or the one in `workspace`).
+ * Entry page: the experiments run across several workspaces, as leaderboards that open their comparison, then one card
+ * per project (all workspaces, or the one in `workspace`).
  *
  * A single workspace is not a level of its own here: its projects are shown directly and the workspace stays in the
  * breadcrumb and the subtitle.
@@ -40,6 +42,8 @@ function toCard(project: ProjectEntry) {
   const matrix = mergeMatrices(project.runs.map(run => run.matrix))
   return { ...project, axes: Object.entries(matrix).map(([axis, values]) => ({ axis, values: formatAxisValues(values) })) }
 }
+/** Cross-workspace leaderboards; a workspace page shows the ones its workspace takes part in. */
+const comparisons = computed(() => catalog.comparisons.value.acrossWorkspaces.filter(group => props.workspace == null || group.runs.some(run => run.workspaceId === props.workspace)))
 const sections = computed(() => workspaces.value.map(workspace => ({ id: workspace.id, projects: workspace.projects.map(toCard) })))
 </script>
 
@@ -53,6 +57,15 @@ const sections = computed(() => workspaces.value.map(workspace => ({ id: workspa
   </PageHeader>
 
   <StateView :error="catalog.query.error.value" :loading="catalog.query.isPending.value" :empty="projectCount === 0" :empty-text="t('navigation.noRuns')" :empty-hint="t('runs.emptyHint')" skeleton="cards" @retry="catalog.query.refetch()">
+    <section v-if="comparisons.length > 0" :class="['mb-6']" data-testid="home-comparisons">
+      <h2 :class="['flex items-center gap-2 mb-2 text-sm font-semibold']">
+        <span :class="[levelIcons.comparison, 'muted']" aria-hidden="true" />{{ t('compare.home.title') }}
+        <a :href="href({ name: 'compare', query: {} })" :class="['link ml-auto text-xs font-normal']">{{ t('compare.home.all') }}</a>
+      </h2>
+      <div :class="['grid gap-3']" style="grid-template-columns: repeat(auto-fill, minmax(min(560px, 100%), 1fr))">
+        <ComparisonPreview v-for="group in comparisons" :key="group.experimentId" :group="group" :limit="5" />
+      </div>
+    </section>
     <section v-for="section in sections" :key="section.id" :class="['mb-6']">
       <h2 v-if="workspaces.length > 1" :class="['flex items-center gap-2 mb-2 text-sm font-semibold']">
         <span :class="[levelIcons.workspace, 'muted']" aria-hidden="true" />

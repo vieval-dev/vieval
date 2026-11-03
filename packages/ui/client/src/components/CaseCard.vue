@@ -88,8 +88,8 @@ const lines = computed(() => props.axes.map((axis) => {
   const notability = Math.abs(percentile - 50) / 50
   return { bin, detail: `p${percentile}`, heights, kind: 'numeric' as const, name: axis.name, notability, position, text: props.formatOf(axis.name, value) }
 }))
-/** Small round icon action beside the case name; finger-sized on phones (the card opens in a drawer there). */
-const action = 'grid place-items-center size-9 md:size-6 shrink-0 rounded-full border border-neutral-200 dark:border-neutral-700/60 text-neutral-600 dark:text-neutral-300 transition-colors hover:(text-primary-700 dark:text-primary-200 border-primary-500/50 bg-primary-500/8) focus-visible:(outline-2 outline-offset-1 outline-primary-500)'
+// The small round actions beside the case name previously lived here as a local class string; they are the
+// `card-action` shortcut now, shared with the comparison plane's column card so both draw their icons at one size.
 const active = computed(() => lines.value.find(line => line.name === props.activeAxis))
 
 /** Numeric rows shown before "more": the values that sit furthest from the middle of all cases. */
@@ -147,7 +147,7 @@ const rows = computed(() => (showTypical.value ? [...notable.value, ...typical.v
       <template v-if="props.pinned && !drawer">
         <TooltipRoot>
           <TooltipTrigger as-child>
-            <a :href="props.href" :class="[action]" :aria-label="t('cases.card.openCase')">
+            <a :href="props.href" :class="['card-action']" :aria-label="t('cases.card.openCase')">
               <span class="i-mingcute-arrow-right-up-line" aria-hidden="true" />
             </a>
           </TooltipTrigger>
@@ -159,7 +159,7 @@ const rows = computed(() => (showTypical.value ? [...notable.value, ...typical.v
         </TooltipRoot>
         <TooltipRoot>
           <TooltipTrigger as-child>
-            <button type="button" :class="[action]" :aria-label="t('cases.card.unpin')" @click="emit('unpin')">
+            <button type="button" :class="['card-action']" :aria-label="t('cases.card.unpin')" @click="emit('unpin')">
               <span class="i-mingcute-close-line" aria-hidden="true" />
             </button>
           </TooltipTrigger>

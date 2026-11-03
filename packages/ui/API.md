@@ -160,10 +160,17 @@ storage. Spans of the live OpenTelemetry runtime are not collected.
 
 ### Comparisons
 
-All return `ComparisonResponse`: `columns` (each with the runs it covers), `rows` (one per case name; `cells[column]`
-= `{ state, scores, roundCount }`, `scores` being `{ values, unscored }`; `changed` when the state or the value of
-`primary` differs between columns), `primary` (the primary score the rows compare, when the columns share one; without
-it, `changed` uses the state only), `scoreDefinitions`, `summary`. Each column's runs carry `headline`.
+All return `ComparisonResponse`: `columns` (each with the runs it covers), `rows` (one per case name and `variant`;
+`cells[column]` = `{ state, scores, counted, metrics, durationMs, roundCount, pooled }`, `scores` being
+`{ values, unscored }`, `counted` the value the case counts with in each score (a failed case counts 0), `metrics` the
+numeric metrics of the case; `changed` when the state or the value of `primary` differs between columns), `primary`
+(the primary score the rows compare, when the columns share one; without it, `changed` uses the state only),
+`scoreDefinitions`, `metricDefinitions`, `summary`. Each column's runs carry `headline`, `workspaceId`, and `project`.
+
+When a column ran a case of one name in several tasks, rows are split by the matrix axes that tell those tasks apart
+and that every column has (`variant`, such as `context=none`), so the columns stay paired case by case. Tasks that
+differ only in an axis some column lacks are averaged into one cell (`pooled` = how many; scores, metrics, and duration
+are means, the state is the worst).
 
 | Route | Columns |
 |---|---|

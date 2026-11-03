@@ -40,8 +40,8 @@ function isSelected(cell: { column: string, row: string }) {
   return props.selectedPair != null
     && props.selectedPair.includes(cell.column) && props.selectedPair.includes(cell.row)
 }
-/** Positive correlations in the primary hue, negative ones in teal; opacity follows |r|. */
-const fill = (r: number) => `color-mix(in oklab, ${r >= 0 ? 'var(--series-1)' : 'var(--series-3)'} ${Math.round(Math.abs(r) * 100)}%, transparent)`
+/** Positive correlations in the primary hue, negative ones in the opposite hue; opacity follows |r|. */
+const fill = (r: number) => `color-mix(in oklab, ${r >= 0 ? 'var(--series-1)' : 'var(--series-1-opposite)'} ${Math.round(Math.abs(r) * 100)}%, transparent)`
 </script>
 
 <template>

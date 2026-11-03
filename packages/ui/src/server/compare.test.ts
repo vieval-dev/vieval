@@ -1,4 +1,4 @@
-import type { RunListItem, ScoreDefinition, TaskNode } from '../shared/contract'
+import type { MetricDefinition, RunListItem, ScoreDefinition, TaskNode } from '../shared/contract'
 import type { RunReducer } from '../shared/reduce'
 
 import { describe, expect, it } from 'vitest'
@@ -14,6 +14,8 @@ const TASK_WITH_JUDGE = 'evals%2Fdemo::default::run=tts%3Dofficial::eval=judge%3
 const SCORE = 'demo.score'
 
 interface CaseResult {
+  /** Recorded metric values by name. */
+  metrics?: Record<string, unknown>
   /** Recorded score values by name. */
   scores?: Record<string, number>
   state: 'errored' | 'failed' | 'passed'
@@ -27,24 +29,33 @@ interface TestRun {
 }
 
 /** One ended run of {@link TASK}: the given cases (named `<prefix>-<index>`) settle, out of `total` expected ones. */
-function runOf(runKey: string, startedAt: string, total: number, results: readonly CaseResult[], options: { definitions?: ScoreDefinition[], prefix?: string, taskId?: string } = {}): TestRun {
+function runOf(runKey: string, startedAt: string, total: number, results: readonly CaseResult[], options: { definitions?: ScoreDefinition[], metricDefinitions?: MetricDefinition[], prefix?: string, taskId?: string, taskIds?: string[] } = {}): TestRun {
   const { prefix = 'case', taskId = TASK } = options
   const envelope = createEnvelopeFactory(runKey)
   const reducer = createRunReducer()
-  const taskScope = { projectId: 'demo', taskId }
-  reducer.apply(envelope('task.started', {}, taskScope))
-  for (const definition of options.definitions ?? []) {
-    reducer.apply(envelope('score.defined', definition, taskScope))
-  }
-  results.forEach((result, index) => {
-    const scope = { caseId: `${index}:${prefix}-${index}`, projectId: 'demo', taskId }
-    reducer.apply(envelope('case.started', { index, name: `${prefix}-${index}`, total }, scope))
-    for (const [name, value] of Object.entries(result.scores ?? {})) {
-      reducer.apply(envelope('score.recorded', { name, value }, scope))
+  // Every task (matrix row) of the run runs the same cases.
+  for (const id of options.taskIds ?? [taskId]) {
+    const taskScope = { projectId: 'demo', taskId: id }
+    reducer.apply(envelope('task.started', {}, taskScope))
+    for (const definition of options.definitions ?? []) {
+      reducer.apply(envelope('score.defined', definition, taskScope))
     }
-    reducer.apply(envelope('case.ended', { index, name: `${prefix}-${index}`, state: result.state, total }, scope))
-  })
-  reducer.apply(envelope('task.ended', { state: 'passed' }, taskScope))
+    for (const definition of options.metricDefinitions ?? []) {
+      reducer.apply(envelope('metric.defined', definition, taskScope))
+    }
+    results.forEach((result, index) => {
+      const scope = { caseId: `${index}:${prefix}-${index}`, projectId: 'demo', taskId: id }
+      reducer.apply(envelope('case.started', { index, name: `${prefix}-${index}`, total }, scope))
+      for (const [name, value] of Object.entries(result.scores ?? {})) {
+        reducer.apply(envelope('score.recorded', { name, value }, scope))
+      }
+      for (const [name, value] of Object.entries(result.metrics ?? {})) {
+        reducer.apply(envelope('metric.recorded', { name, value }, scope))
+      }
+      reducer.apply(envelope('case.ended', { index, name: `${prefix}-${index}`, state: result.state, total }, scope))
+    })
+    reducer.apply(envelope('task.ended', { state: 'passed' }, taskScope))
+  }
   const item: RunListItem = {
     attemptId: `attempt-${runKey}`,
     counts: { errored: 0, failed: 0, passed: 0, requeued: 0, running: 0, skipped: 0, timeout: 0, total: 0 },
@@ -249,7 +260,7 @@ describe('compareRuns', () => {
     const comparison = compareRuns([createReducerHandle(left.reducer), createReducerHandle(right.reducer)], Date.parse('2026-10-20T00:00:00.000Z'))
     expect(comparison.primary).toBe(SCORE)
     expect(comparison.rows.map(row => [row.caseName, row.changed])).toEqual([['case-0', false], ['case-1', true], ['case-2', false]])
-    expect(comparison.rows[0].cells['run-a']).toEqual({ roundCount: 1, scores: { unscored: {}, values: { 'demo.other': 0, [SCORE]: 1 } }, state: 'passed' })
+    expect(comparison.rows[0].cells['run-a']).toEqual({ counted: { 'demo.other': 0, [SCORE]: 1 }, durationMs: 3000, metrics: {}, roundCount: 1, scores: { unscored: {}, values: { 'demo.other': 0, [SCORE]: 1 } }, state: 'passed' })
     expect(comparison.columns.map(column => column.runs[0].headline?.headline.kind)).toEqual(['score', 'score'])
     expect(comparison.scoreDefinitions).toEqual([{ name: SCORE, primary: true }])
   })
@@ -280,5 +291,81 @@ describe('compareRuns', () => {
     const comparison = compareRuns([createReducerHandle(left.reducer), createReducerHandle(right.reducer)], Date.parse('2026-10-20T00:00:00.000Z'))
     expect(comparison.primary).toBeUndefined()
     expect(comparison.rows.map(row => row.changed)).toEqual([false])
+  })
+
+  // ROOT CAUSE:
+  //
+  // If one run runs the same cases under several matrix rows (`context=none` and `context=home-assistant`), the
+  // comparison showed each case once, with the result of whichever task came last.
+  // This happens because `buildComparison` keyed its rows by the case name alone:
+  //
+  // rows.get(node.name)
+  //
+  // We fixed this by keying a row by the case name and its variant: the matrix values that tell apart the tasks of a
+  // column that ran a case of that name.
+  // rows.get(`${node.name}\0${variant}`)
+  /**
+   * @example
+   * expect(comparison.rows.map(row => [row.caseName, row.variant])).toEqual([['case-0', 'context=home'], ['case-0', 'context=none']])
+   */
+  it('keeps one row per matrix row when a run runs the same case under several matrix rows', () => {
+    const taskIds = ['evals%2Fdemo::default::run=context%3Dnone%26tts%3Dofficial::eval=asr%3Dwhisper-1', 'evals%2Fdemo::default::run=context%3Dhome%26tts%3Dofficial::eval=asr%3Dwhisper-1']
+    const left = runOf('run-a', '2026-10-19T06:36:00.000Z', 1, scored(1, 1), { definitions: [{ name: SCORE, primary: true }], taskIds })
+    const right = runOf('run-b', '2026-10-19T07:00:00.000Z', 1, scored(1, 0.5), { definitions: [{ name: SCORE, primary: true }], taskIds })
+
+    const comparison = compareRuns([createReducerHandle(left.reducer), createReducerHandle(right.reducer)], Date.parse('2026-10-20T00:00:00.000Z'))
+    expect(comparison.rows.map(row => [row.caseName, row.variant])).toEqual([['case-0', 'context=home'], ['case-0', 'context=none']])
+    expect(comparison.rows.map(row => row.cells['run-b']?.counted[SCORE])).toEqual([0.5, 0.5])
+    expect(comparison.summary.rows).toBe(2)
+  })
+
+  // ROOT CAUSE:
+  //
+  // If one workspace runs an extra matrix axis the others do not have (`prompt=baseline|cleanup` next to the shared
+  // `context`), its rows were keyed `context=none, prompt=baseline` while the others were keyed `context=none`, so no
+  // row had both columns and nothing could be paired against the baseline.
+  //
+  // We fixed this by aligning rows on the varying axes every column has, and averaging the tasks of a column that
+  // differ only in an axis the other columns lack (as the matrix view averages axes).
+  /**
+   * @example
+   * expect(comparison.rows.map(row => row.variant)).toEqual(['context=home', 'context=none'])
+   */
+  it('aligns rows on the axes every column has and averages an axis only one column runs', () => {
+    const shared = ['evals%2Fdemo::default::run=context%3Dnone::eval=asr%3Dwhisper-1', 'evals%2Fdemo::default::run=context%3Dhome::eval=asr%3Dwhisper-1']
+    const withPrompt = ['none', 'home'].flatMap(context => ['a', 'b'].map(prompt => `evals%2Fdemo::default::run=context%3D${context}%26prompt%3D${prompt}::eval=asr%3Dwhisper-1`))
+    const left = runOf('run-a', '2026-10-19T06:36:00.000Z', 1, scored(1, 1), { definitions: [{ name: SCORE, primary: true }], taskIds: shared })
+    const right = runOf('run-b', '2026-10-19T07:00:00.000Z', 1, scored(1, 0.5), { definitions: [{ name: SCORE, primary: true }], taskIds: withPrompt })
+
+    const comparison = compareRuns([createReducerHandle(left.reducer), createReducerHandle(right.reducer)], Date.parse('2026-10-20T00:00:00.000Z'))
+    expect(comparison.rows.map(row => row.variant)).toEqual(['context=home', 'context=none'])
+    expect(comparison.rows.map(row => [row.cells['run-a']?.pooled, row.cells['run-b']?.pooled])).toEqual([[undefined, 2], [undefined, 2]])
+    expect(comparison.rows.map(row => row.cells['run-b']?.counted[SCORE])).toEqual([0.5, 0.5])
+  })
+
+  /**
+   * @example
+   * expect(comparison.rows[0].cells['run-a'].metrics).toEqual({ 'demo.latency_ms': 120 })
+   */
+  it('carries the numeric metrics of each case, with the definitions of the metrics the cells have', () => {
+    const run = runOf('run-a', '2026-10-19T06:36:00.000Z', 1, [{ metrics: { 'demo.label': 'text', 'demo.latency_ms': 120 }, scores: { [SCORE]: 1 }, state: 'passed' }], {
+      metricDefinitions: [{ better: 'lower', name: 'demo.latency_ms', unit: 'ms' }],
+    })
+
+    const comparison = compareRuns([createReducerHandle(run.reducer)], Date.parse('2026-10-20T00:00:00.000Z'))
+    expect(comparison.rows[0].cells['run-a']?.metrics).toEqual({ 'demo.latency_ms': 120 })
+    expect(comparison.metricDefinitions).toEqual([{ better: 'lower', name: 'demo.latency_ms', unit: 'ms' }])
+  })
+
+  /**
+   * @example
+   * expect(comparison.columns[0].runs[0].workspaceId).toBe('ws-a')
+   */
+  it('names the workspace and project of each compared run, so runs of several workspaces can be told apart', () => {
+    const run = runOf('run-a', '2026-10-19T06:36:00.000Z', 1, scored(1, 1))
+
+    const comparison = compareRuns([createReducerHandle(run.reducer)], Date.parse('2026-10-20T00:00:00.000Z'))
+    expect(comparison.columns[0].runs[0]?.project).toBe('demo')
+    expect(comparison.columns[0].runs[0]?.workspaceId).toBe('ws-a')
   })
 })

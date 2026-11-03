@@ -151,7 +151,7 @@ const natural = defineScore('formula.natural', { grader: { id: 'judge', kind: 'm
 const pass = defineScore('formula.pass', {
   combine: { all: [correct, { atLeast: 0.5, score: natural }] },
   label: 'Pass',
-  primary: true,
+  rank: 1,
 })
 
 describeTask('read-formula', () => {

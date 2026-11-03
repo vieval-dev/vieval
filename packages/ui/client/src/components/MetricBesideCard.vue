@@ -21,6 +21,7 @@ export interface BesideTarget {
  *
  * Use when:
  * - a menu or list picks among metrics (color by, group by, axes, columns) and each choice needs its description
+ * - a menu picks among other choices that each have a preview (the default slot replaces the metric summary)
  *
  * Expects:
  * - `anchor` is the menu or list element; `target` the highlighted metric with its item element
@@ -28,10 +29,23 @@ export interface BesideTarget {
 const props = defineProps<{
   /** The menu or list: the card sits right of its edge. */
   anchor: HTMLElement | null | undefined
-  definitionOf: (name: string) => ColumnDefinition | undefined
+  /** Definition of a metric, for the default content ({@link MetricSummary}); unused with the `default` slot. */
+  definitionOf?: (name: string) => ColumnDefinition | undefined
   /** The highlighted metric and its item: the card follows the item up and down. `undefined` while none is. */
   target: BesideTarget | undefined
-  valuesOf: (name: string) => readonly unknown[]
+  /** Every case's value of a metric, for the default content; unused with the `default` slot. */
+  valuesOf?: (name: string) => readonly unknown[]
+}>()
+const emit = defineEmits<{
+  /**
+   * Esc was pressed while the card was the top layer: the card takes the key from the menu under it, so the menu is
+   * closed by its owner.
+   */
+  escape: []
+}>()
+defineSlots<{
+  /** Content for the highlighted name, instead of the metric summary (a comparison's axis preview). */
+  default?: (props: { value: string }) => unknown
 }>()
 
 // Phones have no room beside a menu; their lists show the description inline and open details in a drawer instead.
@@ -73,10 +87,14 @@ const reference = computed(() => {
       <PopoverContent
         as-child side="right" align="start" :side-offset="12" :collision-padding="12"
         :class="['floating p-2.5 text-xs pointer-events-none']"
-        @open-auto-focus.prevent @close-auto-focus.prevent
+        @open-auto-focus.prevent @close-auto-focus.prevent @escape-key-down="emit('escape')"
       >
         <AnimatedContent>
-          <MetricSummary v-if="shown" :name="shown" :definition="props.definitionOf(shown)" :values="props.valuesOf(shown)" />
+          <template v-if="shown">
+            <slot :value="shown">
+              <MetricSummary :name="shown" :definition="props.definitionOf?.(shown)" :values="props.valuesOf?.(shown) ?? []" />
+            </slot>
+          </template>
         </AnimatedContent>
       </PopoverContent>
     </PopoverPortal>

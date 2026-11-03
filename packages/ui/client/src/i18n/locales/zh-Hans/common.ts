@@ -1,6 +1,11 @@
 import type en from '../en/common'
 
 export default {
+  choice: {
+    description: '选择一项；信息按钮可以预览每个选项的效果',
+    details: '预览 {choice}',
+    use: '使用 {choice}',
+  },
   close: '关闭',
   empty: '暂无内容',
   loading: '加载中…',

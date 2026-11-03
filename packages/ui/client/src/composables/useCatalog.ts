@@ -9,9 +9,12 @@ import { computed, watch } from 'vue'
 
 import { api } from '../api'
 import { mergeMatrices } from '../labels'
+import { headlineValue } from '../scores'
 
 /** Every run below the viewer's report roots, with the hierarchy and labels derived from it. */
 export interface Catalog {
+  /** What the runs can be compared by; each list holds only comparisons of two or more things. */
+  comparisons: Readonly<{ value: Comparable }>
   /** Matrix axes of all runs of an experiment (or a project when `experiment` is omitted). */
   matrixOf: (scope: Scope) => MatrixAxes
   /** The `GET /api/runs` query (key {@link RUNS_KEY}); views pass its state to `StateView`. */
@@ -22,6 +25,25 @@ export interface Catalog {
   runsIn: (scope: Scope) => RunListItem[]
   /** Workspaces with their projects and experiments, ordered by their newest run. */
   workspaces: Readonly<{ value: WorkspaceEntry[] }>
+}
+
+/** What the runs of the catalog can be compared by, each list holding only comparisons of two or more things. */
+export interface Comparable {
+  /** Experiments run in several workspaces or projects, the most places first. */
+  acrossWorkspaces: CrossWorkspaceGroup[]
+  /** Experiments with two or more attempts. */
+  attempts: ExperimentEntry[]
+  /** Projects with two or more experiments. */
+  experiments: ProjectEntry[]
+  /** Runs whose matrix has an axis with two or more values, newest first. */
+  matrixRuns: RunListItem[]
+}
+
+/** One experiment run in several workspaces or projects (the same eval against several products). */
+export interface CrossWorkspaceGroup {
+  experimentId: string
+  /** The newest run of each workspace and project, by headline (best first; runs without one last). */
+  runs: RunListItem[]
 }
 
 /** One experiment of the catalog, with its attempts. */
@@ -154,7 +176,33 @@ export const useCatalog = defineQuery((): Catalog => {
       && (scope.attempt == null || run.attemptId === scope.attempt))
   }
 
+  const comparisons = computed<Comparable>(() => {
+    // Newest run of each experiment in each workspace and project; runs are newest first, so the first one wins.
+    const places = new Map<string, Map<string, RunListItem>>()
+    for (const run of runs.value) {
+      if (run.counts.total === 0)
+        continue
+      const byPlace = places.get(run.experimentId) ?? new Map<string, RunListItem>()
+      const place = `${run.workspaceId}\u0000${run.projectSegment}`
+      if (!byPlace.has(place))
+        byPlace.set(place, run)
+      places.set(run.experimentId, byPlace)
+    }
+    const acrossWorkspaces = [...places].filter(([, byPlace]) => byPlace.size > 1).map(([experimentId, byPlace]) => ({
+      experimentId,
+      runs: [...byPlace.values()].toSorted((left, right) => (headlineValue(right.headline) ?? -1) - (headlineValue(left.headline) ?? -1)),
+    })).toSorted((left, right) => right.runs.length - left.runs.length || left.experimentId.localeCompare(right.experimentId))
+    const projects = workspaces.value.flatMap(workspace => workspace.projects)
+    return {
+      acrossWorkspaces,
+      attempts: projects.flatMap(project => project.experiments).filter(experiment => experiment.attempts.length > 1),
+      experiments: projects.filter(project => project.experiments.length > 1),
+      matrixRuns: runs.value.filter(run => run.counts.total > 0 && Object.values({ ...run.matrix, ...run.evalMatrix }).some(values => values.length > 1)),
+    }
+  })
+
   return {
+    comparisons,
     matrixOf: scope => mergeMatrices(runsIn(scope).map(run => run.matrix)),
     query,
     runs,

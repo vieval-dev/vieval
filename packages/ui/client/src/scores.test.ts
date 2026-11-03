@@ -3,7 +3,7 @@ import type { HeadlineResult, ScoreDefinition, ScoreSummary } from '../../src/sh
 import { describe, expect, it } from 'vitest'
 
 import { i18n } from './i18n'
-import { caseScoreText, completionText, formulaText, gradersDiffer, graderText, headlineOf, headlineValue, headlineView, isGraderCall, primaryScoreName, unscoredText } from './scores'
+import { caseScoreText, completionText, formulaText, gradersDiffer, graderText, headlineOf, headlineValue, headlineView, isGraderCall, orderScores, primaryScoreName, unscoredText } from './scores'
 
 /** The scores of airi's `tts-speech-formula` eval, the first eval migrated to named scores. */
 const definitions: ScoreDefinition[] = [
@@ -163,6 +163,24 @@ describe('graders', () => {
     expect(isGraderCall({ provider: { id: 'judge', model: 'gpt-5.5' } }, 'judge')).toBe(true)
     expect(isGraderCall({ provider: { id: 'openai' }, request: { role: 'judge' } }, 'judge')).toBe(true)
     expect(isGraderCall({ provider: { id: 'openai' }, request: { step: 1 } }, 'judge')).toBe(false)
+  })
+})
+
+describe('orderScores', () => {
+  /**
+   * @example
+   * expect(orderScores(['fix', 'intent', 'overall'], [{ name: 'overall', rank: 1 }, { name: 'intent', rank: 2 }])).toEqual(['overall', 'intent', 'fix'])
+   */
+  it('leads with the ranked scores in rank order and keeps the supporting scores in the order given', () => {
+    expect(orderScores(['fix', 'drop', 'intent', 'overall'], [{ name: 'overall', rank: 1 }, { name: 'intent', rank: 2 }])).toEqual(['overall', 'intent', 'fix', 'drop'])
+  })
+
+  /**
+   * @example
+   * expect(orderScores(['a', 'b'], [{ name: 'b', primary: true }])).toEqual(['b', 'a'])
+   */
+  it('puts the primary score of a report written before ranks first', () => {
+    expect(orderScores(['a', 'b'], [{ name: 'b', primary: true }])).toEqual(['b', 'a'])
   })
 })
 

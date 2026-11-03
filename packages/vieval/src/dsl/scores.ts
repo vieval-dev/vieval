@@ -57,12 +57,15 @@ export interface ScoreMetadata {
    */
   label?: LocalizedText
   /**
-   * Whether this is the headline score of its task: pages, leaderboards, and comparisons show it first. At most one
-   * score of a task is primary. A task with exactly one score uses it without this flag.
+   * Importance of this score among the scores of its task: `1` is the headline score (pages, leaderboards, and
+   * comparisons show it first), `2` the next core score, and so on. Viewers list scores by rank and put the first ranks
+   * on the axes of comparison charts. Two scores of one task cannot share a rank. A score without a rank is a
+   * supporting score, listed after the ranked ones. A task with exactly one score uses it as the headline without a
+   * rank.
    *
-   * @default false
+   * @default undefined
    */
-  primary?: boolean
+  rank?: number
 }
 
 /**
@@ -89,7 +92,7 @@ export interface ScoreRecordOptions {
 export type ScoreRef = ScoreDefinition | string
 
 /**
- * Announces score definitions for one task and enforces one primary score per task.
+ * Announces score definitions for one task and enforces one score per rank in each task.
  *
  * Use when:
  * - a task starts (its `scores` option) or a case records a definition for the first time
@@ -101,7 +104,7 @@ export type ScoreRef = ScoreDefinition | string
  * - the `score.defined` payloads to emit, in order: inputs of a derived score come before it
  *
  * Throws:
- * - when a second score of the task is primary
+ * - when a second score of the task has the rank of an announced one
  */
 export function announceScore(announcements: Announcements<ScoreDefinedData>, score: ScoreDefinition): ScoreDefinedData[] {
   const emitted: ScoreDefinedData[] = []
@@ -112,11 +115,11 @@ export function announceScore(announcements: Announcements<ScoreDefinedData>, sc
       }
     }
     const defined = toScoreDefinedData(definition)
-    const otherPrimary = defined.primary === true
-      ? announcements.latest().find(existing => existing.primary === true && existing.name !== defined.name)
-      : undefined
-    if (otherPrimary != null) {
-      throw new Error(`Score "${defined.name}" is primary, but score "${otherPrimary.name}" of the same task already is.`)
+    const sameRank = defined.rank == null
+      ? undefined
+      : announcements.latest().find(existing => existing.rank === defined.rank && existing.name !== defined.name)
+    if (sameRank != null) {
+      throw new Error(`Score "${defined.name}" has rank ${String(defined.rank)}, but score "${sameRank.name}" of the same task already has it.`)
     }
     if (announcements.announce(defined)) {
       emitted.push(defined)
@@ -144,10 +147,13 @@ export function announceScore(announcements: Announcements<ScoreDefinedData>, sc
  * @example
  * const correct = defineScore('formula.correct', { label: { 'en': 'Correct', 'zh-Hans': '正确' } })
  * const natural = defineScore('formula.natural', { grader: { kind: 'model', id: 'judge' } })
- * const pass = defineScore('formula.pass', { combine: { all: [correct, natural] }, primary: true })
+ * const pass = defineScore('formula.pass', { combine: { all: [correct, natural] }, rank: 1 })
  * context.recordScore(correct, 1)
  */
 export function defineScore(name: string, metadata: ScoreMetadata = {}): ScoreDefinition {
+  if (metadata.rank != null && (!Number.isInteger(metadata.rank) || metadata.rank < 1)) {
+    throw new Error(`Score "${name}" has rank ${String(metadata.rank)}; a rank is a whole number from 1.`)
+  }
   const combine = metadata.combine
   if (combine != null) {
     const inputs = 'all' in combine ? combine.all : 'mean' in combine ? combine.mean : combine.weighted
@@ -189,16 +195,18 @@ function combinationInputs(combine: ScoreCombination | undefined): Array<{ atLea
 }
 
 /**
- * Normalizes a score definition into its `score.defined` payload.
+ * Normalizes a score definition into its `score.defined` payload. Rank 1 is also written as `primary`, the headline
+ * flag that reports and readers have always used, so a report says which score leads without knowing about ranks.
  *
  * Before:
- * - `{ name: 'pass', combine: { all: [correct, { score: natural, atLeast: 0.5 }] }, primary: true }`
+ * - `{ name: 'pass', combine: { all: [correct, { score: natural, atLeast: 0.5 }] }, rank: 1 }`
  *
  * After:
- * - `{ name: 'pass', combine: { kind: 'all', inputs: [{ name: 'correct' }, { name: 'natural', atLeast: 0.5 }] }, primary: true }`
+ * - `{ name: 'pass', combine: { kind: 'all', inputs: [{ name: 'correct' }, { name: 'natural', atLeast: 0.5 }] }, primary: true, rank: 1 }`
  */
 function toScoreDefinedData(definition: ScoreDefinition): ScoreDefinedData {
-  const { combine, ...rest } = definition
+  const { combine, ...metadata } = definition
+  const rest = metadata.rank === 1 ? { ...metadata, primary: true } : metadata
   if (combine == null) {
     return { ...rest }
   }

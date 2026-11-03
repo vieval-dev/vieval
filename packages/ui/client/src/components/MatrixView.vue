@@ -11,6 +11,7 @@ import { useI18n } from 'vue-i18n'
 
 import AnimatedContent from './AnimatedContent.vue'
 import CompletionRing from './CompletionRing.vue'
+import DotStrip from './DotStrip.vue'
 import MarginBar from './MarginBar.vue'
 import MatrixTable from './MatrixTable.vue'
 import SegmentedControl from './SegmentedControl.vue'
@@ -244,19 +245,13 @@ const anyIncomplete = computed(() => grids.value.some(grid => grid.incomplete > 
                     <DropdownMenuItemIndicator><span class="i-mingcute-check-line" aria-hidden="true" /></DropdownMenuItemIndicator>
                   </span>
                   <span :class="['truncate']">{{ axis.name }}</span>
+                  <!-- One dot per value on the scale every axis shares; a wide spread is what averaging would hide. -->
                   <span
-                    :class="['ml-auto relative h-2 w-20 shrink-0 rounded-full bg-neutral-500/12']"
+                    :class="['ml-auto']"
                     :title="axis.values.map(value => `${value || '—'}: ${formatScore(meanOfValue(axis.key, value))}`).join('\n')"
                     data-testid="matrix-averaged-spread"
                   >
-                    <!-- One dot per value on the scale every axis shares; a wide spread is what averaging would hide. -->
-                    <template v-for="value in axis.values" :key="value">
-                      <span
-                        v-if="meanOfValue(axis.key, value) != null"
-                        :class="['absolute top-1/2 size-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--series-1)] opacity-80']"
-                        :style="{ left: `${dotPosition(meanOfValue(axis.key, value)!) * 100}%` }"
-                      />
-                    </template>
+                    <DotStrip :dots="axis.values.flatMap(value => meanOfValue(axis.key, value) == null ? [] : [{ key: value, position: dotPosition(meanOfValue(axis.key, value)!) }])" />
                   </span>
                   <span :class="['w-10 text-right text-xs muted tabular-nums']" :title="t('matrix.averaged.spread')">{{ spreadOf(axis.key) == null ? '' : (spreadOf(axis.key)! * 100).toFixed(1) }}</span>
                 </DropdownMenuCheckboxItem>
@@ -323,10 +318,10 @@ const anyIncomplete = computed(() => grids.value.some(grid => grid.incomplete > 
       <p :class="['flex flex-wrap items-center gap-x-4 gap-y-1 text-xs muted']" data-testid="matrix-legend">
         <span>{{ t('matrix.view.intro', { n: formatCount(matrix.data.value?.runCount ?? 0) }, matrix.data.value?.runCount ?? 0) }}</span>
         <span v-if="anyCompact && !hasBaseline" :class="['inline-flex items-center gap-1.5']">
-          <span :class="['inline-block w-16 h-2 rounded-sm']" :style="{ background: 'linear-gradient(90deg, color-mix(in oklab, var(--series-1) 10%, transparent), var(--series-1))' }" aria-hidden="true" />{{ t('matrix.legend.scale') }}
+          <span :class="['inline-block w-16 h-2 rounded-sm']" :style="{ background: 'linear-gradient(90deg, color-mix(in oklab, var(--series-1) 10%, transparent), color-mix(in oklab, var(--series-1) 50%, transparent))' }" aria-hidden="true" />{{ t('matrix.legend.scale') }}
         </span>
         <span v-if="hasBaseline" :class="['inline-flex items-center gap-1.5']">
-          <span :class="['inline-block w-16 h-2 rounded-sm']" :style="{ background: 'linear-gradient(90deg, var(--series-3), transparent, var(--series-1))' }" aria-hidden="true" />{{ t('matrix.legend.delta', { baseline: baselineText }) }}
+          <span :class="['inline-block w-16 h-2 rounded-sm']" :style="{ background: 'linear-gradient(90deg, color-mix(in oklab, var(--series-1-opposite) 50%, transparent), transparent, color-mix(in oklab, var(--series-1) 50%, transparent))' }" aria-hidden="true" />{{ t('matrix.legend.delta', { baseline: baselineText }) }}
         </span>
         <span v-if="anyCompact && !hasBaseline" :class="['inline-flex items-center gap-1.5']">
           <span :class="['inline-block size-3 rounded-sm outline-2 outline -outline-offset-2 outline-neutral-900 dark:outline-neutral-100']" aria-hidden="true" />{{ t('matrix.legend.best') }}

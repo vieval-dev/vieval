@@ -9,7 +9,7 @@ import { parseTaskId } from '../../src/shared/reduce'
 import { formatCompact, formatScore } from './format'
 import { i18n } from './i18n'
 import { localize } from './localize'
-import { primaryScoreName, scoreColumn } from './scores'
+import { orderScores, primaryScoreName, scoreColumn } from './scores'
 
 /** One case of a task, flattened for the multi-metric charts (parallel coordinates, scatterplot matrix). */
 export interface CaseRow {
@@ -165,7 +165,7 @@ export function buildCaseTable(cases: readonly CaseNode[], metrics: MetricsRespo
     }
   }
   const primary = primaryScoreName(metrics?.scoreDefinitions ?? [], scoreNames)
-  const scores = primary == null ? scoreNames : [primary, ...scoreNames.filter(name => name !== primary)]
+  const scores = orderScores(primary == null ? scoreNames : [primary, ...scoreNames.filter(name => name !== primary)], metrics?.scoreDefinitions ?? [])
   const derivedNames: string[] = []
   for (const series of metrics?.nonNumeric ?? []) {
     for (const point of series.values) {

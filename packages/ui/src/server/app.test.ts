@@ -314,7 +314,7 @@ describe('viewer API on the OSWorld report root (real data)', () => {
     expect(attempts.columns.map(column => column.id)).toEqual([ARCHIVED, RUNNING])
     expect(attempts.primary).toBe(SCORE)
     const row = attempts.rows.find(candidate => candidate.caseName === 'chrome/06fe7178-4491-4589-810f-2e2bc9502122')
-    expect(row?.cells[ARCHIVED]).toEqual({ roundCount: 1, scores: { unscored: {}, values: { [SCORE]: 0 } }, state: 'failed' })
+    expect(row?.cells[ARCHIVED]).toMatchObject({ roundCount: 1, scores: { unscored: {}, values: { [SCORE]: 0 } }, state: 'failed' })
     expect(attempts.columns[0].runs[0].headline?.headline.kind).toBe('score')
     expect(attempts.summary.rows).toBeGreaterThan(18)
 

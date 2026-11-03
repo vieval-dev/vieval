@@ -236,6 +236,26 @@ export function isGraderCall(call: Pick<InferenceCall, 'provider' | 'request'>, 
 }
 
 /**
+ * Orders score names by importance: the headline (`rank` 1, or `primary` in reports written before ranks), then the
+ * other core scores by `rank`, then the supporting scores (no rank) in the order given.
+ *
+ * Use when:
+ * - a view lists several scores (a score table, axis pickers, a case's scores) and should lead with what the eval
+ *   author ranked as most important
+ *
+ * Returns:
+ * - a new array; names without a definition count as supporting scores
+ */
+export function orderScores(names: readonly string[], definitions: readonly ScoreDefinition[]): string[] {
+  const rankOf = (name: string) => {
+    const definition = scoreDefinition(name, definitions)
+    return definition?.rank ?? (definition?.primary === true ? 1 : Number.POSITIVE_INFINITY)
+  }
+  // `toSorted` is stable, so names of equal rank (the supporting scores) keep the order given.
+  return names.toSorted((left, right) => rankOf(left) - rankOf(right))
+}
+
+/**
  * Picks the headline score among the score names of a group of cases: the one defined `primary`, else the only score.
  *
  * Use when:

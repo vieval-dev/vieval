@@ -2,6 +2,9 @@
   /* Categorical series slots (dataviz reference palette); status colors stay reserved for states.
      The first slot follows the theme hue: `primary-600` / `primary-400` of `@proj-airi/unocss-preset-chromatic`. */
   --series-1: oklch(54% calc(var(--chromatic-chroma-600) * var(--chromatic-sat)) var(--chromatic-hue));
+  /* The other side of a diverging scale (losses, negative correlations): the theme hue turned half a circle, at the
+     lightness and chroma of `--series-1`, so the two sides weigh the same and follow the reader's palette. */
+  --series-1-opposite: oklch(54% calc(var(--chromatic-chroma-600) * var(--chromatic-sat)) calc(var(--chromatic-hue) + 180));
   --series-2: #eb6834;
   --series-3: #1baf7a;
   --series-4: #eda100;
@@ -40,10 +43,10 @@
   --seq-3: oklch(76% calc(var(--chromatic-chroma-500) * 0.7) var(--chromatic-hue));
   --seq-4: oklch(67% calc(var(--chromatic-chroma-500) * 0.85) var(--chromatic-hue));
   --seq-5: oklch(58% calc(var(--chromatic-chroma-500) * 0.9) var(--chromatic-hue));
-  /* Text on a strong fill of `--series-1` / `--series-3` (a compact matrix cell): white on the deep light-page hues. */
-  --heat-ink: #fff;
   --chart-grid: #e5e5e5;
   --chart-text: #52514e;
+  /* The `card` background charts sit on: the ring that keeps a dot apart from the marks under it. */
+  --chart-surface: #fff;
   color-scheme: light;
 }
 /*
@@ -60,9 +63,8 @@
   --chromatic-sat: 0.7;
 }
 :root.dark {
-  /* Dark pages fill with the light hues, so the text on a strong fill turns dark. */
-  --heat-ink: #171717;
   --series-1: oklch(74% calc(var(--chromatic-chroma-400) * var(--chromatic-sat)) var(--chromatic-hue));
+  --series-1-opposite: oklch(74% calc(var(--chromatic-chroma-400) * var(--chromatic-sat)) calc(var(--chromatic-hue) + 180));
   --series-2: #d95926;
   --series-3: #199e70;
   --series-4: #c98500;
@@ -87,6 +89,7 @@
   --seq-5: oklch(92% calc(var(--chromatic-chroma-500) * 0.3) var(--chromatic-hue));
   --chart-grid: #333332;
   --chart-text: #c3c2b7;
+  --chart-surface: #171717;
   color-scheme: dark;
 }
 /*

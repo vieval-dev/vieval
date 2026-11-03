@@ -92,13 +92,13 @@ describeTask('retrieval', ({ caseOf }) => {
 - `recordScore` 也可以直接传分数名，例如 `recordScore('retrieval.recall', 0.5)`，这时分数没有名称和说明。
 - 用例第一次记录某个定义时，Vieval 会把它写入报告。也可以在 `describeTask` 的 `scores` 选项中列出任务的分数，让它们在任务开始时就写入报告。列出的分数在第一个用例之前就是已知的；通过的用例如果没有记录它，就算作缺失。
 
-## 选择主分数
+## 选择主分数并给核心分数排序
 
 页面、排行榜、对比和 CLI 汇总行会优先显示每个任务的一个分数，并在数值旁边显示它的名称。这个分数就是**主分数**（primary）。
 
-- 用 `primary: true` 标记主分数。一个任务最多只有一个主分数，声明第二个时会抛出错误。
+- 用 `rank: 1` 标记主分数，其他核心分数按重要程度依次标 `2`、`3`……查看器按 rank 排列分数，并把排在前面的分数放到对比图的坐标轴上。同一个任务里两个分数不能用同一个 rank，声明第二个时会抛出错误。没有 rank 的分数是辅助分数，排在有 rank 的分数之后。
 - 只有一个分数的任务不需要标记，这个分数就是主分数。
-- 有多个分数但都没有标记的任务没有主分数，标题数值会回退为通过用例的比例。
+- 有多个分数但没有 `rank: 1` 的任务没有主分数，标题数值会回退为通过用例的比例。
 - 如果一次运行中各任务的主分数不同，运行级别就不显示标题分数，而是按任务名分别列出各自的主分数，运行的标题数值只保留执行成功率。
 
 ## 组合分数
@@ -120,7 +120,7 @@ const pass = defineScore('tts.pass', {
   // 不带阈值的输入相当于 `atLeast: 1`，所以 mixed（0.5）不算通过。
   combine: { all: [correct, natural] },
   label: { 'en': 'Pass', 'zh-Hans': '通过' },
-  primary: true,
+  rank: 1,
 })
 
 describeTask('read aloud', ({ caseOf }) => {
@@ -161,7 +161,7 @@ describeTask('read aloud', ({ caseOf }) => {
 `errors` 按分数分别设置。`exclude` 的出发点是：服务故障不是被测对象的结果，被排除的用例数量由执行成功率体现。`zero` 适合把每个错误都算作答错的基准测试，例如 Harbor 和 Terminal-Bench：
 
 ```ts
-const solved = defineScore('bench.solved', { errors: 'zero', primary: true })
+const solved = defineScore('bench.solved', { errors: 'zero', rank: 1 })
 ```
 
 每个分数的汇总包含 `mean`（计入用例的平均值，没有用例计入时为 `null`）、`n`（计入的用例数）和 `total`（已结束且未跳过的用例数）。如果没有选中任何用例，例如 `--case` 过滤后为空，任务不会返回分数。

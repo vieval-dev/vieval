@@ -318,8 +318,13 @@ export const scoreDefinedDataSchema = v.object({
   label: v.optional(localizedTextSchema),
   /** Score name, the same as in `score.recorded`. */
   name: v.string(),
-  /** Whether this is the headline score of its task. At most one score of a task is primary. */
+  /** Whether this is the headline score of its task (`rank` 1). At most one score of a task is primary. */
   primary: v.optional(v.boolean()),
+  /**
+   * Importance among the scores of its task: 1 is the headline, 2 the next core score, and so on; absent for a
+   * supporting score. Reports written before ranks existed have none, and readers then keep the declaration order.
+   */
+  rank: v.optional(v.number()),
 })
 
 const scoreRecordedEntries = {
