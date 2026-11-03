@@ -26,7 +26,7 @@ const pass = defineScore('showcase.pass', {
   combine: { all: [{ atLeast: 0.7, score: correct }, { atLeast: 0.6, score: quality }] },
   description: { 'en': 'The answer is at least 70% correct and the judge rates it at least 0.6.', 'zh-Hans': '答案至少 70% 正确，且评委评分不低于 0.6。' },
   label: { 'en': 'Pass', 'zh-Hans': '通过' },
-  primary: true,
+  rank: 1,
 })
 
 // 64 cheap cases: a long case list with metrics and scores that differ by model.

@@ -366,7 +366,7 @@ describe('describeTask DSL', { timeout: 10000 }, () => {
   it('summarizes named scores and derives a combined primary score when each case try settles', async () => {
     const correct = defineScore('correct')
     const natural = defineScore('natural')
-    const pass = defineScore('pass', { combine: { all: [correct, { atLeast: 0.5, score: natural }] }, primary: true })
+    const pass = defineScore('pass', { combine: { all: [correct, { atLeast: 0.5, score: natural }] }, rank: 1 })
     const taskDefinition = describeTask('dsl-custom-scores', () => {
       caseOf('case-1', (context) => {
         context.recordScore(correct, 1)
@@ -2204,7 +2204,7 @@ describe('describeTask named scores', () => {
   it('announces the scores option before the first case, inputs of a derived score first', async () => {
     const correct = defineScore('correct', { label: { 'en': 'Correct', 'zh-Hans': '正确' } })
     const natural = defineScore('natural', { grader: { id: 'judge', kind: 'model' } })
-    const pass = defineScore('pass', { combine: { all: [correct, natural] }, primary: true })
+    const pass = defineScore('pass', { combine: { all: [correct, natural] }, rank: 1 })
     const emitted: Array<{ caseId?: string, data: unknown, event: string }> = []
 
     await runTask(describeTask('scores-announced', () => {
@@ -2217,7 +2217,7 @@ describe('describeTask named scores', () => {
     const defined = emitted.filter(event => event.event === 'score.defined')
     expect(defined.map(event => (event.data as { name: string }).name)).toEqual(['correct', 'natural', 'pass'])
     expect(defined.every(event => event.caseId == null)).toBe(true)
-    expect(defined[2]!.data).toEqual({ combine: { inputs: [{ name: 'correct' }, { name: 'natural' }], kind: 'all' }, name: 'pass', primary: true })
+    expect(defined[2]!.data).toEqual({ combine: { inputs: [{ name: 'correct' }, { name: 'natural' }], kind: 'all' }, name: 'pass', primary: true, rank: 1 })
     expect(emitted.findIndex(event => event.event === 'score.defined')).toBeLessThan(emitted.findIndex(event => event.event === 'case.started'))
   })
 
@@ -2227,7 +2227,7 @@ describe('describeTask named scores', () => {
    */
   it('emits derived scores when the try settles, before case.ended', async () => {
     const correct = defineScore('correct')
-    const pass = defineScore('pass', { combine: { all: [correct] }, primary: true })
+    const pass = defineScore('pass', { combine: { all: [correct] }, rank: 1 })
     const emitted: Array<{ caseId?: string, data: unknown, event: string }> = []
 
     const runResult = await runTask(describeTask('scores-derived', () => {
@@ -2248,7 +2248,7 @@ describe('describeTask named scores', () => {
   it('records unscored values without counting them and marks derived scores unscored', async () => {
     const correct = defineScore('correct')
     const natural = defineScore('natural')
-    const pass = defineScore('pass', { combine: { all: [correct, natural] }, primary: true })
+    const pass = defineScore('pass', { combine: { all: [correct, natural] }, rank: 1 })
     const emitted: Array<{ caseId?: string, data: unknown, event: string }> = []
 
     const runResult = await runTask(describeTask('scores-unscored', () => {
@@ -2293,15 +2293,40 @@ describe('describeTask named scores', () => {
 
   /**
    * @example
-   * two primary scores in one task -> the task run throws when the second is announced.
+   * two scores of rank 1 in one task -> the task run throws when the second is announced.
    */
-  it('rejects a second primary score in one task', async () => {
-    const first = defineScore('first', { primary: true })
-    const second = defineScore('second', { primary: true })
+  it('rejects a second score of the same rank in one task', async () => {
+    const first = defineScore('first', { rank: 1 })
+    const second = defineScore('second', { rank: 1 })
 
     await expect(runTask(describeTask('scores-two-primaries', () => {
       caseOf('case-1', () => {})
-    }, { scores: [first, second] }), [])).rejects.toThrow('Score "second" is primary, but score "first" of the same task already is.')
+    }, { scores: [first, second] }), [])).rejects.toThrow('Score "second" has rank 1, but score "first" of the same task already has it.')
+  })
+
+  /**
+   * @example
+   * expect(defined.map(data => [data.name, data.rank, data.primary])).toEqual([['overall', 1, true], ['intent', 2, undefined]])
+   */
+  it('writes rank 1 as the primary score and keeps the other ranks', async () => {
+    const overall = defineScore('overall', { rank: 1 })
+    const intent = defineScore('intent', { rank: 2 })
+    const emitted: Array<{ caseId?: string, data: unknown, event: string }> = []
+
+    await runTask(describeTask('scores-ranks', () => {
+      caseOf('case-1', () => {})
+    }, { scores: [overall, intent] }), emitted)
+    const defined = emitted.filter(event => event.event === 'score.defined').map(event => event.data as { name: string, primary?: boolean, rank?: number })
+    expect(defined.map(data => [data.name, data.rank, data.primary])).toEqual([['overall', 1, true], ['intent', 2, undefined]])
+  })
+
+  /**
+   * @example
+   * expect(() => defineScore('a', { rank: 0 })).toThrow()
+   */
+  it('rejects a rank that is not a whole number from 1', () => {
+    expect(() => defineScore('a', { rank: 0 })).toThrow('Score "a" has rank 0; a rank is a whole number from 1.')
+    expect(() => defineScore('a', { rank: 1.5 })).toThrow('Score "a" has rank 1.5; a rank is a whole number from 1.')
   })
 
   /**

@@ -88,13 +88,13 @@ describeTask('retrieval', ({ caseOf }) => {
 - `recordScore` also accepts a bare name, for example `recordScore('retrieval.recall', 0.5)`. The score then has no label or description.
 - A definition is announced to the report the first time a case records it. List the task's scores in the `scores` option of `describeTask` to announce them when the task starts. A listed score is known before the first case, and it counts as missing for a passed case that never records it.
 
-## Choose the primary score
+## Choose the primary score and rank the core scores
 
 Pages, leaderboards, comparisons, and the CLI summary line show one score per task first, with its label next to its value. That is the **primary** score.
 
-- Mark it with `primary: true`. At most one score of a task is primary; a second one throws when it is announced.
-- A task with exactly one score uses that score as primary without the flag.
-- A task with several scores and none marked primary has no primary score. Its headline falls back to the share of passed cases.
+- Give it `rank: 1`. Rank the other core scores `2`, `3`, and so on, in order of importance: viewers list scores by rank and put the first ranks on the axes of comparison charts. Two scores of a task cannot share a rank; the second one throws when it is announced. A score without a rank is a supporting score, listed after the ranked ones.
+- A task with exactly one score uses that score as primary without a rank.
+- A task with several scores and none of rank 1 has no primary score. Its headline falls back to the share of passed cases.
 - When the tasks of a run have different primary scores, the run has no run-level headline score. Each task's primary score is listed with its task name, and the completion rate stays as the run headline.
 
 ## Combine scores
@@ -115,7 +115,7 @@ const pass = defineScore('tts.pass', {
   // A bare input means `atLeast: 1`, so a mixed reading (0.5) does not pass.
   combine: { all: [correct, natural] },
   label: { 'en': 'Pass', 'zh-Hans': '通过' },
-  primary: true,
+  rank: 1,
 })
 
 describeTask('read aloud', ({ caseOf }) => {
@@ -155,7 +155,7 @@ One rule decides how each case counts in each score. The task result, `run-summa
 Set `errors` per score. `exclude` follows the view that a provider outage is not a result of the test object; the completion rate then shows how many cases were left out. `zero` matches benchmarks that count every error as a wrong answer, for example Harbor and Terminal-Bench:
 
 ```ts
-const solved = defineScore('bench.solved', { errors: 'zero', primary: true })
+const solved = defineScore('bench.solved', { errors: 'zero', rank: 1 })
 ```
 
 Each score summary reports `mean` (over the counted cases, or `null`), `n` (cases that counted), and `total` (settled cases that were not skipped). An empty case selection, for example a `--case` filter that matches nothing, returns no scores.
