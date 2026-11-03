@@ -25,7 +25,7 @@ import { buildCaseTable, columnDefinitions, metricLabel, metricScale, separation
 import { formatScore, previewValue } from '../format'
 import { levelIcons } from '../hierarchy'
 import { href, navigate } from '../router'
-import { graderText, headlineOf, scoreColumn, scoreDefinition, scoreLabel, unscoredText } from '../scores'
+import { graderText, headlineOf, orderScores, scoreColumn, scoreDefinition, scoreLabel, unscoredText } from '../scores'
 
 /**
  * Scores and metrics of a run: the completion rate and every score over the whole run (label, mean, counted cases,
@@ -80,7 +80,8 @@ const scoreRows = computed(() => {
   if (overall == null)
     return []
   const completion: ScoreSummary | undefined = overall.headline?.completion
-  const rows = overall.scores.map((summary) => {
+  const order = orderScores(overall.scores.map(summary => summary.name), scoreDefinitions.value)
+  const rows = overall.scores.toSorted((left, right) => order.indexOf(left.name) - order.indexOf(right.name)).map((summary) => {
     const definition = scoreDefinition(summary.name, scoreDefinitions.value)
     return {
       column: definition == null ? undefined : scoreColumn(definition, scoreDefinitions.value),

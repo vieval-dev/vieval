@@ -64,7 +64,7 @@ const points = (delta: number) => `${delta > 0 ? '+' : delta < 0 ? '−' : '±'}
       <span :class="['muted']">{{ t('matrix.detail.against', { baseline: props.baselineLabel ?? '' }) }}</span>
       <span :class="['flex items-baseline gap-2 tabular-nums']">
         <span>{{ formatScore(props.comparison.base.value) }} → {{ formatScore(props.cell.value) }}</span>
-        <span :class="['font-semibold', props.comparison.clear ? (props.comparison.delta >= 0 ? 'text-primary-700 dark:text-primary-300' : '[color:var(--series-3)]') : 'muted']">{{ points(props.comparison.delta) }}</span>
+        <span :class="['font-semibold', props.comparison.clear ? (props.comparison.delta >= 0 ? 'text-primary-700 dark:text-primary-300' : '[color:var(--series-1-opposite)]') : 'muted']">{{ points(props.comparison.delta) }}</span>
       </span>
       <span :class="['muted']">{{ t(props.comparison.clear ? 'matrix.baseline.clear' : 'matrix.baseline.noise') }}</span>
     </div>

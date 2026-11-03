@@ -53,6 +53,9 @@ export default defineConfig({
     // `!`: wins over the transparent `btn` background and its hover.
     'btn-active': 'bg-primary-500/15! text-primary-800! dark:text-primary-200! font-medium',
     'card': 'rounded-lg border border-neutral-200/50 dark:border-neutral-800/50 bg-white dark:bg-neutral-900',
+    // Small round icon action beside the name of a floating card (a pinned case, a pinned comparison column); finger-sized
+    // on phones. The icon size is set here so every action of a card draws its glyph at one size.
+    'card-action': 'grid place-items-center size-9 md:size-6 shrink-0 rounded-full border border-neutral-200 dark:border-neutral-700/60 text-sm text-neutral-600 dark:text-neutral-300 transition-colors hover:(text-primary-700 dark:text-primary-200 border-primary-500/50 bg-primary-500/8) focus-visible:(outline-2 outline-offset-1 outline-primary-500)',
     'card-title': 'flex items-center gap-2 px-3 py-2 text-sm font-semibold border-b border-neutral-200/50 dark:border-neutral-800/50',
     'floating': 'z-50 rounded-lg shadow-lg bg-white text-neutral-900 border border-neutral-200/50 dark:(bg-neutral-900 text-neutral-100 border-neutral-700/40)',
     'floating-arrow': 'fill-white dark:fill-neutral-900',

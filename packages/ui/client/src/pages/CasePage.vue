@@ -27,7 +27,7 @@ import { useRunLive } from '../composables/useRunLive'
 import { useStatusFavicon } from '../composables/useStatusFavicon'
 import { formatDateTime, formatDuration, formatTime, previewValue } from '../format'
 import { href, navigate } from '../router'
-import { caseScoreText, isGraderCall, primaryScoreName, scoreDefinition } from '../scores'
+import { caseScoreText, isGraderCall, orderScores, primaryScoreName, scoreDefinition } from '../scores'
 import { runSwitcherOptions } from '../switcher'
 
 /**
@@ -61,7 +61,7 @@ function taskValuesOf(name: string): unknown[] {
 }
 
 /**
- * Every score of the case, the primary first: the scores its task defined and the ones it recorded, each with the
+ * Every score of the case, by rank (the primary first): the scores its task defined and the ones it recorded, each with the
  * last record of the last round (rationale, grader, metadata) and the grader's model calls in this case.
  */
 const caseScores = computed(() => {
@@ -72,7 +72,8 @@ const caseScores = computed(() => {
   const primary = primaryScoreName(data.scoreDefinitions, names)
   const lastRound = data.rounds.at(-1)?.roundIndex ?? 0
   const calls = groupInferenceCalls(data.inference)
-  return names.toSorted((a, b) => Number(b === primary) - Number(a === primary)).map((name) => {
+  // The primary leads even in a report without ranks; ranked core scores follow (see `orderScores`).
+  return orderScores(names.toSorted((a, b) => Number(b === primary) - Number(a === primary)), data.scoreDefinitions).map((name) => {
     const record = data.scoreRecords.findLast(entry => entry.record.name === name && (entry.roundIndex ?? 0) === lastRound)?.record
     const graderId = record?.grader?.id ?? scoreDefinition(name, data.scoreDefinitions)?.grader?.id
     return {

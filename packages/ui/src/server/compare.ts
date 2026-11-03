@@ -1,8 +1,17 @@
-import type { CellCoverage, ComparedRun, ComparisonCell, ComparisonResponse, MatrixCell, MatrixResponse, RunListItem, ScoreDefinition, ScoreGraders, TaskNode } from '../shared/contract'
+import type { CellCoverage, ComparedRun, ComparisonCell, ComparisonResponse, MatrixCell, MatrixResponse, MetricDefinition, RunListItem, ScoreDefinition, ScoreGraders, TaskNode } from '../shared/contract'
+import type { ReducedCase } from '../shared/reduce'
 import type { RunHandle } from './store'
 
 import { addScoreGrader, axisValues, buildTaskNodes, compareNatural, countedScores, countingDefinitions, pickScoreDefinitions } from '../shared/reduce'
 import { toRunListItem } from './store'
+
+/** One case of one task of a column, before the rows are split and pooled. */
+interface CaseEntry {
+  caseName: string
+  cell: ComparisonCell
+  /** Matrix values of the task (`{ task: displayName }` without a matrix). */
+  values: Record<string, string>
+}
 
 /** One run of a matrix cell: its result, and the cases it ran (by `CaseNode.identity`). */
 interface CellRun {
@@ -184,13 +193,19 @@ export function compareRuns(handles: readonly RunHandle[], now: number): Compari
 /**
  * Case rows of the columns; a row is `changed` when its state differs between columns, or, when every scored task
  * shares one primary score, the value the case counts with in it (a failed case counts 0).
+ *
+ * A row is one case name and variant. When a column ran a case of one name in several tasks (matrix rows such as
+ * `context=none` and `context=home-assistant`), the rows are split by the matrix axes that tell those tasks apart and
+ * that every column has, so the columns stay paired case by case. Tasks that differ only in an axis some column lacks
+ * (`prompt` run by one workspace alone) are averaged into one cell, as the matrix view averages axes.
  */
 function buildComparison(view: ComparisonResponse['view'], columns: readonly Column[], now: number): ComparisonResponse {
-  // Per case name: the cell of each column, and the primary value the cell counts with.
-  const rows = new Map<string, { cells: Record<string, ComparisonCell>, counted: Record<string, Record<string, number>> }>()
   const outputColumns: ComparisonResponse['columns'] = []
   const definitions = new Map<string, ScoreDefinition>()
+  const metricDefinitions = new Map<string, MetricDefinition>()
   const primaries = new Set<string>()
+  // Per column: one entry per case name and task configuration; a newer run replaces the entry of an older one.
+  const entriesByColumn = new Map<string, Map<string, CaseEntry>>()
   for (const column of columns) {
     const runs: ComparedRun[] = column.handles.map((handle) => {
       const item = toRunListItem(handle, now)
@@ -200,13 +215,17 @@ function buildComparison(view: ComparisonResponse['view'], columns: readonly Col
         durationMs: item.startedAt != null && item.endedAt != null ? Date.parse(item.endedAt) - Date.parse(item.startedAt) : undefined,
         experimentId: item.experimentId,
         headline: item.headline,
+        project: item.projectSegment,
         runKey: item.runKey,
         startedAt: item.startedAt,
         state: item.state,
+        workspaceId: item.workspaceId,
       }
     })
     const scoreGraders: ScoreGraders = {}
     outputColumns.push({ id: column.id, label: column.label, runs, scoreGraders })
+    const entries = new Map<string, CaseEntry>()
+    entriesByColumn.set(column.id, entries)
     // Older runs first, so a newer run overwrites the cells of the same case.
     for (const handle of column.handles) {
       const reducer = handle.reducer()
@@ -221,25 +240,60 @@ function buildComparison(view: ComparisonResponse['view'], columns: readonly Col
           primaries.add(task.scoring.primary)
         }
         const taskDefinitions = countingDefinitions(task.scoring, reducer.tasks.get(task.id)?.scoreDefinitions ?? new Map())
+        // A task without a matrix is told apart from the others of its run by its name.
+        const values = task.matrix == null ? { task: task.displayName } : { ...task.matrix.run, ...task.matrix.eval }
+        const configuration = Object.entries(values).sort(([left], [right]) => compareNatural(left, right)).map(([key, value]) => `${key}=${value}`).join('&')
         for (const node of task.cases) {
-          const row = rows.get(node.name) ?? { cells: {}, counted: {} }
           const round = node.rounds.at(-1)
-          row.cells[column.id] = { roundCount: node.rounds.length, scores: node.scores, state: node.state }
-          row.counted[column.id] = round == null ? {} : countedScores(round, taskDefinitions)
-          rows.set(node.name, row)
+          const metrics = numericMetrics(reducer.cases.get(node.key), round?.roundIndex)
+          for (const name of Object.keys(metrics)) {
+            const definition = reducer.metricDefinitions.get(name)
+            if (definition != null)
+              metricDefinitions.set(name, definition)
+          }
+          // NUL cannot appear in decoded names, so the joined key is unambiguous.
+          entries.set([node.name, configuration].join('\0'), {
+            caseName: node.name,
+            cell: {
+              counted: round == null ? {} : countedScores(round, taskDefinitions),
+              ...(node.durationMs == null ? {} : { durationMs: node.durationMs }),
+              metrics,
+              roundCount: node.rounds.length,
+              scores: node.scores,
+              state: node.state,
+            },
+            values,
+          })
         }
       }
     }
   }
+
+  const keys = rowAxes([...entriesByColumn.values()].map(entries => [...entries.values()]))
+  // Per case name and variant: the cells of each column, pooled below.
+  const rows = new Map<string, { caseName: string, cells: Map<string, ComparisonCell[]>, variant?: string }>()
+  for (const [columnId, entries] of entriesByColumn) {
+    for (const entry of entries.values()) {
+      const variant = keys.length === 0 ? undefined : keys.map(key => `${key}=${entry.values[key] ?? ''}`).join(', ')
+      const rowKey = [entry.caseName, variant ?? ''].join('\0')
+      const row = rows.get(rowKey) ?? { caseName: entry.caseName, cells: new Map(), ...(variant == null ? {} : { variant }) }
+      row.cells.set(columnId, [...row.cells.get(columnId) ?? [], entry.cell])
+      rows.set(rowKey, row)
+    }
+  }
   const primary = primaries.size === 1 ? [...primaries][0] : undefined
-  const outputRows = [...rows].sort((left, right) => left[0].localeCompare(right[0])).map(([caseName, { cells, counted }]) => {
-    const values = Object.values(cells)
-    const states = new Set(values.map(cell => cell.state))
-    const scores = new Set(Object.values(counted).map(value => primary == null ? null : value[primary] ?? null))
-    return { caseName, cells, changed: values.length > 1 && (states.size > 1 || scores.size > 1) }
-  })
+  const outputRows = [...rows.values()]
+    .sort((left, right) => left.caseName.localeCompare(right.caseName) || compareNatural(left.variant ?? '', right.variant ?? ''))
+    .map(({ cells: pooledCells, ...row }) => {
+      const cells = Object.fromEntries([...pooledCells].map(([columnId, list]) => [columnId, poolCells(list)]))
+      const values = Object.values(cells)
+      const states = new Set(values.map(cell => cell.state))
+      const scores = new Set(values.map(cell => primary == null ? null : cell.counted[primary] ?? null))
+      return { ...row, cells, changed: values.length > 1 && (states.size > 1 || scores.size > 1) }
+    })
   return {
     columns: outputColumns,
+    metricDefinitions: [...metricDefinitions.values()],
     ...(primary == null ? {} : { primary }),
     rows: outputRows,
     scoreDefinitions: [...definitions.values()],
@@ -247,6 +301,31 @@ function buildComparison(view: ComparisonResponse['view'], columns: readonly Col
     view,
   }
 }
+
+/**
+ * Matrix axes the comparison rows are split by: the axes that tell apart two tasks of one column that ran a case of
+ * the same name, kept only when every case of every column has the axis. An axis only some columns run cannot pair
+ * the columns, so it is averaged inside the columns that have it.
+ */
+function rowAxes(columns: readonly (readonly CaseEntry[])[]): string[] {
+  const differing = new Set<string>()
+  for (const entries of columns) {
+    const byName = new Map<string, CaseEntry[]>()
+    for (const entry of entries) {
+      byName.set(entry.caseName, [...byName.get(entry.caseName) ?? [], entry])
+    }
+    for (const list of byName.values()) {
+      for (const key of new Set(list.flatMap(entry => Object.keys(entry.values)))) {
+        if (new Set(list.map(entry => entry.values[key])).size > 1)
+          differing.add(key)
+      }
+    }
+  }
+  return [...differing].filter(key => columns.every(entries => entries.every(entry => key in entry.values))).sort(compareNatural)
+}
+
+/** States of pooled cells, the one that most needs attention first: a pooled cell shows the worst of its cases. */
+const STATE_SEVERITY: readonly ComparisonCell['state'][] = ['errored', 'timeout', 'failed', 'unfinished', 'running', 'requeued', 'skipped', 'passed']
 
 /**
  * How much of its task a run measured (see `cellCoverageSchema`): cases with a result are `passed` and `failed`;
@@ -277,6 +356,47 @@ function matches(handle: RunHandle, filter: { project: string, workspace: string
   }
   const item = toRunListItem(handle, now)
   return item.workspaceId === filter.workspace && (item.projectSegment === filter.project || item.projectIds.includes(filter.project))
+}
+
+/** Last finite number each metric recorded for the case in the given round (or without a round). */
+function numericMetrics(reduced: ReducedCase | undefined, roundIndex: number | undefined): Record<string, number> {
+  const values: Record<string, number> = {}
+  for (const entry of reduced?.metrics ?? []) {
+    if (entry.roundIndex != null && roundIndex != null && entry.roundIndex !== roundIndex)
+      continue
+    if (typeof entry.value === 'number' && Number.isFinite(entry.value))
+      values[entry.name] = entry.value
+  }
+  return values
+}
+
+/**
+ * One cell from the cells of tasks averaged into it: the mean of every score, metric, and duration over the cells that
+ * have it, and the worst state.
+ */
+function poolCells(cells: readonly ComparisonCell[]): ComparisonCell {
+  if (cells.length === 1)
+    return cells[0]!
+  const mean = (records: readonly Record<string, number>[]) => {
+    const sums = new Map<string, { n: number, sum: number }>()
+    for (const record of records) {
+      for (const [name, value] of Object.entries(record)) {
+        const current = sums.get(name) ?? { n: 0, sum: 0 }
+        sums.set(name, { n: current.n + 1, sum: current.sum + value })
+      }
+    }
+    return Object.fromEntries([...sums].map(([name, { n, sum }]) => [name, sum / n]))
+  }
+  const durations = cells.flatMap(cell => cell.durationMs == null ? [] : [cell.durationMs])
+  return {
+    counted: mean(cells.map(cell => cell.counted)),
+    ...(durations.length === 0 ? {} : { durationMs: durations.reduce((sum, value) => sum + value, 0) / durations.length }),
+    metrics: mean(cells.map(cell => cell.metrics)),
+    pooled: cells.length,
+    roundCount: Math.max(...cells.map(cell => cell.roundCount)),
+    scores: { unscored: Object.assign({}, ...cells.map(cell => cell.scores.unscored)), values: mean(cells.map(cell => cell.scores.values)) },
+    state: STATE_SEVERITY.find(state => cells.some(cell => cell.state === state)) ?? cells[0]!.state,
+  }
 }
 
 function primaryMean(scoring: TaskNode['scoring']): null | number {

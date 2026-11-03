@@ -131,7 +131,7 @@ function pointTitle(cell: MatrixCell, point: MatrixCell['history'][number]): str
     <template #score>
       <span
         v-if="baselineDelta !== undefined"
-        :class="['text-xs font-medium tabular-nums', props.comparison!.clear ? (baselineDelta >= 0 ? 'text-primary-700 dark:text-primary-300' : '[color:var(--series-3)]') : 'muted']"
+        :class="['text-xs font-medium tabular-nums', props.comparison!.clear ? (baselineDelta >= 0 ? 'text-primary-700 dark:text-primary-300' : '[color:var(--series-1-opposite)]') : 'muted']"
         :title="t(props.comparison!.clear ? 'matrix.baseline.clear' : 'matrix.baseline.noise')"
         data-testid="matrix-cell-baseline-delta"
       >{{ baselineDelta > 0 ? '+' : baselineDelta < 0 ? '−' : '±' }}{{ Math.abs(baselineDelta).toFixed(1) }}</span>

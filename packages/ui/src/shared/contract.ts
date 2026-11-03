@@ -821,12 +821,29 @@ export const comparedRunSchema = v.object({
   durationMs: v.optional(v.number()),
   experimentId: v.string(),
   headline: v.nullable(headlineResultSchema),
+  /** Project segment of the run's report path, as `RunListItem.projectSegment`. */
+  project: v.string(),
   runKey: v.string(),
   startedAt: v.optional(v.string()),
   state: runStateSchema,
+  workspaceId: v.string(),
 })
 
 export const comparisonCellSchema = v.object({
+  /**
+   * Value the case counts with in each score of its task (see `countedScores`): a failed case counts 0, so means over
+   * these agree with the column's headline.
+   */
+  counted: v.record(v.string(), v.number()),
+  /** Case duration in ms, when the case ended. */
+  durationMs: v.optional(v.number()),
+  /** Numeric metrics the case recorded, the last value of each. */
+  metrics: v.record(v.string(), v.number()),
+  /**
+   * Tasks of the column averaged into this cell, when more than one: they differ only in a matrix axis the other
+   * columns do not have. Scores, metrics, and duration are then means, and the state is the worst one.
+   */
+  pooled: v.optional(v.number()),
   roundCount: v.number(),
   scores: caseScoresSchema,
   state: caseStateSchema,
@@ -841,14 +858,24 @@ export const comparisonResponseSchema = v.object({
     /** Graders that produced each score in the column's runs. */
     scoreGraders: scoreGradersSchema,
   })),
+  /** Latest `metric.defined` of each metric in the cells. */
+  metricDefinitions: v.array(metricDefinedDataSchema),
   /** Primary score the rows compare, when the columns share one. */
   primary: v.optional(v.string()),
-  /** Rows: one per case name; `cells[columnId]` is the case result in that column (latest run of the column). */
+  /**
+   * Rows: one per case name and variant; `cells[columnId]` is the case result in that column (latest run of the
+   * column).
+   */
   rows: v.array(v.object({
     caseName: v.string(),
     cells: v.record(v.string(), comparisonCellSchema),
     /** `true` when the case state or the primary score differs between columns. */
     changed: v.boolean(),
+    /**
+     * Matrix values (`context=none`) that tell apart the tasks of a column that ran a case of this name, on the axes
+     * every column has; absent when no such axis splits the case.
+     */
+    variant: v.optional(v.string()),
   })),
   /** Latest `score.defined` of each score in the cells. */
   scoreDefinitions: v.array(scoreDefinedDataSchema),
