@@ -35,8 +35,11 @@ export default {
     },
     meanValue: 'mean {value}',
     planeAria: 'Columns by {x} and {y}',
-    planeNote: 'Whiskers are 95% intervals of each mean over its cases. Hover a dot for its intervals; click to pin it.',
-    planeNoteFront: 'Whiskers are 95% intervals of each mean over its cases. Hover a dot for its intervals; click to pin it. Filled dots on the dashed line are the Pareto front: no other column beats them on both axes.',
+    planeNote: {
+      front: 'Filled dots on the dashed line are the Pareto front: no other column beats them on both axes.',
+      hover: 'Hover a dot for its intervals; click to pin it.',
+      whiskers: 'Whiskers are 95% intervals of each mean over its cases.',
+    },
     planeTitle: 'Two-axis distribution',
     points: '{n} pt',
     scale: {
@@ -55,6 +58,7 @@ export default {
       noise: 'Within noise of the baseline',
       worse: 'Worse than the baseline beyond noise',
     },
+    whiskers: 'Whiskers',
     winsLosses: '{wins} better · {losses} worse · {ties} equal of {n} cases',
     winsLossesShort: '{wins}↑ {losses}↓ {ties}=',
     x: 'X',

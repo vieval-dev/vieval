@@ -5,6 +5,8 @@ import { TooltipContent, TooltipPortal, TooltipRoot, TooltipTrigger } from 'reka
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import StateBadge from './StateBadge.vue'
+
 /** One axis of a compared column, as the card reads it. */
 export interface PointAxisReading {
   axis: CompareAxis
@@ -31,6 +33,8 @@ const props = defineProps<{
   label: string
   pinned: boolean
   readings: readonly PointAxisReading[]
+  /** The column's newest run is still running: its numbers move as cases settle. */
+  running?: boolean
 }>()
 const emit = defineEmits<{ baseline: [], hide: [], unpin: [] }>()
 const { t } = useI18n()
@@ -63,6 +67,7 @@ function barPosition(delta: PairedDelta, value: number): number {
 <template>
   <div :class="['grid gap-2.5 text-xs']" data-testid="compare-point-card">
     <div :class="['flex items-center gap-1 min-w-0']">
+      <StateBadge v-if="props.running" state="running" icon-only />
       <span :class="['font-semibold text-sm truncate']">{{ props.label }}</span>
       <span v-if="props.isBaseline" :class="['muted shrink-0']">· {{ t('compare.chart.baselineTag') }}</span>
       <template v-if="props.pinned">
