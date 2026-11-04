@@ -36,8 +36,11 @@ export default {
     },
     meanValue: '均值 {value}',
     planeAria: '各列在 {x} 和 {y} 上的位置',
-    planeNote: '误差线是每个均值基于其用例的 95% 置信区间。悬停查看区间，点击固定。',
-    planeNoteFront: '误差线是每个均值基于其用例的 95% 置信区间。悬停查看区间，点击固定。虚线上的实心点是帕累托前沿：没有其他列在两个轴上都比它们好。',
+    planeNote: {
+      front: '虚线上的实心点是帕累托前沿：没有其他列在两个轴上都比它们好。',
+      hover: '悬停查看区间，点击固定。',
+      whiskers: '误差线是每个均值基于其用例的 95% 置信区间。',
+    },
     planeTitle: '二维分布',
     points: '{n} 分',
     scale: {
@@ -56,6 +59,7 @@ export default {
       noise: '与基线的差距在噪声范围内',
       worse: '超出噪声范围，差于基线',
     },
+    whiskers: '误差线',
     winsLosses: '{n} 个用例中 {wins} 个更好 · {losses} 个更差 · {ties} 个持平',
     winsLossesShort: '{wins}↑ {losses}↓ {ties}=',
     x: 'X 轴',

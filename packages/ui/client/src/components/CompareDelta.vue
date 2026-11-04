@@ -15,6 +15,8 @@ export interface DeltaRow {
   hidden?: boolean
   href?: string
   label: string
+  /** The column's newest run is still running: a spinning ring beside its name. */
+  running?: boolean
   /** The column's own mean on the axis, shown next to its difference. */
   value: Interval
 }
@@ -32,7 +34,7 @@ export interface DeltaRow {
 const props = defineProps<{
   axis: CompareAxis
   /** The reference row, drawn first on the zero line with its own mean. */
-  baseline: { href?: string, label: string, value: Interval }
+  baseline: { href?: string, label: string, running?: boolean, value: Interval }
   /** Case name of each row key, for the case dots' tooltips. */
   caseLabels: ReadonlyMap<string, string>
   formatDelta: (value: number) => string
@@ -61,7 +63,10 @@ const ticks = computed(() => Math.max(2, Math.min(6, Math.floor((plotRight.value
 const scale = computed(() => {
   const reach = Math.max(1e-9, ...props.rows.filter(row => !row.hidden).flatMap(row => [Math.abs(row.delta.interval.low), Math.abs(row.delta.interval.high), ...row.delta.differences.map(difference => Math.abs(difference.value))]))
   // Clamped: a hidden outlier left out of the domain stays pinned at the edge instead of running off the chart.
-  return scaleLinear([-reach * 1.05, reach * 1.05], [plotLeft.value, plotRight.value]).nice(ticks.value).clamp(true)
+  // NOTICE: the domain is rounded for a fixed 6 ticks, not for the ticks this width shows: rounding for fewer ticks
+  // widened it (±40 pt became ±60 pt on a phone), so one difference looked smaller on a narrow screen. Only the tick
+  // labels thin out with the width.
+  return scaleLinear([-reach * 1.05, reach * 1.05], [plotLeft.value, plotRight.value]).nice(6).clamp(true)
 })
 
 /** Whether the interval is clear of zero, and if so whether the column is better by the axis's direction. */
@@ -95,6 +100,8 @@ function hoverCase(key: string, value: number, x: number, y: number): void {
         <a :href="props.baseline.href">
           <text :x="labelWidth" :y="rowHeight / 2 + 4" font-size="11" text-anchor="end" fill="var(--chart-text)" font-weight="600">{{ truncate(props.baseline.label) }}<title>{{ props.baseline.label }}</title></text>
         </a>
+        <!-- Still running: a spinning ring between the name and the plot, as the run state badges spin. -->
+        <circle v-if="props.baseline.running" :cx="labelWidth + 6" :cy="rowHeight / 2" r="3.5" fill="none" stroke="var(--mark-running)" stroke-width="1.5" stroke-dasharray="14 8" :class="['animate-spin origin-center [transform-box:fill-box]']" data-testid="compare-delta-running" />
         <circle :cx="scale(0)" :cy="rowHeight / 2" r="5" fill="var(--chart-surface)" stroke="var(--chart-text)" stroke-width="2" />
         <text :x="width - summaryWidth" :y="rowHeight / 2 + 4" font-size="11" fill="var(--chart-text)">
           <tspan font-weight="600">{{ props.formatValue(props.baseline.value.mean) }}</tspan>
@@ -107,6 +114,8 @@ function hoverCase(key: string, value: number, x: number, y: number): void {
         <a :href="row.href">
           <text :x="labelWidth" :y="rowHeight / 2 + 4" font-size="11" text-anchor="end" fill="var(--chart-text)" :class="[row.href && 'underline']">{{ truncate(row.label) }}<title>{{ row.label }}</title></text>
         </a>
+        <!-- Still running: a spinning ring between the name and the plot, as the run state badges spin. -->
+        <circle v-if="row.running" :cx="labelWidth + 6" :cy="rowHeight / 2" r="3.5" fill="none" stroke="var(--mark-running)" stroke-width="1.5" stroke-dasharray="14 8" :class="['animate-spin origin-center [transform-box:fill-box]']" data-testid="compare-delta-running" />
         <!-- Every case's difference, spread vertically by a stable offset so equal differences stay countable. -->
         <circle
           v-for="difference in row.delta.differences" :key="difference.key"

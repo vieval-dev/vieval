@@ -174,6 +174,10 @@ function columnHref(column: ComparisonResponse['columns'][number]) {
   const run = column.runs.at(-1)
   return run && view.value !== 'matrix' ? href({ name: 'run', runKey: run.runKey }) : undefined
 }
+/** A column whose newest run is still running: its means move as cases settle, and the charts say so. */
+function isRunning(column: ComparisonResponse['columns'][number]): boolean {
+  return column.runs.at(-1)?.state === 'running'
+}
 
 /** Scores, metrics, and the duration the charts can be read by (see {@link compareAxes}). */
 const axes = computed(() => (result.value == null ? [] : compareAxes(result.value)))
@@ -250,6 +254,8 @@ const axisOf = (name: string) => axes.value.find(axis => axis.name === name)
  * Scale of each axis of the plane: linear, or log when every column mean on the axis is above 0. A log pick that no
  * longer fits its axis (another axis chosen) reads as linear.
  */
+/** Whether the plane draws the 95% interval of each mean; without them its axes fit the means alone. */
+const showWhiskers = shallowRef(true)
 const pickedXScale = shallowRef<ScaleKind>('linear')
 const pickedYScale = shallowRef<ScaleKind>('linear')
 const logX = computed(() => xAxis.value != null && canLogScale(intervals.value.get(xAxis.value.name)?.values() ?? []))
@@ -270,7 +276,7 @@ const planePoints = computed<PlanePoint[]>(() => {
     const xi = intervals.value.get(x.name)?.get(column.id)
     const yi = intervals.value.get(y.name)?.get(column.id)
     const delta = { x: deltas.value.get(x.name)?.get(column.id), y: deltas.value.get(y.name)?.get(column.id) }
-    return xi == null || yi == null ? [] : [{ delta, href: columnHref(column), id: column.id, label: columnLabel(column), x: xi, y: yi }]
+    return xi == null || yi == null ? [] : [{ delta, href: columnHref(column), id: column.id, label: columnLabel(column), running: isRunning(column), x: xi, y: yi }]
   })
 })
 const front = computed(() => (xAxis.value == null || yAxis.value == null || xAxis.value === yAxis.value
@@ -285,17 +291,17 @@ const deltaRows = computed<DeltaRow[]>(() => {
   return (result.value?.columns ?? []).flatMap((column) => {
     const delta = deltas.value.get(y.name)?.get(column.id)
     const value = intervals.value.get(y.name)?.get(column.id)
-    return delta == null || value == null ? [] : [{ delta, hidden: hidden.value.has(column.id), href: columnHref(column), label: columnLabel(column), value }]
+    return delta == null || value == null ? [] : [{ delta, hidden: hidden.value.has(column.id), href: columnHref(column), label: columnLabel(column), running: isRunning(column), value }]
   }).sort((left, right) => sign * (left.delta.interval.mean - right.delta.interval.mean))
 })
 /** The baseline's own row of the difference chart: its mean on the y axis. */
 const deltaBaseline = computed(() => {
   const column = result.value?.columns.find(item => item.id === baseline.value)
   const value = yAxis.value == null || column == null ? undefined : intervals.value.get(yAxis.value.name)?.get(column.id)
-  return column == null || value == null ? undefined : { href: columnHref(column), label: columnLabel(column), value }
+  return column == null || value == null ? undefined : { href: columnHref(column), label: columnLabel(column), running: isRunning(column), value }
 })
 const caseLabels = computed(() => new Map((result.value?.rows ?? []).map(row => [rowKey(row), row.variant == null ? row.caseName : `${row.caseName} · ${row.variant}`])))
-const tableColumns = computed(() => (result.value?.columns ?? []).map(column => ({ href: columnHref(column), id: column.id, label: columnLabel(column) })))
+const tableColumns = computed(() => (result.value?.columns ?? []).map(column => ({ href: columnHref(column), id: column.id, label: columnLabel(column), running: isRunning(column) })))
 
 /**
  * Graders of the primary score per column, when they differ in kind, model, or version: the values then do not
@@ -474,26 +480,32 @@ const position = computed(() => ({ experiment: query.value.experiment, project: 
             <span :class="['ml-auto flex items-center gap-1 -my-1']" data-testid="compare-plane-toolbar">
               <ChoiceMenu v-if="logY" size="sm" :model-value="yScaleKind" :choices="scaleChoices" :label="t('compare.chart.scale.y')" test-id="compare-scale-y" @update:model-value="value => pickedYScale = value as ScaleKind" />
               <ChoiceMenu v-if="logX" size="sm" :model-value="xScaleKind" :choices="scaleChoices" :label="t('compare.chart.scale.x')" test-id="compare-scale-x" @update:model-value="value => pickedXScale = value as ScaleKind" />
+              <button
+                type="button" :class="['option-trigger gap-1! rounded-md! px-2! py-0.5! text-xs! font-normal']" :aria-pressed="showWhiskers"
+                data-testid="compare-whiskers" @click="showWhiskers = !showWhiskers"
+              >
+                <span :class="[showWhiskers ? 'i-mingcute-check-line' : 'i-mingcute-close-line', 'muted']" aria-hidden="true" />{{ t('compare.chart.whiskers') }}
+              </button>
             </span>
           </h2>
           <div class="p-3">
             <ComparePlane
-              :points="planePoints" :x="xAxis" :y="yAxis" :x-scale-kind="xScaleKind" :y-scale-kind="yScaleKind" :front="front" :baseline="baseline" :baseline-label="deltaBaseline?.label"
+              :points="planePoints" :x="xAxis" :y="yAxis" :x-scale-kind="xScaleKind" :y-scale-kind="yScaleKind" :whiskers="showWhiskers" :front="front" :baseline="baseline" :baseline-label="deltaBaseline?.label"
               :format-x="value => formatValue(value, xAxis!)" :format-y="value => formatValue(value, yAxis!)"
               :format-delta-x="value => formatDelta(value, xAxis!)" :format-delta-y="value => formatDelta(value, yAxis!)"
               @baseline="id => pickedBaseline = id" @hide="id => setHidden(id, true)"
             />
             <p :class="['mt-1 text-xs muted']">
-              {{ front.length > 0 ? t('compare.chart.planeNoteFront') : t('compare.chart.planeNote') }}
+              {{ [showWhiskers && t('compare.chart.planeNote.whiskers'), t('compare.chart.planeNote.hover'), front.length > 0 && t('compare.chart.planeNote.front')].filter(Boolean).join(' ') }}
             </p>
           </div>
         </section>
 
-        <section v-if="axes.length > 2" :class="['card mb-4 min-w-0']">
+        <section v-if="axes.length > 2" :class="['card mb-4 min-w-0 flex flex-col']">
           <h2 class="card-title">
             <span class="i-mingcute-table-2-line" aria-hidden="true" />{{ t('compare.chart.tableTitle') }}
           </h2>
-          <div class="p-2">
+          <div :class="['p-2 flex-1 min-h-0']">
             <CompareScoreTable
               :sort-by="yAxis.name" :axes="axes" :columns="tableColumns" :hidden="hidden" :baseline="baseline" :intervals="intervals" :deltas="deltas"
               :format-value="formatValue" :format-delta="formatDelta"
@@ -536,7 +548,9 @@ const position = computed(() => ({ experiment: query.value.experiment, project: 
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in rows" :key="rowKey(row)" :class="['border-b border-neutral-100/70 dark:border-neutral-900', row.changed && 'bg-amber-50/60 dark:bg-amber-950/30']">
+              <!-- A differing row is marked by its icon only: with several columns nearly every case differs somewhere, and a tint
+                   on every row (it previously had one) pointed at nothing. "Only differing" narrows the list instead. -->
+              <tr v-for="row in rows" :key="rowKey(row)" :class="['border-b border-neutral-100/70 dark:border-neutral-900']">
                 <td :class="['td mono text-xs break-all max-md:min-w-40']">
                   <span v-if="row.changed" class="i-mingcute-git-compare-line text-amber-600 mr-1" :title="t('compare.result.differs')" />{{ row.caseName }}<span v-if="row.variant" :class="['ml-1.5 font-sans muted']">{{ row.variant }}</span>
                 </td>

@@ -23,6 +23,8 @@ export interface PlanePoint {
   href?: string
   id: string
   label: string
+  /** The column's newest run is still running: a pulsing ring around its dot, and its card says so. */
+  running?: boolean
   x: Interval
   y: Interval
 }
@@ -50,6 +52,11 @@ const props = defineProps<{
   /** Ids on the Pareto front, ordered along x. */
   front: readonly string[]
   points: readonly PlanePoint[]
+  /**
+   * Draw the 95% interval of each mean. Without them the axes fit the means alone, so close columns spread out.
+   * @default true
+   */
+  whiskers?: boolean
   x: CompareAxis
   /**
    * `log` spreads values that span orders of magnitude (a 4 ms baseline beside 2.5 s rewrites); only for an axis whose
@@ -150,13 +157,18 @@ function useDomainTween(target: Ref<{ domain: [number, number], kind: ScaleKind 
 const xTicks = computed(() => Math.max(2, Math.min(6, Math.floor((width.value - margin.left - margin.right) / 90))))
 const xKind = computed<ScaleKind>(() => props.xScaleKind ?? 'linear')
 const yKind = computed<ScaleKind>(() => props.yScaleKind ?? 'linear')
-/** Domain each axis settles on: the nice linear domain, or the log domain. */
+/** The part of an interval the axes must show: all of it with whiskers, the mean alone without. */
+const fitted = (interval: Interval): Interval => (props.whiskers === false ? { ...interval, high: interval.mean, low: interval.mean } : interval)
+/**
+ * Domain each axis settles on: the nice linear domain, or the log domain. It is rounded for a fixed tick count, so it is
+ * the same on every screen; a narrow plane only shows fewer tick labels (see the domain NOTICE in `CompareDelta.vue`).
+ */
 const xTarget = computed(() => {
-  const intervals = props.points.map(point => point.x)
-  return { domain: xKind.value === 'log' ? logDomainOf(intervals, props.x) : scaleLinear(domainOf(intervals, props.x), [0, 1]).nice(xTicks.value).domain() as [number, number], kind: xKind.value }
+  const intervals = props.points.map(point => fitted(point.x))
+  return { domain: xKind.value === 'log' ? logDomainOf(intervals, props.x) : scaleLinear(domainOf(intervals, props.x), [0, 1]).nice(6).domain() as [number, number], kind: xKind.value }
 })
 const yTarget = computed(() => {
-  const intervals = props.points.map(point => point.y)
+  const intervals = props.points.map(point => fitted(point.y))
   return { domain: yKind.value === 'log' ? logDomainOf(intervals, props.y) : scaleLinear(domainOf(intervals, props.y), [0, 1]).nice(5).domain() as [number, number], kind: yKind.value }
 })
 const xDomain = useDomainTween(xTarget)
@@ -322,7 +334,7 @@ const crosshair = computed(() => {
  */
 const whiskerLabels = computed(() => {
   const mark = focused.value
-  if (mark == null)
+  if (mark == null || props.whiskers === false)
     return []
   const ends = [
     { key: 'x-low', left: xScale.value(mark.x.low), text: props.formatX(mark.x.low), top: mark.cy + 8, transform: 'translate(-50%, 0)' },
@@ -352,7 +364,7 @@ const pill = 'absolute rounded px-1 text-xs tabular-nums whitespace-nowrap point
       <path v-if="props.front.length > 1" :d="frontPath" fill="none" stroke="var(--series-1)" stroke-width="2" stroke-dasharray="4 4" opacity="0.55" pointer-events="none" />
 
       <!-- Whiskers first, so every dot and label is drawn over every whisker. -->
-      <g v-for="mark in marks" :key="`w${mark.id}`" :stroke="colorOf(mark.id)" stroke-width="1.5" pointer-events="none" :opacity="focusId == null || focusId === mark.id ? 0.35 : 0.1" :class="['transition-opacity']">
+      <g v-for="mark in props.whiskers === false ? [] : marks" :key="`w${mark.id}`" :stroke="colorOf(mark.id)" stroke-width="1.5" pointer-events="none" :opacity="focusId == null || focusId === mark.id ? 0.35 : 0.1" :class="['transition-opacity']">
         <line :x1="xScale(mark.x.low)" :x2="xScale(mark.x.high)" :y1="mark.cy" :y2="mark.cy" />
         <line :x1="xScale(mark.x.low)" :x2="xScale(mark.x.low)" :y1="mark.cy - 3" :y2="mark.cy + 3" />
         <line :x1="xScale(mark.x.high)" :x2="xScale(mark.x.high)" :y1="mark.cy - 3" :y2="mark.cy + 3" />
@@ -362,6 +374,7 @@ const pill = 'absolute rounded px-1 text-xs tabular-nums whitespace-nowrap point
       </g>
 
       <g v-for="mark in marks" :key="mark.id" :opacity="focusId == null || focusId === mark.id ? 1 : 0.35" :class="['transition-opacity cursor-pointer']" @mouseenter="isDesktop && (hovered = mark.id)" @mouseleave="hovered = undefined" @click="pin(mark.id)">
+        <circle v-if="mark.running" :cx="mark.cx" :cy="mark.cy" r="9" fill="none" stroke="var(--mark-running)" stroke-width="1.5" :class="['vv-pulse']" data-testid="compare-plane-running" />
         <circle v-if="mark.id === pinned" :cx="mark.cx" :cy="mark.cy" r="10" fill="none" :stroke="colorOf(mark.id)" stroke-width="2" opacity="0.5" />
         <!-- Front and baseline dots are filled, beaten ones hollow (filled with the card surface). -->
         <circle
@@ -408,7 +421,7 @@ const pill = 'absolute rounded px-1 text-xs tabular-nums whitespace-nowrap point
           <AnimatedContent>
             <div v-if="shown" :class="['w-72 max-w-[calc(100vw-2rem)]']">
               <ComparePointCard
-                :label="shown.mark.label" :href="shown.mark.href" :pinned="shown.pinned" :is-baseline="shown.mark.id === props.baseline"
+                :label="shown.mark.label" :running="shown.mark.running" :href="shown.mark.href" :pinned="shown.pinned" :is-baseline="shown.mark.id === props.baseline"
                 :baseline-label="props.baselineLabel" :readings="readingsOf(shown.mark)"
                 @unpin="pinned = undefined" @baseline="makeBaseline(shown.mark.id)" @hide="hide(shown.mark.id)"
               />
@@ -432,7 +445,7 @@ const pill = 'absolute rounded px-1 text-xs tabular-nums whitespace-nowrap point
           </DrawerDescription>
           <div v-if="pinnedPoint" :class="['overflow-y-auto min-h-0']">
             <ComparePointCard
-              :label="pinnedPoint.label" :href="pinnedPoint.href" pinned :is-baseline="pinnedPoint.id === props.baseline"
+              :label="pinnedPoint.label" :running="pinnedPoint.running" :href="pinnedPoint.href" pinned :is-baseline="pinnedPoint.id === props.baseline"
               :baseline-label="props.baselineLabel" :readings="readingsOf(pinnedPoint)"
               @unpin="pinned = undefined" @baseline="makeBaseline(pinnedPoint.id)" @hide="hide(pinnedPoint.id)"
             />
