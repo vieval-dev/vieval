@@ -12,19 +12,20 @@ import * as v from 'valibot'
 
 import { ViewerError } from './errors'
 
-const CONTENT_TYPES: Record<string, string> = {
+// Static overrides keep browser-active files and ambiguous extensions such as .ts out of inline serving.
+const CONTENT_TYPES: Record<string, string | { staticExtension: '.bin', type: string }> = {
   '.avif': 'image/avif',
   '.bmp': 'image/bmp',
-  '.css': 'text/css; charset=utf-8',
+  '.css': { staticExtension: '.bin', type: 'text/css; charset=utf-8' },
   '.csv': 'text/csv; charset=utf-8',
   '.flac': 'audio/flac',
   '.gif': 'image/gif',
-  '.htm': 'text/html; charset=utf-8',
-  '.html': 'text/html; charset=utf-8',
+  '.htm': { staticExtension: '.bin', type: 'text/html; charset=utf-8' },
+  '.html': { staticExtension: '.bin', type: 'text/html; charset=utf-8' },
   '.ico': 'image/x-icon',
   '.jpeg': 'image/jpeg',
   '.jpg': 'image/jpeg',
-  '.js': 'text/javascript; charset=utf-8',
+  '.js': { staticExtension: '.bin', type: 'text/javascript; charset=utf-8' },
   '.json': 'application/json',
   '.jsonl': 'application/jsonl',
   '.log': 'text/plain; charset=utf-8',
@@ -40,15 +41,15 @@ const CONTENT_TYPES: Record<string, string> = {
   '.opus': 'audio/opus',
   '.pdf': 'application/pdf',
   '.png': 'image/png',
-  '.svg': 'image/svg+xml',
+  '.svg': { staticExtension: '.bin', type: 'image/svg+xml' },
   '.toml': 'application/toml',
-  '.ts': 'text/plain; charset=utf-8',
+  '.ts': { staticExtension: '.bin', type: 'text/plain; charset=utf-8' },
   '.tsv': 'text/tab-separated-values; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8',
   '.wav': 'audio/wav',
   '.webm': 'video/webm',
   '.webp': 'image/webp',
-  '.xml': 'application/xml',
+  '.xml': { staticExtension: '.bin', type: 'application/xml' },
   '.yaml': 'application/yaml',
   '.yml': 'application/yaml',
 }
@@ -112,7 +113,8 @@ export function classifyPreview(contentType: string, name: string): PreviewKind 
  * Content type from a file name, `application/octet-stream` when unknown.
  */
 export function contentTypeFromName(name: string): string {
-  return CONTENT_TYPES[extname(name).toLowerCase()] ?? 'application/octet-stream'
+  const entry = CONTENT_TYPES[extname(name).toLowerCase()]
+  return typeof entry === 'string' ? entry : entry?.type ?? 'application/octet-stream'
 }
 
 /**
@@ -295,6 +297,21 @@ export async function resolveInsideRoot(root: string, requestedPath: string): Pr
     throw new ViewerError(403, 'Path is outside the allowed root.')
   }
   return realTarget
+}
+
+/**
+ * Normalizes an attachment's extension for hosts that infer the MIME type from its filename.
+ *
+ * Before:
+ * - "recording.OPUS", "preview.html", "trace.unknown"
+ *
+ * After:
+ * - ".opus", ".bin", ".bin"
+ */
+export function staticFileExtension(name: string): string {
+  const extension = extname(name).toLowerCase()
+  const entry = CONTENT_TYPES[extension]
+  return typeof entry === 'string' ? extension : entry?.staticExtension ?? '.bin'
 }
 
 /**

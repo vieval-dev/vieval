@@ -7,7 +7,7 @@ import { defineQuery, useQuery } from '@pinia/colada'
 import { useDocumentVisibility, useIntervalFn } from '@vueuse/core'
 import { computed, watch } from 'vue'
 
-import { api } from '../api'
+import { api, isPublishedReport } from '../api'
 import { mergeMatrices } from '../labels'
 import { headlineValue } from '../scores'
 
@@ -124,9 +124,11 @@ export function sumCounts(runs: readonly RunListItem[]): CaseCounts {
  */
 export const useCatalog = defineQuery((): Catalog => {
   const query = useQuery({ key: RUNS_KEY, query: () => api.runs() })
-  const polling = useIntervalFn(() => void query.refetch(), REFRESH_MS)
+  const polling = useIntervalFn(() => void query.refetch(), REFRESH_MS, { immediate: !isPublishedReport })
   // A hidden tab does not poll; it re-reads the runs once it is shown again.
   watch(useDocumentVisibility(), (visibility) => {
+    if (isPublishedReport)
+      return
     if (visibility === 'hidden') {
       polling.pause()
       return

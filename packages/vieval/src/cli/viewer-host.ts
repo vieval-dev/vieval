@@ -21,6 +21,30 @@ export const DEFAULT_VIEWER_PORT = 51204
  */
 export const DEFAULT_VIEWER_HOST = '127.0.0.1'
 
+/** Selection and destination for publishing completed runs. */
+export interface ExportReportOptions {
+  /** Extra directories to allow for linked evidence. @default [] */
+  evidenceRoots?: string[]
+  /** Publish external evidence linked by the selected runs. @default false */
+  includeEvidence?: boolean
+  /** Directory to create for the static site. */
+  output: string
+  /** Roots to search for reports. */
+  reportRoots: string[]
+  /** Exact run keys to publish. @default All supported completed runs */
+  runKeys?: string[]
+}
+
+/** Summary of the static site written by the exporter. */
+export interface ExportReportResult {
+  /** Number of artifacts or evidence entries that could not be included. */
+  omittedFiles: number
+  /** Absolute path of the static site. */
+  output: string
+  /** Runs included in the site. */
+  runKeys: string[]
+}
+
 /**
  * What an external host receives once a run's event bus exists, before the first event is emitted.
  */
@@ -135,6 +159,8 @@ export interface ViewerHost {
  * Module shape `@vieval/ui` must export.
  */
 export interface ViewerModule {
+  /** Exports completed reports as a portable Viewer site. */
+  exportReport?: (options: ExportReportOptions) => Promise<ExportReportResult>
   startViewer: (options: StartViewerOptions) => Promise<ViewerHost>
 }
 
@@ -155,10 +181,10 @@ export interface ViewerModule {
  * Throws:
  * - when the package is not installed or does not export `startViewer`
  */
-export async function importViewer(baseDirectory: string, packageName: string = VIEWER_PACKAGE_NAME): Promise<ViewerModule> {
+export async function importViewer(baseDirectory: string, packageName: string = VIEWER_PACKAGE_NAME, command = '--with-viewer'): Promise<ViewerModule> {
   const loaded = await importFromProject(baseDirectory, packageName) ?? await importFromVieval(packageName)
   if (loaded == null) {
-    throw new Error(`--with-viewer requires the "${packageName}" package. Install it next to your vieval config, for example: pnpm add -D ${packageName}`)
+    throw new Error(`${command} requires the "${packageName}" package. Install it next to your vieval config, for example: pnpm add -D ${packageName}`)
   }
 
   if (!isViewerModule(loaded)) {

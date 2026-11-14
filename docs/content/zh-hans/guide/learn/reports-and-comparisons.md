@@ -117,6 +117,14 @@ vieval report attempts --config vieval.config.ts
 
 `attempts` 按时间从新到旧列出报告目录中的尝试：每个实验和尝试一行，显示涉及的工作区、通过、失败和没有结果的用例数，以及执行成功率。"←" 标记 `vieval run --resume` 不指定标识时会继续的那次尝试；备注列显示该尝试继续自哪次尝试、是否被中断，以及没来得及写入摘要就被终止的运行。可以传入报告目录，或用 `--config` 列出配置文件旁边的报告；用 `--experiment` 和 `--workspace` 筛选，用 `--format table|json` 选择输出格式。
 
+## 分享报告
+
+```bash [终端]
+vieval report export .vieval/reports --output report-site
+```
+
+将 `report-site` 部署到静态托管服务后，即可分享链接。
+
 ## 比较两组已有报告
 
 比较命令的第一个目录是基线，第二个目录是候选方案：

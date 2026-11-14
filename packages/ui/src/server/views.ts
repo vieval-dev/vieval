@@ -1,7 +1,6 @@
 import type {
   ArtifactDescriptor,
   CaseDetail,
-  LogsResponse,
   MetricsResponse,
   ProgressResponse,
   RunSnapshot,
@@ -48,20 +47,6 @@ export async function buildCaseDetail(handle: RunHandle, evidence: EvidenceServi
     scoreRecords: reduced.scoreRecords.map(entry => ({ ...entry })),
     taskDisplayName: reducer.tasks.get(taskId)?.displayName ?? taskId,
   }
-}
-
-/**
- * Console output (`case.output`) of a run, split into lines and paged.
- */
-export function buildLogs(handle: RunHandle, query: { caseId?: string, limit: number, offset: number, round?: number, stream?: string, taskId?: string }): LogsResponse {
-  const lines = handle.reducer().logs.filter(line =>
-    (query.taskId == null || line.taskId === query.taskId)
-    && (query.caseId == null || line.caseId === query.caseId)
-    && (query.stream == null || line.stream === query.stream)
-    && (query.round == null || line.roundIndex === query.round))
-  const slice = lines.slice(query.offset, query.offset + query.limit)
-  const nextOffset = query.offset + slice.length
-  return { lines: slice, nextOffset: nextOffset < lines.length ? nextOffset : null, total: lines.length }
 }
 
 /**
@@ -190,22 +175,18 @@ export function buildSnapshot(handle: RunHandle, evidence: EvidenceService, now:
   const summary = handle.summary()
   const tasks = buildTaskNodes(reducer, key => counts.get(key) ?? 0)
   return {
-    current: currentPosition(reducer, now),
+    ...buildProgress(handle, now),
     endedAt: run.endedAt,
     eventCounts: { ...reducer.eventCounts },
     headline: resolveTaskHeadline(tasks),
     identity: reducer.identity() ?? { attemptId: 'unknown-attempt', experimentId: 'unknown-experiment', runId: handle.runKey, workspaceId: 'unknown-workspace' },
     interruptSignal: run.interruptSignal ?? summary?.interruptSignal,
     parseErrors: handle.parseErrors(),
-    progress: estimateProgress(reducer, now),
     projects: buildProjectNodes(reducer),
-    runKey: handle.runKey,
     scoreDefinitions: [...reducer.scoreDefinitions.values()],
-    seq: reducer.seq(),
     seqGaps: reducer.seqGaps(),
     source: handle.source(),
     startedAt: run.startedAt,
-    state: handle.state(now),
     summary: summary == null
       ? undefined
       : {

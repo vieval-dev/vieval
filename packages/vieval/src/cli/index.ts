@@ -7,6 +7,7 @@ import { runReportAnalyzeCli } from './report-analyze'
 import { runReportAttemptsCli } from './report-attempts'
 import { runReportCompareCli } from './report-case-compare'
 import { runReportCasesCli } from './report-cases'
+import { runReportExportCli } from './report-export'
 import { runReportIndexCli } from './report-index'
 import { runViewerCli } from './viewer'
 
@@ -16,7 +17,7 @@ export type { CliRunOutput, RunVievalCliOptions } from './run'
 export { runVievalCli } from './run'
 export type { ParsedViewerCliArguments, ViewerCliRuntime } from './viewer'
 export { parseViewerCliArguments, runViewerCli } from './viewer'
-export type { RunReadyContext, RunReadyDisposer, RunReadyHook, StartViewerOptions, ViewerHost, ViewerModule } from './viewer-host'
+export type { ExportReportOptions, ExportReportResult, RunReadyContext, RunReadyDisposer, RunReadyHook, StartViewerOptions, ViewerHost, ViewerModule } from './viewer-host'
 export { importViewer, VIEWER_PACKAGE_NAME } from './viewer-host'
 
 type Command = 'report' | 'run' | 'viewer'
@@ -44,6 +45,7 @@ const topLevelHelpText = `
     $ vieval report analyze .vieval/reports/my-run
     $ vieval report attempts --config vieval.config.ts
     $ vieval report index .vieval/reports --output .vieval/reports/index/runs.jsonl
+    $ vieval report export .vieval/reports --output report-site
     $ vieval viewer .vieval/reports
 `
 
@@ -119,6 +121,11 @@ export async function runTopLevelCli(argv: readonly string[]): Promise<void> {
   if (parsed.command === 'report') {
     const reportSubcommand = parsed.commandArgv[0]
 
+    if (reportSubcommand === 'export') {
+      await runReportExportCli(parsed.commandArgv.slice(1))
+      return
+    }
+
     if (reportSubcommand === 'analyze') {
       await runReportAnalyzeCli(parsed.commandArgv)
       return
@@ -144,7 +151,7 @@ export async function runTopLevelCli(argv: readonly string[]): Promise<void> {
       return
     }
 
-    throw new Error(`Unsupported vieval report command "${reportSubcommand ?? '(none)'}". Expected "analyze", "attempts", "index", "cases", or "compare".`)
+    throw new Error(`Unsupported vieval report command "${reportSubcommand ?? '(none)'}". Expected "analyze", "attempts", "index", "cases", "compare", or "export".`)
   }
 
   if (parsed.command === 'viewer') {
