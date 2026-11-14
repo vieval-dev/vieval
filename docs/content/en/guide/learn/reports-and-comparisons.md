@@ -95,6 +95,14 @@ vieval report attempts --config vieval.config.ts
 
 `attempts` lists the attempts in a report root, newest first: per experiment and attempt, the workspaces, the passed, failed, and no-result case counts, and the completion rate. "←" marks the attempt that `vieval run --resume` continues without an id; notes show which attempt an attempt resumed, interrupts, and runs killed before they wrote a summary. Pass a report root, or `--config` to list the reports next to it; filter with `--experiment` and `--workspace`, and choose `--format table|json`.
 
+## Share reports
+
+```bash [Terminal]
+vieval report export .vieval/reports --output report-site
+```
+
+Deploy `report-site` to a static host, then share the URL.
+
 ## Compare two existing report sets
 
 The report comparison command requires a left baseline and a right candidate:
