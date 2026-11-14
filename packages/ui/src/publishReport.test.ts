@@ -1,3 +1,4 @@
+import type { CaseDetail } from './shared/contract'
 import type { PublishedCatalog, PublishedComparison, PublishedRun } from './shared/publishedReport'
 
 import { appendFile, mkdir, readFile, rename, symlink, writeFile } from 'node:fs/promises'
@@ -45,6 +46,9 @@ describe('static report publication', () => {
     await appendFile(join(reportRoot, OSWORLD_RUNS.running, 'events.jsonl'), `${continuation.join('\n')}\n${JSON.stringify(ended)}\n`)
     const live = createTestApp({ reportRoots: [reportRoot], vievalDirectory })
     const expected = await live.json<unknown>(`/api/compare/runs?runs=${archiveKey},${candidateKey}`)
+    const caseQuery = new URLSearchParams({ caseId, taskId: OSWORLD_TASK_ID })
+    const localDetail = await live.json<CaseDetail>(`/api/runs/${archiveKey}/case?${caseQuery}`)
+    const localTimeline = await live.json<unknown>(`/api/runs/${archiveKey}/timeline?${caseQuery}`)
     live.store.close()
 
     const result = await exportReport({ includeEvidence: true, output, reportRoots: [reportRoot] })
@@ -58,7 +62,10 @@ describe('static report publication', () => {
     expect(catalog.runs[archiveIndex].reportRoot).toBeNull()
     expect(await readFile(join(output, 'index.html'), 'utf8')).toContain('name="vieval-report" content="static"')
     const report = JSON.parse(await readFile(join(output, runDataPath(archiveIndex, 'run')), 'utf8')) as PublishedRun
-    const { detail, externalLogs } = report.tasks[OSWORLD_TASK_ID].cases[caseId]
+    const { detail, externalLogs, timeline } = report.tasks[OSWORLD_TASK_ID].cases[caseId]
+    // Publishing changes file references; the report data comes from the same builders as the Viewer API.
+    expect(detail).toEqual({ ...localDetail, artifacts: detail.artifacts, evidence: detail.evidence })
+    expect(timeline).toEqual(localTimeline)
     expect(detail.input).toMatchObject({ task: { id: '06fe7178-4491-4589-810f-2e2bc9502122' } })
     expect(detail.scoreRecords[0].record).toEqual({ name: 'osworld.success', value: 0 })
     expect(detail.artifacts.map(artifact => [

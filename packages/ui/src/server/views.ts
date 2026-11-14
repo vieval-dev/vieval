@@ -175,22 +175,18 @@ export function buildSnapshot(handle: RunHandle, evidence: EvidenceService, now:
   const summary = handle.summary()
   const tasks = buildTaskNodes(reducer, key => counts.get(key) ?? 0)
   return {
-    current: currentPosition(reducer, now),
+    ...buildProgress(handle, now),
     endedAt: run.endedAt,
     eventCounts: { ...reducer.eventCounts },
     headline: resolveTaskHeadline(tasks),
     identity: reducer.identity() ?? { attemptId: 'unknown-attempt', experimentId: 'unknown-experiment', runId: handle.runKey, workspaceId: 'unknown-workspace' },
     interruptSignal: run.interruptSignal ?? summary?.interruptSignal,
     parseErrors: handle.parseErrors(),
-    progress: estimateProgress(reducer, now),
     projects: buildProjectNodes(reducer),
-    runKey: handle.runKey,
     scoreDefinitions: [...reducer.scoreDefinitions.values()],
-    seq: reducer.seq(),
     seqGaps: reducer.seqGaps(),
     source: handle.source(),
     startedAt: run.startedAt,
-    state: handle.state(now),
     summary: summary == null
       ? undefined
       : {

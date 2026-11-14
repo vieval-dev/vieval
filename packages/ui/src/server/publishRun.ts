@@ -11,7 +11,7 @@ import { fileKey } from '../shared/publishedReport'
 import { ViewerError } from './errors'
 import { isAllowedPath, isInside, listTree, resolveInsideRoot, staticFileExtension } from './files'
 import { buildOtelLogs, buildOtelMetrics, buildOtelTraces } from './otel'
-import { buildCaseDetail, buildMetrics, buildProgress, buildScores, buildSnapshot, buildTimeline, findCase, listArtifacts } from './views'
+import { buildCaseDetail, buildMetrics, buildScores, buildSnapshot, buildTimeline, findCase, listArtifacts } from './views'
 
 /**
  * Materializes a completed run and copies the files that its static Viewer can open.
@@ -29,6 +29,7 @@ export async function publishRun(handle: RunHandle, evidence: EvidenceService, o
   const { at, includeEvidence, output, publicDir } = options
   const reducer = handle.reducer()
   const snapshot = buildSnapshot(handle, evidence, at)
+  const { current, progress, runKey, seq, state } = snapshot
   const files: PublishedRun['files'] = {}
   const omitted: PublishedRun['omitted'] = []
   const evidenceViews: PublishedRun['evidenceViews'] = Object.create(null)
@@ -153,7 +154,7 @@ export async function publishRun(handle: RunHandle, evidence: EvidenceService, o
     metrics: buildMetrics(handle, {}),
     omitted,
     otel: { logs: buildOtelLogs(handle), metrics: buildOtelMetrics(handle), traces: buildOtelTraces(handle) },
-    progress: buildProgress(handle, at),
+    progress: { current, progress, runKey, seq, state },
     scores: buildScores(handle),
     snapshot,
     tasks,
