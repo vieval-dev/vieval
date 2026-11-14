@@ -38,7 +38,7 @@ export interface PublishedRun {
 }
 
 /** Inspection views of a task and its individual cases. */
-export interface PublishedTask {
+interface PublishedTask {
   /** Detail views indexed by case ID. */
   cases: Record<string, { detail: CaseDetail, externalLogs?: ExternalLogsResponse, timeline: TimelineResponse }>
   /** Full metric series and retry timeline for the task. */
@@ -47,6 +47,7 @@ export interface PublishedTask {
 }
 
 export const CATALOG_PATH = 'report/catalog.json'
+export const TELEMETRY_SIGNALS = ['logs', 'metrics', 'traces'] as const
 
 /** Identifies one file within a run, including the evidence link when applicable. */
 export function fileKey(path: string, linkId?: string): string {
@@ -59,6 +60,6 @@ export function runDataPath(index: number, kind: 'comparison' | 'run'): string {
 }
 
 /** Identifies the optional raw telemetry document of a published run. */
-export function telemetryPath(index: number, signal: 'logs' | 'metrics' | 'traces'): string {
+export function telemetryPath(index: number, signal: (typeof TELEMETRY_SIGNALS)[number]): string {
   return `report/otel/${index}/${signal}.json`
 }

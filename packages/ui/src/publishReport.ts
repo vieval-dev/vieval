@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 
 import { isAllowedPath, isInside } from './server/files'
 import { createRunStore, toRunListItem } from './server/store'
-import { CATALOG_PATH, runDataPath, telemetryPath } from './shared/publishedReport'
+import { CATALOG_PATH, runDataPath, TELEMETRY_SIGNALS, telemetryPath } from './shared/publishedReport'
 
 /**
  * Builds a static Viewer site for completed reports.
@@ -94,7 +94,7 @@ export async function exportReport(options: ExportReportOptions): Promise<Export
     const routes = ['/index.html', `/${CATALOG_PATH}`, ...runs.flatMap((_, index) => [
       `/${runDataPath(index, 'run')}`,
       `/${runDataPath(index, 'comparison')}`,
-      ...(['logs', 'metrics', 'traces'] as const).map(signal => `/${telemetryPath(index, signal)}`),
+      ...TELEMETRY_SIGNALS.map(signal => `/${telemetryPath(index, signal)}`),
     ])]
     const { copyPublicAssets, createNitro, prepare, prerender } = await import('nitro/builder')
     const nitro = await createNitro({

@@ -5,11 +5,11 @@ import type { RunHandle } from './store'
 
 import { createHash } from 'node:crypto'
 import { copyFile } from 'node:fs/promises'
-import { basename, extname, join } from 'node:path'
+import { basename, join } from 'node:path'
 
 import { fileKey } from '../shared/publishedReport'
 import { ViewerError } from './errors'
-import { isAllowedPath, isInside, listTree, resolveInsideRoot } from './files'
+import { isAllowedPath, isInside, listTree, resolveInsideRoot, staticFileExtension } from './files'
 import { buildOtelLogs, buildOtelMetrics, buildOtelTraces } from './otel'
 import { buildCaseDetail, buildMetrics, buildProgress, buildScores, buildSnapshot, buildTimeline, findCase, listArtifacts } from './views'
 
@@ -43,11 +43,8 @@ export async function publishRun(handle: RunHandle, evidence: EvidenceService, o
       if (isInside(output, source) || isInside(source, output))
         throw new Error('Export output must not overlap linked files.')
 
-      // Static hosts infer the type by extension. Use .bin for active and unknown formats.
-      const extension = extname(path).toLowerCase()
-      const passive = ['.avif', '.bmp', '.csv', '.flac', '.gif', '.ico', '.jpeg', '.jpg', '.json', '.jsonl', '.log', '.m4a', '.md', '.mov', '.mp3', '.mp4', '.ndjson', '.oga', '.ogg', '.ogv', '.pdf', '.png', '.toml', '.tsv', '.txt', '.wav', '.webm', '.webp', '.yaml', '.yml']
       const name = createHash('sha256').update(JSON.stringify([handle.runKey, key])).digest('hex')
-      const target = `files/${name}${passive.includes(extension) ? extension : '.bin'}`
+      const target = `files/${name}${staticFileExtension(path)}`
       await copyFile(source, join(publicDir, target))
       files[key] = target
     }
@@ -59,8 +56,8 @@ export async function publishRun(handle: RunHandle, evidence: EvidenceService, o
     }
   }
 
-  function portablePreview<T extends { path: string, previewKind?: PreviewKind }>(item: T, linkId?: string): T {
-    return item.previewKind === 'html' || (item.previewKind === 'image' && files[fileKey(item.path, linkId)]?.endsWith('.bin'))
+  function portablePreview<T extends { path: string, previewKind?: PreviewKind }>(item: T): T {
+    return item.previewKind === 'html' || (item.previewKind === 'image' && staticFileExtension(item.path) === '.bin')
       ? { ...item, previewKind: 'binary' }
       : item
   }
@@ -71,10 +68,11 @@ export async function publishRun(handle: RunHandle, evidence: EvidenceService, o
     : await isAllowedPath([handle.reportDirectory], artifactRoot)
   const artifacts = []
   for (const artifact of await listArtifacts(handle, {})) {
-    if (!root?.allowed || !root.exists)
+    if (!root?.allowed || !root.exists) {
       omitted.push({ path: artifact.path, reason: 'Run has no allowed artifact directory.' })
-    else
-      await publishFile(root.realPath, artifact.path)
+      continue
+    }
+    await publishFile(root.realPath, artifact.path)
     if (files[fileKey(artifact.path)] != null)
       artifacts.push(portablePreview(artifact))
   }
@@ -112,7 +110,7 @@ export async function publishRun(handle: RunHandle, evidence: EvidenceService, o
     const entries = tree.entries.filter(entry => entry.kind !== 'file' || files[fileKey(entry.path, link.id)] != null)
     evidenceViews[link.id] = {
       timeline: timeline == null ? undefined : { ...timeline, frames: timeline.frames.filter(frame => files[fileKey(frame.path, link.id)] != null) },
-      tree: { ...tree, entries: entries.map(entry => portablePreview(entry, link.id)) },
+      tree: { ...tree, entries: entries.map(portablePreview) },
     }
   }
 
@@ -123,7 +121,7 @@ export async function publishRun(handle: RunHandle, evidence: EvidenceService, o
       const detail = await buildCaseDetail(handle, evidence, task.id, caseId)
       const caseEvidence = links.filter(link => link.taskId === task.id && link.caseId === caseId)
       let externalLogs: ExternalLogsResponse | undefined
-      if (includeEvidence && caseEvidence.some(link => link.allowed)) {
+      if (caseEvidence.some(link => link.allowed)) {
         const reduced = findCase(handle, task.id, caseId)
         let offset: null | number = 0
         while (offset != null) {

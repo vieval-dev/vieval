@@ -10,7 +10,7 @@ import { createEvidenceService } from './server/evidence'
 import { isAllowedPath } from './server/files'
 import { publishRun } from './server/publishRun'
 import { createRunStore } from './server/store'
-import { CATALOG_PATH, runDataPath, telemetryPath } from './shared/publishedReport'
+import { CATALOG_PATH, runDataPath, TELEMETRY_SIGNALS, telemetryPath } from './shared/publishedReport'
 
 /** Build-time inputs sent to the isolated Nitro prerenderer. */
 export interface ReportPrerenderOptions {
@@ -78,7 +78,7 @@ export function createReportPrerender(options: ReportPrerenderOptions): H3 {
       const { item: _item, ...comparison } = projectComparisonRun(run, options.at)
       return comparison
     })
-    for (const signal of ['logs', 'metrics', 'traces'] as const) {
+    for (const signal of TELEMETRY_SIGNALS) {
       app.get(`/${telemetryPath(index, signal)}`, async () => {
         const run = await handle()
         if (run?.reportDirectory == null)

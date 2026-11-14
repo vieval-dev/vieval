@@ -28,6 +28,9 @@ describe('static report publication', () => {
     const artifactDir = join(artifacts, normalizePathSegment(OSWORLD_TASK_ID), normalizePathSegment(caseId))
     await mkdir(artifactDir, { recursive: true })
     await writeFile(join(artifactDir, 'preview.html'), '<html><title>Recorded output</title></html>')
+    await writeFile(join(artifactDir, 'diagram.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
+    await writeFile(join(artifactDir, 'recording.opus'), 'recorded audio')
+    await writeFile(join(artifactDir, 'trace.unknown'), 'unrecognized format')
     const privateFile = join(directory, 'outside.txt')
     await writeFile(privateFile, 'outside the artifact directory')
     await symlink(privateFile, join(artifactDir, 'outside.txt'))
@@ -58,8 +61,16 @@ describe('static report publication', () => {
     const { detail, externalLogs } = report.tasks[OSWORLD_TASK_ID].cases[caseId]
     expect(detail.input).toMatchObject({ task: { id: '06fe7178-4491-4589-810f-2e2bc9502122' } })
     expect(detail.scoreRecords[0].record).toEqual({ name: 'osworld.success', value: 0 })
-    expect(detail.artifacts.map(artifact => [artifact.name, artifact.previewKind])).toEqual([['preview.html', 'binary']])
-    expect(report.files[fileKey(detail.artifacts[0].path)]).toMatch(/\.bin$/)
+    expect(detail.artifacts.map(artifact => [
+      artifact.name,
+      artifact.previewKind,
+      report.files[fileKey(artifact.path)].split('.').at(-1),
+    ]).sort()).toEqual([
+      ['diagram.svg', 'binary', 'bin'],
+      ['preview.html', 'binary', 'bin'],
+      ['recording.opus', 'audio', 'opus'],
+      ['trace.unknown', 'binary', 'bin'],
+    ])
     expect(externalLogs?.lines).toHaveLength(24)
     const [link] = detail.evidence
     const frame = report.evidenceViews[link.id].timeline?.frames[0]
