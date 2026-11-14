@@ -50,6 +50,16 @@ vieval viewer reports-a reports-b --evidence-root /data/episodes --stale-after 3
 | `--evidence-root <dir>` | — | Extra directory that `*.evidence` metric paths may point into (repeatable). The `.vieval` directory above each report root is always allowed. |
 | `--stale-after <min>` | `60` | A run without an end event whose last event is older is shown as `stale`. |
 
+## Share a static report
+
+```sh
+vieval report export .vieval/reports --output report-site
+```
+
+Export requires Node.js 22.22 or later and a new output directory. Serve that directory over HTTP and share the URL of
+a run, case, or comparison. Repeat `--run <runKey>` to select runs. Attachments are included by default. Add
+`--include-evidence` to publish linked external evidence and `--evidence-root <dir>` to allow an additional directory.
+
 ## Programmatic use
 
 ```ts

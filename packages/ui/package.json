@@ -54,6 +54,8 @@
     "@napi-rs/image": "catalog:",
     "es-toolkit": "catalog:",
     "h3": "catalog:",
+    "nitro": "catalog:",
+    "rollup": "catalog:",
     "srvx": "catalog:",
     "thumbhash": "catalog:",
     "tinyglobby": "catalog:",

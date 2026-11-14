@@ -12,6 +12,7 @@ import { createViewerApp } from './server/app'
 import { createEvidenceService } from './server/evidence'
 import { createRunStore } from './server/store'
 
+export { exportReport } from './publishReport'
 export type { CreateViewerAppOptions } from './server/app'
 export { createViewerApp } from './server/app'
 export { createEventTail, parseEventLine } from './server/event-tail'

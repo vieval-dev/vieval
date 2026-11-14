@@ -454,6 +454,7 @@ vieval run [--config <path>] [--workspace <id>] [--project <name>] [--task <name
 vieval run --with-viewer [--port <port>] [--host <host>] [--open]
 vieval viewer [reportRoot...] [--port <port>] [--host <host>] [--open] [--evidence-root <dir>] [--stale-after <min>]
 vieval report analyze <report-directory>
+vieval report export [reportRoot...] --output <directory> [--run <runKey>] [--include-evidence]
 vieval report index <report-directory> [--output <path>] [--format table|json|jsonl]
 vieval report cases <report-directory> [--where <key=value>] [--group-by <key>] [--format table|json|jsonl]
 vieval report compare <left-report-directory> <right-report-directory> [--case-key <key>] [--score <name>] [--format table|json]

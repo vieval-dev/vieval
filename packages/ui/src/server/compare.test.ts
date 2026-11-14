@@ -1,11 +1,12 @@
-import type { MetricDefinition, RunListItem, ScoreDefinition, TaskNode } from '../shared/contract'
-import type { RunReducer } from '../shared/reduce'
+import type { ComparisonRun } from '../shared/compare'
+import type { MetricDefinition, RunListItem, ScoreDefinition } from '../shared/contract'
 
 import { describe, expect, it } from 'vitest'
 
 import { createEnvelopeFactory, createReducerHandle } from '../../test/helpers'
-import { buildTaskNodes, createRunReducer } from '../shared/reduce'
-import { buildMatrix, compareRuns } from './compare'
+import { buildMatrix, compareRuns } from '../shared/compare'
+import { createRunReducer } from '../shared/reduce'
+import { projectComparisonRun } from './comparisonRun'
 
 const TASK = 'evals%2Fdemo::default::run=tts%3Dofficial::eval=asr%3Dwhisper-1'
 const TASK_WITH_JUDGE = 'evals%2Fdemo::default::run=tts%3Dofficial::eval=judge%3Dgpt-5.5'
@@ -21,15 +22,8 @@ interface CaseResult {
   state: 'errored' | 'failed' | 'passed'
 }
 
-interface TestRun {
-  item: RunListItem
-  reducer: RunReducer
-  scoreDefinitions: ReadonlyMap<string, ScoreDefinition>
-  tasks: TaskNode[]
-}
-
 /** One ended run of {@link TASK}: the given cases (named `<prefix>-<index>`) settle, out of `total` expected ones. */
-function runOf(runKey: string, startedAt: string, total: number, results: readonly CaseResult[], options: { definitions?: ScoreDefinition[], metricDefinitions?: MetricDefinition[], prefix?: string, taskId?: string, taskIds?: string[] } = {}): TestRun {
+function runOf(runKey: string, startedAt: string, total: number, results: readonly CaseResult[], options: { definitions?: ScoreDefinition[], metricDefinitions?: MetricDefinition[], prefix?: string, taskId?: string, taskIds?: string[] } = {}): ComparisonRun {
   const { prefix = 'case', taskId = TASK } = options
   const envelope = createEnvelopeFactory(runKey)
   const reducer = createRunReducer()
@@ -76,7 +70,8 @@ function runOf(runKey: string, startedAt: string, total: number, results: readon
     state: 'ended',
     workspaceId: 'ws-a',
   }
-  return { item, reducer, scoreDefinitions: reducer.scoreDefinitions, tasks: buildTaskNodes(reducer, () => 0) }
+  const run = projectComparisonRun(createReducerHandle(reducer), Date.parse(startedAt))
+  return { ...run, item: { ...item, headline: run.item.headline } }
 }
 
 const scored = (count: number, value: number): CaseResult[] => Array.from({ length: count }, () => ({ scores: { [SCORE]: value }, state: 'passed' }))
@@ -257,7 +252,7 @@ describe('compareRuns', () => {
       { scores: { [SCORE]: 0 }, state: 'failed' },
     ], { definitions: [{ name: SCORE, primary: true }] })
 
-    const comparison = compareRuns([createReducerHandle(left.reducer), createReducerHandle(right.reducer)], Date.parse('2026-10-20T00:00:00.000Z'))
+    const comparison = compareRuns([left, right])
     expect(comparison.primary).toBe(SCORE)
     expect(comparison.rows.map(row => [row.caseName, row.changed])).toEqual([['case-0', false], ['case-1', true], ['case-2', false]])
     expect(comparison.rows[0].cells['run-a']).toEqual({ counted: { 'demo.other': 0, [SCORE]: 1 }, durationMs: 3000, metrics: {}, roundCount: 1, scores: { unscored: {}, values: { 'demo.other': 0, [SCORE]: 1 } }, state: 'passed' })
@@ -273,7 +268,7 @@ describe('compareRuns', () => {
     const left = runOf('run-a', '2026-10-19T06:36:00.000Z', 1, scored(1, 1), { definitions: [{ grader: { kind: 'model', model: 'judge-a' }, name: SCORE, primary: true }] })
     const right = runOf('run-b', '2026-10-19T07:00:00.000Z', 1, scored(1, 1), { definitions: [{ grader: { kind: 'model', model: 'judge-b' }, name: SCORE, primary: true }] })
 
-    const comparison = compareRuns([createReducerHandle(left.reducer), createReducerHandle(right.reducer)], Date.parse('2026-10-20T00:00:00.000Z'))
+    const comparison = compareRuns([left, right])
     expect(comparison.columns.map(column => column.scoreGraders)).toEqual([
       { [SCORE]: [{ kind: 'model', model: 'judge-a' }] },
       { [SCORE]: [{ kind: 'model', model: 'judge-b' }] },
@@ -288,7 +283,7 @@ describe('compareRuns', () => {
     const left = runOf('run-a', '2026-10-19T06:36:00.000Z', 1, [{ scores: { 'demo.a': 1 }, state: 'passed' }])
     const right = runOf('run-b', '2026-10-19T07:00:00.000Z', 1, [{ scores: { 'demo.b': 0 }, state: 'passed' }])
 
-    const comparison = compareRuns([createReducerHandle(left.reducer), createReducerHandle(right.reducer)], Date.parse('2026-10-20T00:00:00.000Z'))
+    const comparison = compareRuns([left, right])
     expect(comparison.primary).toBeUndefined()
     expect(comparison.rows.map(row => row.changed)).toEqual([false])
   })
@@ -313,7 +308,7 @@ describe('compareRuns', () => {
     const left = runOf('run-a', '2026-10-19T06:36:00.000Z', 1, scored(1, 1), { definitions: [{ name: SCORE, primary: true }], taskIds })
     const right = runOf('run-b', '2026-10-19T07:00:00.000Z', 1, scored(1, 0.5), { definitions: [{ name: SCORE, primary: true }], taskIds })
 
-    const comparison = compareRuns([createReducerHandle(left.reducer), createReducerHandle(right.reducer)], Date.parse('2026-10-20T00:00:00.000Z'))
+    const comparison = compareRuns([left, right])
     expect(comparison.rows.map(row => [row.caseName, row.variant])).toEqual([['case-0', 'context=home'], ['case-0', 'context=none']])
     expect(comparison.rows.map(row => row.cells['run-b']?.counted[SCORE])).toEqual([0.5, 0.5])
     expect(comparison.summary.rows).toBe(2)
@@ -337,7 +332,7 @@ describe('compareRuns', () => {
     const left = runOf('run-a', '2026-10-19T06:36:00.000Z', 1, scored(1, 1), { definitions: [{ name: SCORE, primary: true }], taskIds: shared })
     const right = runOf('run-b', '2026-10-19T07:00:00.000Z', 1, scored(1, 0.5), { definitions: [{ name: SCORE, primary: true }], taskIds: withPrompt })
 
-    const comparison = compareRuns([createReducerHandle(left.reducer), createReducerHandle(right.reducer)], Date.parse('2026-10-20T00:00:00.000Z'))
+    const comparison = compareRuns([left, right])
     expect(comparison.rows.map(row => row.variant)).toEqual(['context=home', 'context=none'])
     expect(comparison.rows.map(row => [row.cells['run-a']?.pooled, row.cells['run-b']?.pooled])).toEqual([[undefined, 2], [undefined, 2]])
     expect(comparison.rows.map(row => row.cells['run-b']?.counted[SCORE])).toEqual([0.5, 0.5])
@@ -352,7 +347,7 @@ describe('compareRuns', () => {
       metricDefinitions: [{ better: 'lower', name: 'demo.latency_ms', unit: 'ms' }],
     })
 
-    const comparison = compareRuns([createReducerHandle(run.reducer)], Date.parse('2026-10-20T00:00:00.000Z'))
+    const comparison = compareRuns([run])
     expect(comparison.rows[0].cells['run-a']?.metrics).toEqual({ 'demo.latency_ms': 120 })
     expect(comparison.metricDefinitions).toEqual([{ better: 'lower', name: 'demo.latency_ms', unit: 'ms' }])
   })
@@ -364,7 +359,7 @@ describe('compareRuns', () => {
   it('names the workspace and project of each compared run, so runs of several workspaces can be told apart', () => {
     const run = runOf('run-a', '2026-10-19T06:36:00.000Z', 1, scored(1, 1))
 
-    const comparison = compareRuns([createReducerHandle(run.reducer)], Date.parse('2026-10-20T00:00:00.000Z'))
+    const comparison = compareRuns([run])
     expect(comparison.columns[0].runs[0]?.project).toBe('demo')
     expect(comparison.columns[0].runs[0]?.workspaceId).toBe('ws-a')
   })

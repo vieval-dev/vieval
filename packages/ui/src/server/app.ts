@@ -1,6 +1,6 @@
 import type { H3Event } from 'h3'
 
-import type { EventsResponse, RunEvent, RunListItem, TreeResponse } from '../shared/contract'
+import type { EventsResponse, RunEvent, TreeResponse } from '../shared/contract'
 import type { EvidenceService } from './evidence'
 import type { RunHandle, RunStore } from './store'
 
@@ -10,15 +10,16 @@ import { join } from 'node:path'
 import { errorMessageFrom } from '@moeru/std'
 import { getQuery, getRouterParam, H3 } from 'h3'
 
+import { buildMatrix, compareAttempts, compareExperiments, compareRuns, inScope } from '../shared/compare'
 import { VIEWER_API_VERSION } from '../shared/contract'
-import { buildTaskNodes } from '../shared/reduce'
-import { buildMatrix, compareAttempts, compareExperiments, compareRuns } from './compare'
+import { buildLogs } from '../shared/logs'
+import { projectComparisonRun } from './comparisonRun'
 import { ViewerError } from './errors'
 import { contentTypeFromName, listTree, readJsonlPage, resolveInsideRoot, serveFile } from './files'
 import { buildOtelLogs, buildOtelMetrics, buildOtelTraces } from './otel'
 import { createImagePreviews } from './preview'
 import { toRunListItem, UNSUPPORTED_RUN_MESSAGE } from './store'
-import { buildCaseDetail, buildLogs, buildMetrics, buildProgress, buildScores, buildSnapshot, buildTask, buildTimeline, findCase, listArtifacts, MAX_LOG_LIMIT } from './views'
+import { buildCaseDetail, buildMetrics, buildProgress, buildScores, buildSnapshot, buildTask, buildTimeline, findCase, listArtifacts, MAX_LOG_LIMIT } from './views'
 
 /** Most events one `/events` page returns. */
 const MAX_EVENTS_LIMIT = 5000
@@ -219,7 +220,7 @@ export function createViewerApp(options: CreateViewerAppOptions): H3 {
     }
     const handle = await runFrom(event)
     scopeFrom(event, handle)
-    return buildLogs(handle, {
+    return buildLogs(handle.reducer().logs, {
       caseId: query.caseId,
       limit: intParam(query.limit, 'limit', 500, 1, MAX_LOG_LIMIT),
       offset: intParam(query.offset, 'offset', 0, 0),
@@ -339,26 +340,22 @@ export function createViewerApp(options: CreateViewerAppOptions): H3 {
 
   app.get('/api/matrix', async (event) => {
     const query = getQuery(event) as Record<string, string | undefined>
-    const at = now()
-    const runs = (await store.list()).filter(handle => handle.unsupportedVersion() == null).map((handle) => {
-      // Built once and shared by the list item and the matrix: building task nodes walks every case.
-      const tasks = buildTaskNodes(handle.reducer(), () => 0)
-      return { item: toRunListItem(handle, at, tasks), scoreDefinitions: handle.reducer().scoreDefinitions, tasks }
-    })
-    return buildMatrix(runs.filter(run => inScope(run.item, query)))
+    return buildMatrix(await comparisonsInScope(query))
   })
   app.get('/api/compare/experiments', async (event) => {
     const query = getQuery(event) as Record<string, string | undefined>
-    return compareExperiments(await store.list(), { project: required(query.project, 'project'), workspace: required(query.workspace, 'workspace') }, now())
+    const scope = { project: required(query.project, 'project'), workspace: required(query.workspace, 'workspace') }
+    return compareExperiments(await comparisonsInScope(scope), scope)
   })
 
   app.get('/api/compare/attempts', async (event) => {
     const query = getQuery(event) as Record<string, string | undefined>
-    return compareAttempts(await store.list(), {
+    const scope = {
       experiment: required(query.experiment, 'experiment'),
       project: required(query.project, 'project'),
       workspace: required(query.workspace, 'workspace'),
-    }, now())
+    }
+    return compareAttempts(await comparisonsInScope(scope), scope)
   })
 
   app.get('/api/compare/runs', async (event) => {
@@ -374,12 +371,30 @@ export function createViewerApp(options: CreateViewerAppOptions): H3 {
       assertSupported(handle)
       return handle
     }))
-    return compareRuns(handles, now())
+    const at = now()
+    return compareRuns(handles.map(handle => projectComparisonRun(handle, at)))
   })
 
   app.all('/api/**', () => {
     throw new ViewerError(404, 'Unknown API route.')
   })
+
+  async function comparisonsInScope(scope: { experiment?: string, project?: string, workspace?: string }) {
+    const at = now()
+    return (await store.list()).flatMap((handle) => {
+      if (handle.unsupportedVersion() != null)
+        return []
+      const reducer = handle.reducer()
+      const identity = reducer.identity()
+      if (identity != null) {
+        return inScope({ ...identity, projectIds: [...reducer.projects.keys()], projectSegment: handle.projectSegment }, scope)
+          ? [projectComparisonRun(handle, at)]
+          : []
+      }
+      const run = projectComparisonRun(handle, at)
+      return inScope(run.item, scope) ? [run] : []
+    })
+  }
 
   app.get('/**', async (event) => {
     const directory = options.clientDirectory
@@ -436,16 +451,6 @@ function hostnameOf(header: null | string): string | undefined {
     return header.slice(1, header.indexOf(']'))
   }
   return header.split(':')[0].toLowerCase()
-}
-
-/**
- * Whether a run belongs to the hierarchy scope of the optional `workspace`, `project`, and `experiment` filters.
- * A project matches the report path segment or any project the run executed (multi-project runs).
- */
-function inScope(item: RunListItem, query: Record<string, string | undefined>): boolean {
-  return (query.workspace == null || item.workspaceId === query.workspace)
-    && (query.project == null || item.projectSegment === query.project || item.projectIds.includes(query.project))
-    && (query.experiment == null || item.experimentId === query.experiment)
 }
 
 function intParam(value: string | undefined, name: string, fallback: number, min: number, max = Number.MAX_SAFE_INTEGER): number {

@@ -1,7 +1,6 @@
 import type {
   ArtifactDescriptor,
   CaseDetail,
-  LogsResponse,
   MetricsResponse,
   ProgressResponse,
   RunSnapshot,
@@ -48,20 +47,6 @@ export async function buildCaseDetail(handle: RunHandle, evidence: EvidenceServi
     scoreRecords: reduced.scoreRecords.map(entry => ({ ...entry })),
     taskDisplayName: reducer.tasks.get(taskId)?.displayName ?? taskId,
   }
-}
-
-/**
- * Console output (`case.output`) of a run, split into lines and paged.
- */
-export function buildLogs(handle: RunHandle, query: { caseId?: string, limit: number, offset: number, round?: number, stream?: string, taskId?: string }): LogsResponse {
-  const lines = handle.reducer().logs.filter(line =>
-    (query.taskId == null || line.taskId === query.taskId)
-    && (query.caseId == null || line.caseId === query.caseId)
-    && (query.stream == null || line.stream === query.stream)
-    && (query.round == null || line.roundIndex === query.round))
-  const slice = lines.slice(query.offset, query.offset + query.limit)
-  const nextOffset = query.offset + slice.length
-  return { lines: slice, nextOffset: nextOffset < lines.length ? nextOffset : null, total: lines.length }
 }
 
 /**
